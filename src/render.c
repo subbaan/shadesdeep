@@ -409,6 +409,53 @@ static void draw_chasm(Renderer *r, Canvas *cv, const View *v, int tx, int ty, i
     }
 }
 
+static void light_at_px(const Renderer *r, float wx, float wy, CF *o);
+
+/* where a torch burned out: a smear of soot and a charred stub */
+static void draw_scorch(Renderer *r, Canvas *cv, const View *v, int tx, int ty, int sx, int sy)
+{
+    uint32_t h = hash2(tx, ty, 0x5c0c);
+    float cx = sx + 16 + (int)(h % 5) - 2, cy = sy + 17 + (int)((h >> 4) % 5) - 2;
+    for (int j = -14; j <= 14; j++)
+        for (int i = -15; i <= 15; i++) {
+            int x = (int)cx + i, y = (int)cy + j;
+            if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
+            float d = (i * i) / 225.0f + (j * j) / 150.0f;     /* squashed: it lies on the floor */
+            if (d >= 1) continue;
+            uint32_t n = hash2((tx * TILE + i + 15) / 3, (ty * TILE + j + 14) / 3, 0x50f7);
+            float rough = 0.75f + 0.5f * (n & 255) / 255.0f;  /* blotchy edge */
+            float k = clampf((1 - d * rough) * 1.6f, 0, 1);
+            k *= 0.70f + 0.25f * ((n >> 8) & 255) / 255.0f;
+            if (k <= 0.02f) continue;
+            uint32_t *p = &cv->px[(size_t)y * cv->w + x];
+            *p = mix(*p, 0x050404, (int)(k * 0.9f * 256));
+        }
+    /* the stub: the torch sprite, charred black with an ashen head */
+    CF c;
+    light_at_px(r, tx * TILE + 16.0f, ty * TILE + 16.0f, &c);
+    float vis = v->fog ? c.v : 1, seen = v->fog ? c.s : 1;
+    const Image *im = &r->t.item[IT_TORCH];
+    int ox = sx + (int)(h >> 12) % 5 - 2, oy = sy + (int)(h >> 16) % 3 - 1;
+    for (int j = 0; j < im->h; j++)
+        for (int i = 0; i < im->w; i++) {
+            uint32_t a = im->px[j * im->w + i];
+            if (CA(a) < 128) continue;
+            int x = ox + i, y = oy + j;
+            if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
+            int R = CR(a), G = CG(a), B = CB(a), l = (R * 77 + G * 150 + B * 29) >> 8;
+            uint32_t ch;
+            float along = (float)(i + im->h - 1 - j) / (float)(im->w + im->h - 2);
+            if (l > 40 && (R > G + 50 || along > 0.56f)) {   /* the head (top right): burnt to ash */
+                int k = 150 + (int)(hash2(x, y, 9) % 60);
+                ch = RGB(k, k - 4, k - 10);
+            } else {                                /* the shaft: charcoal */
+                ch = RGB(14 + l / 6, 11 + l / 8, 9 + l / 10);
+            }
+            uint32_t lit = lightc(ch, c.r + 0.15f, c.g + 0.15f, c.b + 0.15f);
+            cv->px[(size_t)y * cv->w + x] = v->fog ? fogmix(lit, memtone(ch), vis, seen) : lit;
+        }
+}
+
 static void draw_ground(Renderer *r, Canvas *cv, const View *v)
 {
     const Level *lv = v->lv;
@@ -442,6 +489,7 @@ static void draw_ground(Renderer *r, Canvas *cv, const View *v)
             if (tile_at(lv, tx, ty + 1) == T_CHASM) edge |= 8;
             draw_lit(cv, sx, sy, im, TILE, TILE, &r->corner[ty][tx], &r->corner[ty][tx + 1],
                      &r->corner[ty + 1][tx], &r->corner[ty + 1][tx + 1], 1, 1, ao, v->fog, over, edge);
+            if (lv->scorch[ty][tx]) draw_scorch(r, cv, v, tx, ty, sx, sy);
         }
 }
 

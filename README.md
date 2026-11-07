@@ -5,7 +5,7 @@ art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.2.0 (torches and items) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.2.1 (torches and items) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 ## Build and run
 
@@ -36,7 +36,9 @@ FreeType development packages (`sudo pacman -S base-devel libpng zlib freetype2`
   you when you are close.
 - **Torches:** a lit torch lights a wide circle around you but burns out and
   makes you visible from afar. Throw one to light a room from a distance (it
-  burns on the floor for a while), or to lure monsters with the noise.
+  burns on the floor for a while), or to lure monsters with the noise. Walk
+  onto a burning torch with your hand free to take it up again; one that
+  burns out leaves a charred stub.
 - **Chasms:** you can see the real level below through them. Stepping in asks
   whether to jump: it is a quick way down, but the fall hurts. Anything you
   throw into a chasm lands on the level below, and a burning torch keeps
@@ -54,7 +56,8 @@ chasm with the level revealed, `LUME_DUMP_JUMP=N` jumps down N chasms, and
 `LUME_DUMP_LOWER=file.png` writes the rendered level below. `LUME_DUMP_TORCH=1`
 lights a torch, `LUME_DUMP_MENU=inv|throw|use|item` opens a menu,
 `LUME_DUMP_AIM=dx,dy` aims a torch and `LUME_DUMP_THROW=dx,dy,frac` freezes a
-thrown torch part-way through its flight.
+thrown torch part-way through its flight. `LUME_DUMP_REST=N` waits N turns
+first (e.g. to let a thrown torch burn out).
 
 The tiles and sprites are procedural placeholders (`src/tiles.c`) until the
 real art arrives. Fonts: Cinzel and Alegreya (SIL Open Font License, see

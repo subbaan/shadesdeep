@@ -319,9 +319,10 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         if (!l->lit) snprintf(hint, sizeof hint, "Click to walk over and light it");
     } else if (l && l->kind == L_FLOORTORCH) {
         snprintf(title, sizeof title, "Burning torch");
-        snprintf(desc, sizeof desc, "A torch lies burning on the floor%s, lighting everything around it.",
-                 l->fuel >= 0 && l->fuel < 25 ? ", nearly spent" : "");
-        if (tile_walkable(t)) snprintf(hint, sizeof hint, "Click to travel here");
+        snprintf(desc, sizeof desc, "A torch lies burning on the floor%s, lighting everything around it.%s",
+                 l->fuel >= 0 && l->fuel < 25 ? ", nearly spent" : "",
+                 g->torch_lit ? "" : " Your hand is free: you can take it up and carry it.");
+        if (tile_walkable(t)) snprintf(hint, sizeof hint, g->torch_lit ? "Click to travel here" : "Click to take it up");
     } else if (game_item_at(g, x, y)) {
         FloorItem *it = game_item_at(g, x, y);
         char nm[64];
@@ -337,6 +338,10 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
     } else if (l && l->kind == L_CRYSTAL) {
         snprintf(title, sizeof title, "Glowcrystal");
         snprintf(desc, sizeof desc, "Pale blue crystals growing from the rock, shedding a cold, steady light.");
+    } else if (lv->scorch[y][x]) {
+        snprintf(title, sizeof title, "Burnt-out torch");
+        snprintf(desc, sizeof desc, "A charred stub in a smear of soot: all that is left of a torch that burned here.");
+        if (tile_walkable(t)) snprintf(hint, sizeof hint, "Click to travel here");
     } else {
         if (t == T_ROCK) return;
         snprintf(title, sizeof title, "%s", tile_name(t));
@@ -414,7 +419,7 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Items", "i  your pack (click an item for its actions)" },
         { "Throw", "t  then aim with the mouse or keys, Tab to cycle targets" },
         { "Use", "a  light a torch, drink a potion;  d  drop" },
-        { "Torch", "T  light or snuff the torch in your hand" },
+        { "Torch", "T  light or snuff;  walk onto a burning torch to take it up" },
         { "Chasms", "step in to jump down a level (it hurts)" },
         { "Zoom", "+ and -  or the mouse wheel" },
         { "Text size", "kitty's own font zoom (ctrl+shift+= / -)" },

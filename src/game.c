@@ -416,7 +416,9 @@ static void burn_floor_torches(Game *g, int d)
         Light *l = &lv->lights[i];
         if (l->kind != L_FLOORTORCH || l->fuel < 0) continue;
         if (--l->fuel > 0) continue;
-        if (d == g->depth && (lv->f[l->y][l->x] & F_VIS)) game_msg(g, C_DIM, "a torch on the floor gutters and goes out.");
+        if (d == g->depth && (lv->f[l->y][l->x] & F_VIS))
+            game_msg(g, C_DIM, "a torch on the floor gutters and goes out, leaving a charred stub.");
+        lv->scorch[l->y][l->x] = 1;
         level_remove_light(lv, i);
         if (d == g->depth + 1) g->lower_dirty = true;
     }
@@ -900,9 +902,32 @@ static bool place_item(Game *g, int depth, ItemKind k, int count, int x, int y, 
     return false;
 }
 
+/* a burning torch on the floor: take it up if your hand is free */
+static void take_floor_torch(Game *g)
+{
+    Mob *p = &g->player;
+    Level *lv = game_level(g);
+    for (int i = 0; i < lv->nlights; i++) {
+        Light *l = &lv->lights[i];
+        if (l->kind != L_FLOORTORCH || l->x != p->x || l->y != p->y) continue;
+        if (g->torch_lit) {
+            game_msg(g, C_DIM, "a torch burns here on the floor.");
+            return;
+        }
+        int fuel = l->fuel > g->torch_fuel ? l->fuel : g->torch_fuel;
+        g->torch_lit = true;
+        g->torch_fuel = fuel;
+        level_remove_light(lv, i);
+        level_relight(lv);
+        game_msg(g, C_GOOD, "you take up the burning torch (%d turns left in it).", fuel);
+        return;
+    }
+}
+
 static void pickup(Game *g)
 {
     Mob *p = &g->player;
+    take_floor_torch(g);
     FloorItem *it = game_item_at(g, p->x, p->y);
     if (!it) return;
     char nm[64];

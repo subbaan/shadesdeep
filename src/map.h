@@ -79,6 +79,7 @@ typedef struct {
     uint8_t t[MAP_H][MAP_W];
     uint8_t f[MAP_H][MAP_W];
     int8_t  room[MAP_H][MAP_W];     /* room index or -1 */
+    uint8_t scorch[MAP_H][MAP_W];   /* a torch burned out here: soot and a charred stub */
     Room rooms[MAX_ROOMS];
     int nrooms;
     Light lights[MAX_LIGHTS];

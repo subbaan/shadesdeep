@@ -274,6 +274,11 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
             while (g->proj.active && g->proj.pos < g->proj.n * frac) game_update(g, 1.0f / 240);
         if (frac >= 1) for (int i = 0; i < 60; i++) game_update(g, 1.0f / 60);
     }
+    /* LUME_DUMP_REST=N: wait N turns (lets thrown torches burn out) */
+    for (int n = getenv("LUME_DUMP_REST") ? atoi(getenv("LUME_DUMP_REST")) : 0; n > 0 && g->state == GS_PLAY; n--) {
+        game_rest(g);
+        for (int i = 0; i < 30 && game_busy(g); i++) game_update(g, 1.0f / 30);
+    }
     render_camera(r, g, fr.world.w, fr.world.h, 0, true);
     bool freeze = g->proj.active;
     /* two passes so the interface's hit areas exist for the hover test */
