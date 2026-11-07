@@ -49,6 +49,9 @@ void cv_blend_rect(Canvas *cv, int x, int y, int w, int h, uint32_t c, int a);
 void cv_frame(Canvas *cv, int x, int y, int w, int h, uint32_t c, int a);
 void cv_glow(Canvas *cv, int x, int y, int r, uint32_t c, float strength);    /* additive radial */
 void cv_disc(Canvas *cv, float cx, float cy, float r, uint32_t c, int a);     /* soft-edged */
+void cv_ring(Canvas *cv, float cx, float cy, float r, float width, uint32_t c, int a);
+/* Draw an image scaled up by an integer factor (for interface icons). */
+void cv_image_scaled(Canvas *cv, const Image *im, int x, int y, int s, int alpha);
 void cv_line(Canvas *cv, int x0, int y0, int x1, int y1, uint32_t c, int a);
 /* Draw an image (sprite rect sx,sy,sw,sh) with alpha at x,y; flip mirrors it. */
 void cv_image(Canvas *cv, const Image *im, int sx, int sy, int sw, int sh, int x, int y, int flip);

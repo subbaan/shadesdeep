@@ -7,10 +7,21 @@
 #include <string.h>
 
 const MobInfo MOB_INFO[MK_COUNT] = {
-    [MK_PLAYER] = { "you", "That's you: an adventurer with a lantern's glow and a short sword.", 24, 85, 2, 5, 0, 0 },
+    [MK_PLAYER] = { "you", "That's you: an adventurer with a dim lantern, a short sword and a pack.", 24, 85, 2, 5, 0, 0 },
     [MK_RAT]    = { "rat", "A rat the size of a dog. Quick to bite, quicker to die.", 5, 70, 1, 3, 0, 6 },
     [MK_GOBLIN] = { "goblin", "A wiry goblin with a rusty blade. It sees well in the dark, but even better in the light.",
                     11, 70, 2, 4, 10, 8 },
+};
+
+const ItemInfo ITEM_INFO[IT_COUNT] = {
+    [IT_TORCH]  = { "torch", "torches",
+                    "A pitch-soaked torch. Light it and carry a wide circle of light for 200 turns, though everything "
+                    "in the dark will see you coming. Thrown, it lands burning and lights the area for a while.", 7, true },
+    [IT_DART]   = { "dart", "darts",
+                    "A small iron dart balanced for throwing. It can usually be picked up again. "
+                    "Anything that hears it land may come to look.", 9, false },
+    [IT_POTION] = { "healing potion", "healing potions",
+                    "A flask of ruby liquid that knits wounds closed when drunk.", 7, true },
 };
 
 static const int DX8[8] = { 0, 1, 0, -1, 1, 1, -1, -1 };
@@ -104,6 +115,25 @@ static void spawn_mobs(Game *g, int d)
     }
 }
 
+static void spawn_items(Game *g, int d)
+{
+    Level *lv = g->lv[d];
+    Rng r = { lv->seed * 131u + 17 };
+    int n = 3 + rng_range(&r, 0, 3), placed = 0;
+    for (int tries = 0; tries < 2000 && placed < n && placed < MAX_ITEMS; tries++) {
+        int x = rng_range(&r, 1, MAP_W - 2), y = rng_range(&r, 1, MAP_H - 2);
+        if (lv->t[y][x] != T_FLOOR || lv->room[y][x] < 0) continue;
+        bool taken = false;
+        for (int i = 0; i < placed; i++)
+            if (g->items[d][i].x == x && g->items[d][i].y == y) taken = true;
+        if (taken) continue;
+        int roll = rng_range(&r, 0, 99);
+        FloorItem *it = &g->items[d][placed++];
+        *it = (FloorItem){ true, roll < 45 ? IT_TORCH : roll < 75 ? IT_DART : IT_POTION, 1, x, y, false };
+        if (it->kind == IT_DART) it->count = rng_range(&r, 2, 4);
+    }
+}
+
 static void ensure_level(Game *g, int d)
 {
     if (d < 1 || d > MAX_DEPTH + 1 || g->lv[d]) return;
@@ -111,6 +141,7 @@ static void ensure_level(Game *g, int d)
     g->lv[d] = calloc(1, sizeof(Level));
     level_generate(g->lv[d], d, g->seed + (uint32_t)d * 7919u, d > 1 ? g->holes[d - 1] : NULL, g->holes[d]);
     spawn_mobs(g, d);
+    spawn_items(g, d);
 }
 
 /* ------------------------------------------------------------------ view */
@@ -120,7 +151,7 @@ typedef struct { Game *g; Level *lv; } ViewCtx;
 static void plight_mark(void *vc, int x, int y, float d)
 {
     ViewCtx *c = vc;
-    float r = 3.6f;
+    float r = c->g->torch_lit ? 7.0f : 3.6f;
     if (d > r) return;
     float k = 1.0f - d / r;
     c->g->plight[y][x] = d < 1 ? 1.0f : k * k * (3 - 2 * k);
@@ -159,7 +190,7 @@ static void compute_view(Game *g)
         for (int x = 0; x < MAP_W; x++) lv->f[y][x] &= (uint8_t)~F_VIS;
     memset(g->plight, 0, sizeof g->plight);
     ViewCtx c = { g, lv };
-    fov_cast(lv, g->player.x, g->player.y, 4, plight_mark, &c);
+    fov_cast(lv, g->player.x, g->player.y, g->torch_lit ? 8 : 4, plight_mark, &c);
     fov_cast(lv, g->player.x, g->player.y, 24, view_mark, &c);
     int n = count_visible_mobs(g);
     if (n > g->seen_mobs && g->autom != AUTO_NONE) {
@@ -201,6 +232,10 @@ Game *game_new(uint32_t seed)
     compute_view(g);
     for (int y = 0; y < MAP_H; y++)
         for (int x = 0; x < MAP_W; x++) g->visf[y][x] = (lv->f[y][x] & F_VIS) ? 1.0f : 0.0f;
+    g->inv[0] = (Slot){ IT_TORCH, 2 };
+    g->inv[1] = (Slot){ IT_DART, 5 };
+    g->inv[2] = (Slot){ IT_POTION, 1 };
+    g->ninv = 3;
     game_msg(g, C_INFO, "you descend into the dark. Light is precious down here.");
     game_msg(g, C_DIM, "click to travel, x explores, ? for help.");
     return g;
@@ -337,7 +372,7 @@ static void monsters_act(Game *g)
     Level *lv = game_level(g);
     Mob *p = &g->player;
     /* the player stands out when a lamp or torch is on them; their own glow is dim */
-    float pb = level_brightness(lv, p->x, p->y);
+    float pb = level_brightness(lv, p->x, p->y) + (g->torch_lit ? 1.0f : 0.0f);
     Mob *ms = g->mobs[g->depth];
     for (int i = 0; i < MAX_MOBS && g->state != GS_DEAD; i++) {
         Mob *m = &ms[i];
@@ -373,9 +408,35 @@ static void monsters_act(Game *g)
     }
 }
 
+static void burn_floor_torches(Game *g, int d)
+{
+    Level *lv = g->lv[d];
+    if (!lv) return;
+    for (int i = lv->nlights - 1; i >= 0; i--) {
+        Light *l = &lv->lights[i];
+        if (l->kind != L_FLOORTORCH || l->fuel < 0) continue;
+        if (--l->fuel > 0) continue;
+        if (d == g->depth && (lv->f[l->y][l->x] & F_VIS)) game_msg(g, C_DIM, "a torch on the floor gutters and goes out.");
+        level_remove_light(lv, i);
+        if (d == g->depth + 1) g->lower_dirty = true;
+    }
+}
+
 static void end_turn(Game *g)
 {
     g->turn++;
+    if (g->torch_lit) {
+        g->torch_fuel--;
+        if (g->torch_fuel == 25) game_msg(g, C_WARN, "your torch is burning low.");
+        if (g->torch_fuel <= 0) {
+            g->torch_lit = false;
+            g->torch_fuel = 0;
+            game_msg(g, C_WARN, "your torch burns out. Only your lantern's glow remains.");
+            game_stop(g);
+        }
+    }
+    burn_floor_torches(g, g->depth);
+    burn_floor_torches(g, g->depth + 1);
     monsters_act(g);
     Mob *p = &g->player;
     if (++g->regen >= 9) {
@@ -414,6 +475,8 @@ static void change_level(Game *g, int depth, int x, int y)
     for (int yy = 0; yy < MAP_H; yy++)
         for (int xx = 0; xx < MAP_W; xx++) g->visf[yy][xx] = 0;
 }
+
+static void pickup(Game *g);
 
 bool game_move(Game *g, int dx, int dy)
 {
@@ -459,6 +522,7 @@ bool game_move(Game *g, int dx, int dy)
         return false;
     }
     start_tween(p, nx, ny);
+    pickup(g);
     if (t == T_STAIRS_DOWN && g->autom != AUTO_STAIRS)
         game_msg(g, C_INFO, "stairs lead down into the dark (press > or click them again to descend).");
     end_turn(g);
@@ -549,7 +613,9 @@ static int find_path(Game *g, int gx, int gy, int *out, int max)
     while (h < t && found < 0) {
         int c = q[h++], x = c % MAP_W, y = c / MAP_W;
         if (gx < 0 && c != q[0]) {
-            /* explore: a known tile next to the unknown */
+            /* explore: an item worth picking up, or a known tile next to the unknown */
+            FloorItem *it = game_item_at(g, x, y);
+            if (it && !it->dropped && (lv->f[y][x] & F_SEEN)) { found = c; break; }
             for (int d = 0; d < 8; d++) {
                 int X = x + DX8[d], Y = y + DY8[d];
                 if (in_map(X, Y) && !(lv->f[Y][X] & F_SEEN) && lv->t[Y][X] != T_ROCK) { found = c; break; }
@@ -728,7 +794,9 @@ bool game_debug_to_chasm(Game *g)
     return false;
 }
 
-bool game_busy(const Game *g) { return g->player.at < 0.7f; }
+bool game_busy(const Game *g) { return g->player.at < 0.7f || g->proj.active; }
+
+static void resolve_throw(Game *g);
 
 static void anim_mob(Mob *m, float dt)
 {
@@ -764,11 +832,340 @@ void game_update(Game *g, float dt)
             g->visf[y][x] += (tgt - g->visf[y][x]) * k;
         }
 
-    if (g->autom != AUTO_NONE && g->state == GS_PLAY) {
+    if (g->proj.active) {
+        g->proj.pos += dt * 17.0f;
+        if (g->proj.pos >= g->proj.n) {
+            g->proj.active = false;
+            resolve_throw(g);
+        }
+    }
+
+    if (g->autom != AUTO_NONE && g->state == GS_PLAY && !g->proj.active) {
         g->auto_t -= dt;
         if (g->auto_t <= 0 && g->player.at >= 0.85f) {
             g->auto_t = g->autom == AUTO_REST ? 0.02f : 0.075f;
             auto_step(g);
         }
     }
+}
+
+/* ---------------------------------------------------------------- items */
+
+FloorItem *game_items(Game *g, int depth) { return g->items[depth]; }
+
+FloorItem *game_item_at(Game *g, int x, int y)
+{
+    FloorItem *it = g->items[g->depth];
+    for (int i = 0; i < MAX_ITEMS; i++)
+        if (it[i].alive && it[i].x == x && it[i].y == y) return &it[i];
+    return NULL;
+}
+
+const char *game_item_name(ItemKind k, int count, char *buf, size_t n)
+{
+    const ItemInfo *ii = &ITEM_INFO[k];
+    if (count == 1) snprintf(buf, n, "%s %s", k == IT_POTION ? "a" : "a", ii->name);
+    else snprintf(buf, n, "%d %s", count, ii->plural);
+    return buf;
+}
+
+static void push_fx(Game *g, FxKind k, int x, int y)
+{
+    if (g->nfx < MAX_FX) g->fx[g->nfx++] = (Fx){ k, x, y };
+}
+
+static bool add_item(Game *g, ItemKind k, int count)
+{
+    for (int i = 0; i < g->ninv; i++)
+        if (g->inv[i].kind == k) { g->inv[i].count += count; return true; }
+    if (g->ninv >= MAX_INV) return false;
+    g->inv[g->ninv++] = (Slot){ k, count };
+    return true;
+}
+
+static void take_one(Game *g, int slot)
+{
+    if (--g->inv[slot].count > 0) return;
+    for (int i = slot; i < g->ninv - 1; i++) g->inv[i] = g->inv[i + 1];
+    g->ninv--;
+}
+
+static bool place_item(Game *g, int depth, ItemKind k, int count, int x, int y, bool dropped)
+{
+    FloorItem *it = g->items[depth];
+    for (int i = 0; i < MAX_ITEMS; i++)
+        if (it[i].alive && it[i].x == x && it[i].y == y && it[i].kind == k) { it[i].count += count; return true; }
+    for (int i = 0; i < MAX_ITEMS; i++)
+        if (!it[i].alive) { it[i] = (FloorItem){ true, k, count, x, y, dropped }; return true; }
+    return false;
+}
+
+static void pickup(Game *g)
+{
+    Mob *p = &g->player;
+    FloorItem *it = game_item_at(g, p->x, p->y);
+    if (!it) return;
+    char nm[64];
+    if (!add_item(g, it->kind, it->count)) {
+        game_msg(g, C_DIM, "your pack is full; you leave %s.", game_item_name(it->kind, it->count, nm, sizeof nm));
+        return;
+    }
+    int slot = 0;
+    for (int i = 0; i < g->ninv; i++) if (g->inv[i].kind == it->kind) slot = i;
+    game_msg(g, C_GOOD, "you pick up %s (%c).", game_item_name(it->kind, it->count, nm, sizeof nm), 'a' + slot);
+    it->alive = false;
+}
+
+/* a burning torch now lies on (x, y) of `depth` */
+static void floor_torch(Game *g, int depth, int x, int y)
+{
+    Level *lv = g->lv[depth];
+    if (!lv) return;
+    for (int i = 0; i < lv->nlights; i++) {
+        Light *l = &lv->lights[i];
+        if (l->kind == L_FLOORTORCH && l->x == x && l->y == y) { l->fuel = FLOOR_TORCH_FUEL; return; }
+    }
+    int i = level_add_light(lv, L_FLOORTORCH, x, y, x, y, true, lv->room[y][x]);
+    if (i >= 0) lv->lights[i].fuel = FLOOR_TORCH_FUEL;
+    level_relight(lv);
+}
+
+/* nearest open floor to (x, y) on a level */
+static void nearest_floor(Level *lv, int *x, int *y)
+{
+    if (tile_walkable(tile_at(lv, *x, *y))) return;
+    int bx = *x, by = *y, bd = 1 << 30;
+    for (int yy = 0; yy < MAP_H; yy++)
+        for (int xx = 0; xx < MAP_W; xx++) {
+            if (!tile_walkable((Tile)lv->t[yy][xx])) continue;
+            int d = (xx - *x) * (xx - *x) + (yy - *y) * (yy - *y);
+            if (d < bd) { bd = d; bx = xx; by = yy; }
+        }
+    *x = bx; *y = by;
+}
+
+int game_throw_path(Game *g, ItemKind k, int tx, int ty, int *out, int max, bool *hits)
+{
+    Level *lv = game_level(g);
+    Mob *p = &g->player;
+    *hits = false;
+    if (tx == p->x && ty == p->y) return 0;
+    int range = ITEM_INFO[k].range, n = 0;
+    int x0 = p->x, y0 = p->y;
+    int dx = abs(tx - x0), sx = x0 < tx ? 1 : -1;
+    int dy = -abs(ty - y0), sy = y0 < ty ? 1 : -1;
+    int err = dx + dy;
+    int x = x0, y = y0;
+    if (max > 32) max = 32;
+    while (n < max && n < range) {
+        if (x == tx && y == ty) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x += sx; }
+        if (e2 <= dx) { err += dx; y += sy; }
+        Tile t = tile_at(lv, x, y);
+        if (tile_opaque(t) || tile_solid(t)) break;     /* bounces off: lands in front */
+        out[n++] = y * MAP_W + x;
+        if (game_mob_at(g, x, y)) { *hits = true; break; }
+    }
+    return n;
+}
+
+bool game_throw(Game *g, int slot, int tx, int ty)
+{
+    if (g->state != GS_PLAY || g->proj.active || slot < 0 || slot >= g->ninv) return false;
+    Projectile *pr = &g->proj;
+    bool hits;
+    ItemKind k = g->inv[slot].kind;
+    int n = game_throw_path(g, k, tx, ty, pr->path, 32, &hits);
+    if (n == 0) { game_msg(g, C_DIM, "you can't throw there."); return false; }
+    game_stop(g);
+    pr->active = true;
+    pr->kind = k;
+    pr->sx = g->player.x;
+    pr->sy = g->player.y;
+    pr->n = n;
+    pr->pos = 0;
+    pr->hit = hits;
+    take_one(g, slot);
+    Mob *p = &g->player;
+    int lx = pr->path[n - 1] % MAP_W;
+    if (lx != p->x) p->flip = lx < p->x;
+    p->bump = 0.6f;
+    p->bdx = (lx > p->x) - (lx < p->x);
+    p->bdy = (pr->path[n - 1] / MAP_W > p->y) - (pr->path[n - 1] / MAP_W < p->y);
+    return true;
+}
+
+static void make_noise(Game *g, int x, int y, int radius)
+{
+    Mob *ms = g->mobs[g->depth];
+    for (int i = 0; i < MAX_MOBS; i++) {
+        Mob *m = &ms[i];
+        if (!m->alive || cheb(m->x, m->y, x, y) > radius) continue;
+        if (m->asleep) {
+            if (!rng_chance(&g->rng, 60)) continue;
+            m->asleep = false;
+            if (game_level(g)->f[m->y][m->x] & F_VIS) game_msg(g, C_WARN, "the %s stirs at the noise.", MOB_INFO[m->kind].name);
+        }
+        m->hunting = true;      /* goes to look */
+        m->tx = x;
+        m->ty = y;
+    }
+}
+
+static void resolve_throw(Game *g)
+{
+    Projectile *pr = &g->proj;
+    Level *lv = game_level(g);
+    int c = pr->path[pr->n - 1], x = c % MAP_W, y = c / MAP_W;
+    Mob *m = pr->hit ? game_mob_at(g, x, y) : NULL;
+    const char *mn = m ? MOB_INFO[m->kind].name : "";
+    bool into_chasm = lv->t[y][x] == T_CHASM;
+    char t[16];
+    switch (pr->kind) {
+    case IT_DART:
+        if (m) {
+            int chance = m->asleep ? 100 : 88 - MOB_INFO[m->kind].def;
+            m->asleep = false;
+            if ((int)(rng_u32(&g->rng) % 100) < chance) {
+                int dmg = rng_range(&g->rng, 2, 4);
+                m->hp -= dmg;
+                m->flash = 1;
+                snprintf(t, sizeof t, "%d", dmg);
+                floater(g, x, y, 0xffd27a, t);
+                if (m->hp <= 0) { kill_mob(g, m); game_msg(g, C_GOOD, "the dart kills the %s!", mn); }
+                else game_msg(g, C_TEXT, "the dart hits the %s.", mn);
+            } else {
+                floater(g, x, y, 0xb0b0b0, "miss");
+                game_msg(g, C_DIM, "the dart misses the %s.", mn);
+            }
+        }
+        push_fx(g, FX_SPARKS, x, y);
+        if (into_chasm) {
+            int bx = x, by = y;
+            if (g->lv[g->depth + 1]) {
+                nearest_floor(g->lv[g->depth + 1], &bx, &by);
+                place_item(g, g->depth + 1, IT_DART, 1, bx, by, false);
+            }
+            game_msg(g, C_DIM, "the dart clatters away into the chasm.");
+        } else if (rng_chance(&g->rng, 85)) {
+            place_item(g, g->depth, IT_DART, 1, x, y, false);
+        } else {
+            game_msg(g, C_DIM, "the dart snaps.");
+        }
+        make_noise(g, x, y, 5);
+        break;
+    case IT_TORCH:
+        if (m) {
+            int dmg = rng_range(&g->rng, 1, 3);
+            m->hp -= dmg;
+            m->flash = 1;
+            m->asleep = false;
+            snprintf(t, sizeof t, "%d", dmg);
+            floater(g, x, y, 0xffa040, t);
+            if (m->hp <= 0) { kill_mob(g, m); game_msg(g, C_GOOD, "the torch bursts over the %s and it dies in the flames!", mn); }
+            else game_msg(g, C_TEXT, "the torch bursts against the %s in a shower of sparks!", mn);
+        }
+        if (into_chasm) {
+            int bx = x, by = y;
+            if (g->lv[g->depth + 1]) {
+                nearest_floor(g->lv[g->depth + 1], &bx, &by);
+                floor_torch(g, g->depth + 1, bx, by);
+                g->lower_dirty = true;
+            }
+            push_fx(g, FX_FALL, x, y);
+            game_msg(g, C_INFO, "the torch tumbles into the chasm and lands far below, still burning.");
+        } else {
+            floor_torch(g, g->depth, x, y);
+            push_fx(g, FX_SPARKS, x, y);
+            if (!m) game_msg(g, C_TEXT, "the torch lands and burns on the floor.");
+        }
+        make_noise(g, x, y, 3);
+        break;
+    case IT_POTION:
+        push_fx(g, FX_SHATTER, x, y);
+        if (m) game_msg(g, C_DIM, "the flask shatters against the %s, wasted.", mn);
+        else game_msg(g, C_DIM, "the flask shatters%s. Healing potions are better drunk.", into_chasm ? " far below" : "");
+        make_noise(g, x, y, 6);
+        break;
+    default:
+        break;
+    }
+    if (m && m->alive) { m->hunting = true; m->tx = g->player.x; m->ty = g->player.y; }
+    end_turn(g);
+}
+
+void game_torch_toggle(Game *g)
+{
+    if (g->state != GS_PLAY) return;
+    if (g->torch_lit) {
+        g->torch_lit = false;
+        game_msg(g, C_DIM, "you snuff out your torch (%d turns of it left). The dark closes in.", g->torch_fuel);
+        end_turn(g);
+        return;
+    }
+    if (g->torch_fuel <= 0) {
+        int slot = -1;
+        for (int i = 0; i < g->ninv; i++) if (g->inv[i].kind == IT_TORCH) slot = i;
+        if (slot < 0) { game_msg(g, C_DIM, "you have no torches."); return; }
+        take_one(g, slot);
+        g->torch_fuel = TORCH_FUEL;
+        game_msg(g, C_WARN, "you light a torch. Its glow pushes back the dark, and announces you.");
+    } else {
+        game_msg(g, C_WARN, "you relight your torch.");
+    }
+    g->torch_lit = true;
+    end_turn(g);
+}
+
+bool game_use(Game *g, int slot)
+{
+    if (g->state != GS_PLAY || slot < 0 || slot >= g->ninv) return false;
+    Mob *p = &g->player;
+    switch (g->inv[slot].kind) {
+    case IT_TORCH:
+        if (g->torch_lit) {
+            /* swap the burning stub for a fresh torch */
+            take_one(g, slot);
+            g->torch_fuel = TORCH_FUEL;
+            game_msg(g, C_WARN, "you light a fresh torch from the old one.");
+            end_turn(g);
+        } else if (g->torch_fuel > 0) {
+            game_torch_toggle(g);
+        } else {
+            game_torch_toggle(g);
+        }
+        return true;
+    case IT_POTION: {
+        take_one(g, slot);
+        int heal = 15;
+        if (p->hp + heal > p->maxhp) heal = p->maxhp - p->hp;
+        p->hp += heal;
+        char t[16];
+        snprintf(t, sizeof t, "+%d", heal);
+        floater(g, p->x, p->y, 0x8ee070, t);
+        game_msg(g, C_GOOD, "you drink the potion. Warmth floods through you.");
+        end_turn(g);
+        return true;
+    }
+    default:
+        game_msg(g, C_DIM, "you can't use that; try throwing it.");
+        return false;
+    }
+}
+
+bool game_drop(Game *g, int slot)
+{
+    if (g->state != GS_PLAY || slot < 0 || slot >= g->ninv) return false;
+    Mob *p = &g->player;
+    FloorItem *here = game_item_at(g, p->x, p->y);
+    Slot s = g->inv[slot];
+    if (here && here->kind != s.kind) { game_msg(g, C_DIM, "there's already something here."); return false; }
+    if (!place_item(g, g->depth, s.kind, s.count, p->x, p->y, true)) return false;
+    for (int i = slot; i < g->ninv - 1; i++) g->inv[i] = g->inv[i + 1];
+    g->ninv--;
+    char nm[64];
+    game_msg(g, C_TEXT, "you put down %s.", game_item_name(s.kind, s.count, nm, sizeof nm));
+    end_turn(g);
+    return true;
 }

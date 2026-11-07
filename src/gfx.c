@@ -68,6 +68,36 @@ void cv_disc(Canvas *cv, float cx, float cy, float r, uint32_t c, int a)
         }
 }
 
+void cv_ring(Canvas *cv, float cx, float cy, float r, float width, uint32_t c, int a)
+{
+    float ro = r + width / 2, ri = r - width / 2;
+    int x0 = clampi((int)floorf(cx - ro - 1), 0, cv->w), x1 = clampi((int)ceilf(cx + ro + 1), 0, cv->w);
+    int y0 = clampi((int)floorf(cy - ro - 1), 0, cv->h), y1 = clampi((int)ceilf(cy + ro + 1), 0, cv->h);
+    for (int yy = y0; yy < y1; yy++)
+        for (int xx = x0; xx < x1; xx++) {
+            float dx = xx + 0.5f - cx, dy = yy + 0.5f - cy, d = sqrtf(dx * dx + dy * dy);
+            float e = fminf(ro - d, d - ri) + 0.5f;
+            if (e <= 0) continue;
+            blend_px(&cv->px[(size_t)yy * cv->w + xx], c, e >= 1 ? a : (int)(a * e));
+        }
+}
+
+void cv_image_scaled(Canvas *cv, const Image *im, int x, int y, int s, int alpha)
+{
+    for (int j = 0; j < im->h * s; j++) {
+        int yy = y + j;
+        if ((unsigned)yy >= (unsigned)cv->h) continue;
+        const uint32_t *src = im->px + (size_t)(j / s) * im->w;
+        uint32_t *row = cv->px + (size_t)yy * cv->w;
+        for (int i = 0; i < im->w * s; i++) {
+            int xx = x + i;
+            if ((unsigned)xx >= (unsigned)cv->w) continue;
+            uint32_t c = src[i / s];
+            blend_px(&row[xx], c, CA(c) * alpha / 255);
+        }
+    }
+}
+
 void cv_line(Canvas *cv, int x0, int y0, int x1, int y1, uint32_t c, int a)
 {
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;

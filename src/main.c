@@ -131,7 +131,19 @@ typedef struct {
     int path[MAX_PATH];
     int plen;
     int hx, hy;
+    int tpath[32];
 } Hover;
+
+/* interface state: open menus, aiming */
+typedef struct {
+    bool help;
+    MenuKind menu;
+    int menu_slot;
+    bool targeting;
+    int tslot, tx, ty;      /* item being thrown, aim cursor */
+    int tcycle;             /* Tab position among visible monsters */
+    bool quit_armed;
+} Ctl;
 
 /* the map tile under a window pixel */
 static void hover_tile(const Renderer *r, const Frame *fr, int mx, int my, int *tx, int *ty)
@@ -144,23 +156,67 @@ static void hover_tile(const Renderer *r, const Frame *fr, int mx, int my, int *
     if (!in_map(*tx, *ty)) *tx = *ty = -1;
 }
 
-static void draw_frame(Renderer *r, UI *ui, Game *g, Frame *fr, Hover *hv, int mx, int my, float dt,
-                       bool help, bool quit_armed, float fps, bool show_fps)
+static void draw_frame(Renderer *r, UI *ui, Game *g, Frame *fr, Hover *hv, const Ctl *ctl, int mx, int my, float dt,
+                       float fps, bool show_fps)
 {
     hv->hx = hv->hy = -1;
     hv->plen = 0;
     bool over_ui = mx >= 0 && ui_over_panel(ui, mx, my);
-    if (mx >= 0 && !over_ui && g->state == GS_PLAY && !help) {
+    if (mx >= 0 && !over_ui && g->state == GS_PLAY && !ctl->help) {
         hover_tile(r, fr, mx, my, &hv->hx, &hv->hy);
-        if (hv->hx >= 0 && g->autom == AUTO_NONE)
+        if (hv->hx >= 0 && g->autom == AUTO_NONE && !ctl->targeting && ctl->menu == MENU_NONE && !g->proj.active)
             hv->plen = game_path_preview(g, hv->hx, hv->hy, hv->path, MAX_PATH);
     }
-    render_world(r, g, &fr->world, dt, hv->hx, hv->hy, hv->path, hv->plen);
+    Overlay ov = { hv->hx, hv->hy, hv->path, hv->plen, NULL, 0, false, IT_DART };
+    int ux = hv->hx, uy = hv->hy;
+    if (ctl->targeting && ctl->tslot >= 0 && ctl->tslot < g->ninv && !g->proj.active) {
+        ov.tkind = g->inv[ctl->tslot].kind;
+        ov.tpath = hv->tpath;
+        ov.tlen = game_throw_path(g, ov.tkind, ctl->tx, ctl->ty, hv->tpath, 32, &ov.thit);
+        ov.hx = ux = ctl->tx;
+        ov.hy = uy = ctl->ty;
+    }
+    render_world(r, g, &fr->world, dt, &ov);
     cv_upscale(&fr->screen, &fr->world, fr->zoom, 0, 0);
     float cx, cy;
     render_cam_pos(r, &cx, &cy);
-    UiFrame uf = { (float)lroundf(cx), (float)lroundf(cy), fr->zoom, mx, my, hv->hx, hv->hy, help, quit_armed, fps, show_fps };
+    UiFrame uf = { (float)lroundf(cx), (float)lroundf(cy), fr->zoom, mx, my, ux, uy, ctl->help, ctl->quit_armed,
+                   fps, show_fps, ctl->menu, ctl->menu_slot, ctl->targeting, ctl->tslot };
     ui_draw(ui, g, &fr->screen, &uf);
+}
+
+/* visible monsters, nearest first */
+static int visible_mobs(Game *g, Mob **out, int max)
+{
+    Level *lv = game_level(g);
+    Mob *ms = game_mobs(g, g->depth);
+    int n = 0;
+    for (int i = 0; i < MAX_MOBS && n < max; i++)
+        if (ms[i].alive && (lv->f[ms[i].y][ms[i].x] & F_VIS)) out[n++] = &ms[i];
+    Mob *p = &g->player;
+    for (int i = 1; i < n; i++)
+        for (int j = i; j > 0; j--) {
+            int da = abs(out[j]->x - p->x) + abs(out[j]->y - p->y), db = abs(out[j - 1]->x - p->x) + abs(out[j - 1]->y - p->y);
+            if (da >= db) break;
+            Mob *t = out[j]; out[j] = out[j - 1]; out[j - 1] = t;
+        }
+    return n;
+}
+
+static void start_aim(Game *g, Ctl *ctl, int slot, const Hover *hv)
+{
+    ctl->menu = MENU_NONE;
+    ctl->targeting = true;
+    ctl->tslot = slot;
+    ctl->tcycle = 0;
+    Mob *ms[MAX_MOBS];
+    Mob *p = &g->player;
+    int n = visible_mobs(g, ms, MAX_MOBS);
+    if (n) { ctl->tx = ms[0]->x; ctl->ty = ms[0]->y; }
+    else if (hv->hx >= 0) { ctl->tx = hv->hx; ctl->ty = hv->hy; }
+    else { ctl->tx = p->x + (p->flip ? -3 : 3); ctl->ty = p->y; }
+    ctl->tx = clampi(ctl->tx, 0, MAP_W - 1);
+    ctl->ty = clampi(ctl->ty, 0, MAP_H - 1);
 }
 
 static int dump_frame(const char *assets, uint32_t seed, const char *path, int w, int h, int cellh,
@@ -198,13 +254,33 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         for (int i = 0; i < 200; i++) game_update(g, 0.02f);
     }
     for (int i = 0; i < 120; i++) game_update(g, 1.0f / 60);
-    Hover hv;
+    static Hover hv;
+    Ctl ctl = { .menu_slot = 0, .tslot = -1 };
+    ui_set_icons(ui, render_item_icons(r));
+    /* developer views: LUME_DUMP_TORCH=1 lights a torch, LUME_DUMP_MENU=inv|throw|use|item,
+     * LUME_DUMP_AIM="dx,dy" aims a torch, LUME_DUMP_THROW="dx,dy,frac" freezes one mid-flight */
+    if (getenv("LUME_DUMP_TORCH")) game_torch_toggle(g);
+    const char *dm = getenv("LUME_DUMP_MENU");
+    if (dm) ctl.menu = !strcmp(dm, "throw") ? MENU_THROW : !strcmp(dm, "use") ? MENU_USE : !strcmp(dm, "item") ? MENU_ITEM : MENU_INV;
+    int adx, ady;
+    float frac = 0.5f;
+    if (getenv("LUME_DUMP_AIM") && sscanf(getenv("LUME_DUMP_AIM"), "%d,%d", &adx, &ady) == 2) {
+        start_aim(g, &ctl, 0, &hv);
+        ctl.tx = g->player.x + adx;
+        ctl.ty = g->player.y + ady;
+    }
+    if (getenv("LUME_DUMP_THROW") && sscanf(getenv("LUME_DUMP_THROW"), "%d,%d,%f", &adx, &ady, &frac) >= 2) {
+        if (game_throw(g, 0, g->player.x + adx, g->player.y + ady))
+            while (g->proj.active && g->proj.pos < g->proj.n * frac) game_update(g, 1.0f / 240);
+        if (frac >= 1) for (int i = 0; i < 60; i++) game_update(g, 1.0f / 60);
+    }
     render_camera(r, g, fr.world.w, fr.world.h, 0, true);
+    bool freeze = g->proj.active;
     /* two passes so the interface's hit areas exist for the hover test */
-    draw_frame(r, ui, g, &fr, &hv, mx, my, 1.0f / 60, false, false, 60, false);
+    draw_frame(r, ui, g, &fr, &hv, &ctl, mx, my, 1.0f / 60, 60, false);
     for (int i = 0; i < 30; i++) {
-        game_update(g, 1.0f / 60);
-        draw_frame(r, ui, g, &fr, &hv, mx, my, 1.0f / 60, false, false, 60, false);
+        if (!freeze) game_update(g, 1.0f / 60);
+        draw_frame(r, ui, g, &fr, &hv, &ctl, mx, my, freeze ? 0 : 1.0f / 60, 60, false);
     }
     if (getenv("LUME_DUMP_LOWER")) render_dump_lower(r, getenv("LUME_DUMP_LOWER"));
     int rc = canvas_write_png(&fr.screen, path);
@@ -328,6 +404,7 @@ int main(int argc, char **argv)
 
     Game *g = game_new(seed);
     Renderer *r = render_new();
+    ui_set_icons(ui, render_item_icons(r));
     Frame fr = { 0 };
     int zoom = zoom_opt ? zoom_opt : auto_zoom(ts.ypix);
     frame_resize(&fr, ts.xpix, ts.ypix, zoom);
@@ -340,7 +417,8 @@ int main(int argc, char **argv)
     double last = now_s(), next = last, fps_t = last, quit_t = -10;
     int fps_frames = 0;
     float fps_now = 0;
-    bool help = false, quit = false;
+    bool quit = false;
+    Ctl ctl = { .tslot = -1 };
     int mx = -1, my = -1;
 
     while (!g_quit && !g_input.quit && !quit) {
@@ -382,20 +460,36 @@ int main(int argc, char **argv)
 
         /* Esc twice quits; once closes whatever is open */
         if (pr[K_ESC]) {
-            if (help) help = false;
+            if (ctl.help) ctl.help = false;
             else if (g->state == GS_JUMP_PROMPT) game_jump_answer(g, false);
+            else if (ctl.targeting) ctl.targeting = false;
+            else if (ctl.menu == MENU_ITEM) ctl.menu = MENU_INV;
+            else if (ctl.menu != MENU_NONE) ctl.menu = MENU_NONE;
             else if (g->autom != AUTO_NONE) game_stop(g);
             else if (t - quit_t < 1.5) quit = true;
             else quit_t = t;
         } else if (any_key) {
             quit_t = -10;
         }
-        bool quit_armed = t - quit_t < 1.5;
+        ctl.quit_armed = t - quit_t < 1.5;
 
         UiAction click = UA_NONE;
-        if (g_input.mclick[0]) click = ui_hit(ui, mx, my);
+        int carg = 0;
+        if (g_input.mclick[0]) click = ui_hit(ui, mx, my, &carg);
+        bool map_click = g_input.mclick[0] && click == UA_NONE && hv.hx >= 0 && !ui_over_panel(ui, mx, my);
+        /* the status bar buttons work from any menu */
+        if (click == UA_INV || click == UA_THROW || click == UA_TORCH || click == UA_EXPLORE || click == UA_REST ||
+            click == UA_STAIRS || click == UA_HELP) {
+            bool same = (click == UA_INV && ctl.menu == MENU_INV) || (click == UA_THROW && ctl.menu == MENU_THROW);
+            ctl.menu = MENU_NONE;
+            ctl.targeting = false;
+            if (same) click = UA_NONE;
+        }
+        bool busy = game_busy(g);
 
         if (g->state == GS_DEAD) {
+            ctl.menu = MENU_NONE;
+            ctl.targeting = false;
             if (pr[K_ENTER] || pr[K_KPENTER] || click == UA_NEW_GAME) {
                 game_free(g);
                 g = game_new((uint32_t)time(NULL) ^ seed++);
@@ -406,25 +500,96 @@ int main(int argc, char **argv)
         } else if (g->state == GS_JUMP_PROMPT) {
             if (pr['y'] || pr[K_ENTER] || click == UA_JUMP_YES) game_jump_answer(g, true);
             else if (pr['n'] || click == UA_JUMP_NO) game_jump_answer(g, false);
-        } else if (help) {
-            if (click == UA_CLOSE || pr[K_ENTER] || pr['?'] || SHIFTED('/')) help = false;
+        } else if (ctl.help) {
+            if (click == UA_CLOSE || pr[K_ENTER] || pr['?'] || SHIFTED('/')) ctl.help = false;
+        } else if (busy && g->proj.active) {
+            /* something is in the air: wait for it */
+        } else if (ctl.targeting) {
+            int dx, dy;
+            if (ctl.tslot >= g->ninv) ctl.targeting = false;
+            if (g_input.moved && hv.hx >= 0) { ctl.tx = hv.hx; ctl.ty = hv.hy; }
+            if (dir_key(rep, &dx, &dy)) {
+                ctl.tx = clampi(ctl.tx + dx, 0, MAP_W - 1);
+                ctl.ty = clampi(ctl.ty + dy, 0, MAP_H - 1);
+            } else if (pr[K_TAB]) {
+                Mob *ms[MAX_MOBS];
+                int n = visible_mobs(g, ms, MAX_MOBS);
+                if (n) {
+                    ctl.tcycle = (ctl.tcycle + 1) % n;
+                    ctl.tx = ms[ctl.tcycle]->x;
+                    ctl.ty = ms[ctl.tcycle]->y;
+                }
+            } else if (g_input.mclick[2]) {
+                ctl.targeting = false;
+            } else if (map_click || pr[K_ENTER] || pr[K_KPENTER] || PLAIN('t')) {
+                if (map_click) { ctl.tx = hv.hx; ctl.ty = hv.hy; }
+                if (game_throw(g, ctl.tslot, ctl.tx, ctl.ty)) ctl.targeting = false;
+            }
+        } else if (ctl.menu != MENU_NONE) {
+            int pick = -1;
+            if (ctl.menu == MENU_ITEM) {
+                int sl = ctl.menu_slot;
+                bool valid = sl >= 0 && sl < g->ninv;
+                if (!valid) ctl.menu = MENU_INV;
+                else if (PLAIN('t') || click == UA_ITEM_THROW) start_aim(g, &ctl, sl, &hv);
+                else if (((PLAIN('a') || PLAIN('q')) && ITEM_INFO[g->inv[sl].kind].usable) || click == UA_ITEM_USE) {
+                    ctl.menu = MENU_NONE;
+                    game_use(g, sl);
+                } else if (PLAIN('d') || click == UA_ITEM_DROP) {
+                    ctl.menu = MENU_NONE;
+                    game_drop(g, sl);
+                } else if (map_click || g_input.mclick[2]) {
+                    ctl.menu = MENU_NONE;
+                }
+            } else {
+                for (int k = 'a'; k <= 'z'; k++)
+                    if (PLAIN(k) && k - 'a' < g->ninv && menu_allows(ctl.menu, g->inv[k - 'a'].kind)) pick = k - 'a';
+                if (click == UA_PICK) pick = carg;
+                if (ctl.menu == MENU_INV && PLAIN('i') && pick < 0) ctl.menu = MENU_NONE;
+                else if (pick >= 0) {
+                    switch (ctl.menu) {
+                    case MENU_INV:   ctl.menu = MENU_ITEM; ctl.menu_slot = pick; break;
+                    case MENU_THROW: start_aim(g, &ctl, pick, &hv); break;
+                    case MENU_USE:   ctl.menu = MENU_NONE; game_use(g, pick); break;
+                    case MENU_DROP:  ctl.menu = MENU_NONE; game_drop(g, pick); break;
+                    default: break;
+                    }
+                } else if (map_click || g_input.mclick[2]) {
+                    ctl.menu = MENU_NONE;
+                }
+            }
         } else {
             int dx, dy;
             if (any_key && g->autom != AUTO_NONE && !pr[K_ESC]) game_stop(g);
             if (dir_key(rep, &dx, &dy)) {
-                if (!game_busy(g) || dir_key(pr, &dx, &dy)) game_move(g, dx, dy);
+                if (!busy || dir_key(pr, &dx, &dy)) game_move(g, dx, dy);
             } else if (SHIFTED('z') || click == UA_REST) {
                 game_rest_long(g);
             } else if (PLAIN('z') || (pr['.'] && !SHIFTED('.')) || pr[K_KP5] || PLAIN('s')) {
-                if (!game_busy(g)) game_rest(g);
+                if (!busy) game_rest(g);
             } else if (PLAIN('x') || click == UA_EXPLORE) {
                 game_explore(g);
+            } else if (SHIFTED('t') || click == UA_TORCH) {
+                game_torch_toggle(g);
+            } else if (PLAIN('i') || click == UA_INV) {
+                ctl.menu = MENU_INV;
+                game_stop(g);
+            } else if (PLAIN('t') || click == UA_THROW) {
+                if (g->ninv) ctl.menu = MENU_THROW;
+                else game_msg(g, C_DIM, "you have nothing to throw.");
+                game_stop(g);
+            } else if (PLAIN('a') || PLAIN('q')) {
+                ctl.menu = MENU_USE;
+                game_stop(g);
+            } else if (PLAIN('d')) {
+                if (g->ninv) ctl.menu = MENU_DROP;
+                game_stop(g);
             } else if (SHIFTED('.') || pr['>'] || click == UA_STAIRS) {
                 game_to_stairs(g);
             } else if (SHIFTED(',') || pr['<']) {
                 if (!game_ascend(g)) game_msg(g, C_DIM, "there are no stairs up here.");
             } else if (SHIFTED('/') || pr['?'] || click == UA_HELP) {
-                help = true;
+                ctl.help = true;
                 game_stop(g);
             } else if (pr['='] || pr['+'] || pr[K_KPPLUS] || click == UA_ZOOM_IN || g_input.wheel > 0) {
                 if (zoom < 6) zoom++;
@@ -432,11 +597,11 @@ int main(int argc, char **argv)
             } else if (pr['-'] || pr[K_KPMINUS] || click == UA_ZOOM_OUT || g_input.wheel < 0) {
                 if (zoom > 1) zoom--;
                 zoom_opt = zoom;
-            } else if (g_input.mclick[0] && click == UA_NONE && hv.hx >= 0) {
+            } else if (map_click) {
                 game_travel_to(g, hv.hx, hv.hy);
             }
         }
-        if (help && g_input.mclick[0] && click == UA_CLOSE) help = false;
+        if (ctl.help && g_input.mclick[0] && click == UA_CLOSE) ctl.help = false;
         #undef SHIFTED
         #undef PLAIN
         input_clear_edges();
@@ -447,7 +612,7 @@ int main(int argc, char **argv)
 
         unsigned inflight = kg.sent - (g_input.gfx_ok + g_input.gfx_err);
         if (inflight >= MAX_INFLIGHT && t - fps_t < 0.25) continue;     /* kitty is behind: skip a frame */
-        draw_frame(r, ui, g, &fr, &hv, mx, my, dt, help, quit_armed, fps_now, show_fps);
+        draw_frame(r, ui, g, &fr, &hv, &ctl, mx, my, dt, fps_now, show_fps);
         kgfx_present(&kg, &fr.screen, &ts);
         fps_frames++;
         if (t - fps_t >= 0.5) {

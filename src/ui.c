@@ -8,14 +8,15 @@
 #include "font.h"
 #include "version.h"
 
-#define MAX_BTN 24
+#define MAX_BTN 48
 #define MAX_PANEL 16
 
-typedef struct { int x, y, w, h; UiAction a; } Btn;
+typedef struct { int x, y, w, h; UiAction a; int arg; } Btn;
 typedef struct { int x, y, w, h; } Box;
 
 struct UI {
     Font *head, *body, *small, *big;
+    Image icons[IT_COUNT];  /* not owned: set by ui_set_icons */
     int cell_h;
     float scale;
     int px;                 /* body text size */
@@ -76,9 +77,16 @@ void ui_set_scale(UI *ui, int cell_h, float scale)
 
 /* ------------------------------------------------------------- widgets */
 
-static void add_btn(UI *ui, int x, int y, int w, int h, UiAction a)
+static void add_btn_arg(UI *ui, int x, int y, int w, int h, UiAction a, int arg)
 {
-    if (ui->nbtn < MAX_BTN) ui->btn[ui->nbtn++] = (Btn){ x, y, w, h, a };
+    if (ui->nbtn < MAX_BTN) ui->btn[ui->nbtn++] = (Btn){ x, y, w, h, a, arg };
+}
+
+static void add_btn(UI *ui, int x, int y, int w, int h, UiAction a) { add_btn_arg(ui, x, y, w, h, a, 0); }
+
+void ui_set_icons(UI *ui, const Image *icons)
+{
+    for (int i = 0; i < IT_COUNT; i++) ui->icons[i] = icons[i];
 }
 
 static void add_panel(UI *ui, int x, int y, int w, int h)
@@ -86,11 +94,14 @@ static void add_panel(UI *ui, int x, int y, int w, int h)
     if (ui->npanel < MAX_PANEL) ui->panel[ui->npanel++] = (Box){ x, y, w, h };
 }
 
-UiAction ui_hit(const UI *ui, int mx, int my)
+UiAction ui_hit(const UI *ui, int mx, int my, int *arg)
 {
     for (int i = ui->nbtn - 1; i >= 0; i--) {
         const Btn *b = &ui->btn[i];
-        if (mx >= b->x && my >= b->y && mx < b->x + b->w && my < b->y + b->h) return b->a;
+        if (mx >= b->x && my >= b->y && mx < b->x + b->w && my < b->y + b->h) {
+            if (arg) *arg = b->arg;
+            return b->a;
+        }
     }
     return UA_NONE;
 }
@@ -101,7 +112,7 @@ bool ui_over_panel(const UI *ui, int mx, int my)
         const Box *b = &ui->panel[i];
         if (mx >= b->x && my >= b->y && mx < b->x + b->w && my < b->y + b->h) return true;
     }
-    return ui_hit(ui, mx, my) != UA_NONE;
+    return ui_hit(ui, mx, my, NULL) != UA_NONE;
 }
 
 static void panel(UI *ui, Canvas *cv, int x, int y, int w, int h, int alpha, bool hit)
@@ -194,25 +205,40 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     x = font_draw(hf, cv, x, base, buf, 0xe2d4b4, 255) + pad;
     diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
     x += pad;
+    if (g->torch_lit || g->torch_fuel > 0) {
+        snprintf(buf, sizeof buf, "TORCH %d", g->torch_fuel);
+        uint32_t tc = !g->torch_lit ? 0x8a7c62 : g->torch_fuel <= 25 ? 0xff7a40 : 0xffc060;
+        x = font_draw(hf, cv, x, base, buf, tc, 255) + pad;
+        diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
+        x += pad;
+    }
+    int turn_x = x;
     snprintf(buf, sizeof buf, "TURN %d", g->turn);
-    x = font_draw(hf, cv, x, base, buf, 0xb8aa8c, 255) + pad;
+    x = font_width(hf, buf) + x + pad;
     int left_end = x;
 
     /* right: actions */
     int bh = h * 64 / 100, by = y + (h - bh) / 2;
-    struct { const char *k, *l; UiAction a; } B[] = {
-        { "x", "Explore", UA_EXPLORE }, { "Z", "Rest", UA_REST }, { ">", "Descend", UA_STAIRS }, { "?", "Help", UA_HELP },
+    bool has_torch = g->torch_fuel > 0;
+    for (int i = 0; i < g->ninv; i++) if (g->inv[i].kind == IT_TORCH) has_torch = true;
+    const char *tl = g->torch_lit ? "Snuff" : "Torch";
+    struct { const char *k, *l; UiAction a; bool en; } B[] = {
+        { "x", "Explore", UA_EXPLORE, true }, { "Z", "Rest", UA_REST, true }, { "t", "Throw", UA_THROW, g->ninv > 0 },
+        { "i", "Items", UA_INV, true }, { "T", tl, UA_TORCH, has_torch || g->torch_lit }, { ">", "Descend", UA_STAIRS, true },
+        { NULL, "?", UA_HELP, true },
     };
-    int nb = 4, gap = ui->px / 2, tw = 0;
+    int nb = 7, gap = ui->px / 2, tw = 0;
     for (int i = 0; i < nb; i++) tw += button_width(ui, B[i].k, B[i].l) + gap;
     bool compact = cv->w - tw - pad < left_end;
     if (compact) {     /* narrow window: drop the key hints */
         tw = 0;
         for (int i = 0; i < nb; i++) tw += button_width(ui, NULL, B[i].l) + gap;
     }
+    if (cv->w - tw - pad >= left_end || cv->w - tw - pad >= turn_x + font_width(hf, buf))
+        font_draw(hf, cv, turn_x, base, buf, 0xb8aa8c, 255);
     int bx = cv->w - tw - pad / 2;
     for (int i = 0; i < nb; i++) {
-        bool en = g->state == GS_PLAY;
+        bool en = g->state == GS_PLAY && B[i].en;
         bx += button(ui, cv, bx, by, bh, compact ? NULL : B[i].k, B[i].l, B[i].a, f->mx, f->my, en || B[i].a == UA_HELP) + gap;
     }
 }
@@ -291,6 +317,19 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         snprintf(desc, sizeof desc, l->lit ? "A torch in an iron bracket lights the room around it. You can be seen in its light."
                                            : "An unlit torch in an iron bracket. Light it to see the room, but anything here will see you too.");
         if (!l->lit) snprintf(hint, sizeof hint, "Click to walk over and light it");
+    } else if (l && l->kind == L_FLOORTORCH) {
+        snprintf(title, sizeof title, "Burning torch");
+        snprintf(desc, sizeof desc, "A torch lies burning on the floor%s, lighting everything around it.",
+                 l->fuel >= 0 && l->fuel < 25 ? ", nearly spent" : "");
+        if (tile_walkable(t)) snprintf(hint, sizeof hint, "Click to travel here");
+    } else if (game_item_at(g, x, y)) {
+        FloorItem *it = game_item_at(g, x, y);
+        char nm[64];
+        game_item_name(it->kind, it->count, nm, sizeof nm);
+        snprintf(title, sizeof title, "%s", nm);
+        if (title[0] >= 'a' && title[0] <= 'z') title[0] = (char)(title[0] - 32);
+        snprintf(desc, sizeof desc, "%s", ITEM_INFO[it->kind].desc);
+        snprintf(hint, sizeof hint, "Click to pick it up");
     } else if (l && l->kind == L_MOSS) {
         snprintf(title, sizeof title, "Glowmoss");
         snprintf(desc, sizeof desc, "A carpet of moss that gives off a faint green-blue light.");
@@ -372,6 +411,10 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Rest", "z or . a turn,  Z until healed" },
         { "Stairs", ">  travel to and descend,  <  climb" },
         { "Light a sconce", "walk into it, or click it" },
+        { "Items", "i  your pack (click an item for its actions)" },
+        { "Throw", "t  then aim with the mouse or keys, Tab to cycle targets" },
+        { "Use", "a  light a torch, drink a potion;  d  drop" },
+        { "Torch", "T  light or snuff the torch in your hand" },
         { "Chasms", "step in to jump down a level (it hurts)" },
         { "Zoom", "+ and -  or the mouse wheel" },
         { "Text size", "kitty's own font zoom (ctrl+shift+= / -)" },
@@ -402,6 +445,86 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
     int bh = font_line(hf) * 3 / 2;
     int bw = button_width(ui, "Esc", "Close");
     button(ui, cv, x + (w - bw) / 2, y + h - pad - bh, bh, "Esc", "Close", UA_CLOSE, f->mx, f->my, true);
+}
+
+static int icon_scale(const UI *ui)
+{
+    int s = (font_line(ui->body) * 13 / 10 + TILE / 2) / TILE;
+    return s < 1 ? 1 : s;
+}
+
+static void menu_panel(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int bottom)
+{
+    static const char *TITLES[] = { "", "Pack", "Throw what?", "Use what?", "Drop what?", "" };
+    Font *hf = ui->head, *bf = ui->body, *sf = ui->small;
+    int pad = ui->px * 7 / 10, s = icon_scale(ui), row = TILE * s + ui->px / 4;
+    int w = ui->px * 15;
+    if (f->menu == MENU_ITEM && f->menu_slot >= 0 && f->menu_slot < g->ninv) {
+        Slot *sl = &g->inv[f->menu_slot];
+        const ItemInfo *ii = &ITEM_INFO[sl->kind];
+        int dh = font_wrap(sf, NULL, 0, 0, w - pad * 2, ii->desc, 0, 0);
+        int bh = font_line(hf) * 3 / 2;
+        int h = pad * 3 + TILE * s * 3 / 2 + dh + bh + pad;
+        int x = cv->w - w - ui->px / 2, y = bottom - h - ui->px / 2;
+        panel(ui, cv, x, y, w, h, 235, true);
+        int big = s * 3 / 2 > s ? s * 3 / 2 : s + 1;
+        cv_image_scaled(cv, &ui->icons[sl->kind], x + pad, y + pad, big, 255);
+        char nm[64];
+        game_item_name(sl->kind, sl->count, nm, sizeof nm);
+        char title[80];
+        snprintf(title, sizeof title, "%c) %s", 'a' + f->menu_slot, nm);
+        font_draw(hf, cv, x + pad * 2 + TILE * big, y + pad + TILE * big / 2 + font_ascent(hf) / 3, title, GOLD, 255);
+        int yy = y + pad + TILE * s * 3 / 2 + pad / 2;
+        yy += font_wrap(sf, cv, x + pad, yy, w - pad * 2, ii->desc, 0xd8cbb0, 255);
+        int bx = x + pad, by = y + h - pad - bh;
+        if (sl->kind == IT_TORCH) bx += button(ui, cv, bx, by, bh, "a", g->torch_lit ? "Fresh" : "Light", UA_ITEM_USE, f->mx, f->my, true) + pad / 2;
+        if (sl->kind == IT_POTION) bx += button(ui, cv, bx, by, bh, "q", "Drink", UA_ITEM_USE, f->mx, f->my, true) + pad / 2;
+        bx += button(ui, cv, bx, by, bh, "t", "Throw", UA_ITEM_THROW, f->mx, f->my, true) + pad / 2;
+        button(ui, cv, bx, by, bh, "d", "Drop", UA_ITEM_DROP, f->mx, f->my, true);
+        return;
+    }
+    int n = g->ninv > 0 ? g->ninv : 1;
+    int h = pad * 2 + font_line(hf) + n * row + font_line(sf) + pad / 2;
+    int x = cv->w - w - ui->px / 2, y = bottom - h - ui->px / 2;
+    if (y < 4) y = 4;
+    panel(ui, cv, x, y, w, h, 235, true);
+    font_draw(hf, cv, x + pad, y + pad + font_ascent(hf), TITLES[f->menu], GOLD, 255);
+    int yy = y + pad + font_line(hf);
+    if (!g->ninv) font_draw(bf, cv, x + pad, yy + font_ascent(bf), "Your pack is empty.", C_DIM, 255);
+    for (int i = 0; i < g->ninv; i++) {
+        Slot *sl = &g->inv[i];
+        bool ok = menu_allows(f->menu, sl->kind);
+        bool hov = ok && f->mx >= x && f->mx < x + w && f->my >= yy && f->my < yy + row;
+        if (hov) cv_blend_rect(cv, x + 3, yy, w - 6, row, 0x4a3820, 170);
+        cv_image_scaled(cv, &ui->icons[sl->kind], x + pad, yy + ui->px / 8, s, ok ? 255 : 90);
+        char nm[64], line[96];
+        game_item_name(sl->kind, sl->count, nm, sizeof nm);
+        snprintf(line, sizeof line, "%s", nm);
+        int base = yy + row / 2 + font_ascent(bf) / 3;
+        int tx = x + pad * 2 + TILE * s;
+        char key[4] = { (char)('a' + i), ')', 0 };
+        tx = font_draw(sf, cv, tx, base, key, ok ? GOLD : GOLD_DIM, 255) + ui->px / 3;
+        font_draw(bf, cv, tx, base, line, ok ? (hov ? 0xfff2d0 : 0xe2d4b4) : 0x6a6050, 255);
+        if (sl->kind == IT_TORCH && g->torch_lit && f->menu == MENU_INV)
+            font_draw(sf, cv, x + w - pad - font_width(sf, "one burning"), base, "one burning", 0xffb050, 255);
+        if (ok) add_btn_arg(ui, x, yy, w, row, UA_PICK, i);
+        yy += row;
+    }
+    const char *foot = f->menu == MENU_INV ? "Pick an item, Esc closes" : "Pick with a letter or the mouse";
+    font_draw(sf, cv, x + pad, y + h - pad / 2 - font_line(sf) / 4, foot, 0x8a7c62, 255);
+}
+
+static void targeting_banner(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
+{
+    if (!f->targeting || f->target_slot < 0 || f->target_slot >= g->ninv) return;
+    char buf[160];
+    snprintf(buf, sizeof buf, "Throw %s %s: click where, Tab cycles targets, Esc cancels",
+             g->inv[f->target_slot].kind == IT_POTION ? "a" : "a", ITEM_INFO[g->inv[f->target_slot].kind].name);
+    Font *hf = ui->head;
+    int w = font_width(hf, buf) + ui->px * 2, h = font_line(hf) * 3 / 2;
+    int x = (cv->w - w) / 2, y = ui->px / 2;
+    panel(ui, cv, x, y, w, h, 210, false);
+    font_draw(hf, cv, x + ui->px, y + (h + font_ascent(hf) * 7 / 10) / 2, buf, 0xffe0a0, 255);
 }
 
 /* ---------------------------------------------------------------- draw */
@@ -478,6 +601,8 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
     } else if (f->help) {
         help(ui, cv, f);
     } else {
-        hover_card(ui, cv, g, f);
+        if (f->menu != MENU_NONE) menu_panel(ui, cv, g, f, bar_top);
+        targeting_banner(ui, cv, g, f);
+        if (f->menu == MENU_NONE) hover_card(ui, cv, g, f);
     }
 }

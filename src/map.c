@@ -131,6 +131,11 @@ float level_brightness(const Level *lv, int x, int y)
 float light_flicker(const Light *l, float t)
 {
     if (l->kind == L_CRYSTAL || l->kind == L_MOSS) return 0.9f + 0.1f * sinf(t * 1.3f + l->phase);
+    if (l->kind == L_FLOORTORCH && l->fuel >= 0 && l->fuel < 25) {
+        /* guttering out */
+        float k = 0.35f + 0.65f * (l->fuel / 25.0f);
+        return k * (0.8f + 0.12f * sinf(t * 9.3f + l->phase) + 0.08f * sinf(t * 21.0f + l->phase * 3));
+    }
     float p = l->phase;
     float f = 0.86f + 0.06f * sinf(t * 7.1f + p) + 0.05f * sinf(t * 12.7f + p * 2.3f) +
               0.03f * sinf(t * 23.0f + p * 4.1f);
@@ -146,16 +151,31 @@ int level_add_light(Level *lv, LightKind k, int x, int y, int fx, int fy, bool l
     l->x = x; l->y = y; l->fx = fx; l->fy = fy;
     l->lit = lit;
     l->room = room;
-    l->phase = (float)(hash2(fx, fy, lv->seed) % 6283) / 1000.0f;
+    l->phase = (float)(hash2(fx, fy, lv->seed + (uint32_t)lv->nlights) % 6283) / 1000.0f;
+    l->fuel = -1;
     switch (k) {
     case L_SCONCE:  l->r = 1.30f; l->g = 0.78f; l->b = 0.40f; l->radius = 8.0f; break;
     case L_BRAZIER: l->r = 1.35f; l->g = 0.80f; l->b = 0.38f; l->radius = 8.5f; break;
     case L_CRYSTAL: l->r = 0.32f; l->g = 0.78f; l->b = 1.50f; l->radius = 7.5f; break;
     case L_MOSS:    l->r = 0.30f; l->g = 0.95f; l->b = 0.80f; l->radius = 4.5f; break;
+    case L_FLOORTORCH: l->r = 1.30f; l->g = 0.74f; l->b = 0.36f; l->radius = 6.5f; break;
     case L_PLAYER:  l->r = 0.85f; l->g = 0.62f; l->b = 0.38f; l->radius = 3.5f; break;
     }
     lv->light_dirty = true;
     return lv->nlights++;
+}
+
+void level_remove_light(Level *lv, int i)
+{
+    if (i < 0 || i >= lv->nlights) return;
+    for (int k = i; k < lv->nlights - 1; k++) {
+        lv->lights[k] = lv->lights[k + 1];
+        lv->cn[k] = lv->cn[k + 1];
+        memcpy(lv->ci[k], lv->ci[k + 1], sizeof lv->ci[k]);
+        memcpy(lv->cw[k], lv->cw[k + 1], sizeof lv->cw[k]);
+    }
+    lv->nlights--;
+    lv->light_dirty = true;
 }
 
 Light *level_light_on(Level *lv, int fx, int fy)

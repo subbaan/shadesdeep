@@ -389,6 +389,73 @@ static const Pal GOBLIN_PAL[] = {
     { 'L', 0x6a4a2e, 0 }, { 'D', 0x4a3220, 0 }, { 'b', 0x3a2a1c, 0 }, { 'm', 0xa8a8b0, 0 },
 };
 
+static const char *const I_TORCH[16] = {
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "..........kkk...",
+    ".........kccck..",
+    "........kcCcck..",
+    ".......kwkcck...",
+    "......kwWkkk....",
+    ".....kwWk.......",
+    "....kwWk........",
+    "...kwWk.........",
+    "...kWk..........",
+    "....k...........",
+};
+static const Pal I_TORCH_PAL[] = {
+    { 'k', 0x16110e, 0 }, { 'w', 0x6e4828, 0 }, { 'W', 0x9a6a3c, 0 }, { 'c', 0x3a2a1e, 0 }, { 'C', 0x5a4030, 0 },
+};
+
+static const char *const I_DART[16] = {
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "..rr............",
+    "...rrsssssssmm..",
+    "..rr........k...",
+    "................",
+    "...rr...........",
+    "....rrsssssssmm.",
+    "...rr........k..",
+    "................",
+    "................",
+};
+static const Pal I_DART_PAL[] = {
+    { 'k', 0x2a2a30, 0 }, { 'r', 0xb83a30, 0 }, { 's', 0x8a7a6a, 0 }, { 'm', 0xd8dce4, 0 },
+};
+
+static const char *const I_POTION[16] = {
+    "................",
+    "................",
+    "................",
+    "................",
+    "......kkk.......",
+    "......kck.......",
+    "......kgk.......",
+    ".....kgggk......",
+    "....kgrrrgk.....",
+    "...kgrRrrrgk....",
+    "...kgRrrrrgk....",
+    "...kgrrrrrgk....",
+    "...kgrrrrdgk....",
+    "....kgrddgk.....",
+    ".....kkkkk......",
+    "................",
+};
+static const Pal I_POTION_PAL[] = {
+    { 'k', 0x1a1416, 0 }, { 'c', 0x8a6040, 0 }, { 'g', 0x9ab0b8, 0 }, { 'r', 0xc02838, 1 },
+    { 'R', 0xff7a80, 1 }, { 'd', 0x801820, 1 },
+};
+
 void tiles_build(Tiles *t)
 {
     memset(t, 0, sizeof *t);
@@ -408,6 +475,9 @@ void tiles_build(Tiles *t)
     build_sprite(&t->mob[MK_PLAYER], &t->mob_glow[MK_PLAYER], HERO, HERO_PAL, sizeof HERO_PAL / sizeof *HERO_PAL);
     build_sprite(&t->mob[MK_RAT], &t->mob_glow[MK_RAT], RAT, RAT_PAL, sizeof RAT_PAL / sizeof *RAT_PAL);
     build_sprite(&t->mob[MK_GOBLIN], &t->mob_glow[MK_GOBLIN], GOBLIN, GOBLIN_PAL, sizeof GOBLIN_PAL / sizeof *GOBLIN_PAL);
+    build_sprite(&t->item[IT_TORCH], &t->item_glow[IT_TORCH], I_TORCH, I_TORCH_PAL, sizeof I_TORCH_PAL / sizeof *I_TORCH_PAL);
+    build_sprite(&t->item[IT_DART], &t->item_glow[IT_DART], I_DART, I_DART_PAL, sizeof I_DART_PAL / sizeof *I_DART_PAL);
+    build_sprite(&t->item[IT_POTION], &t->item_glow[IT_POTION], I_POTION, I_POTION_PAL, sizeof I_POTION_PAL / sizeof *I_POTION_PAL);
 }
 
 void tiles_free(Tiles *t)

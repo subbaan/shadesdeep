@@ -3,6 +3,7 @@
 #define GAME_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "map.h"
@@ -42,6 +43,49 @@ typedef struct {
     bool flip;
     float idle;         /* phase for idle bob */
 } Mob;
+
+/* ---------------------------------------------------------------- items */
+
+typedef enum { IT_TORCH, IT_DART, IT_POTION, IT_COUNT } ItemKind;
+
+typedef struct {
+    const char *name, *plural;
+    const char *desc;
+    int range;          /* throwing range in tiles */
+    bool usable;        /* has an "apply" action */
+} ItemInfo;
+
+extern const ItemInfo ITEM_INFO[IT_COUNT];
+
+#define MAX_INV    20
+#define MAX_ITEMS  64
+#define TORCH_FUEL 200  /* turns a carried torch burns */
+#define FLOOR_TORCH_FUEL 120
+
+typedef struct { ItemKind kind; int count; } Slot;
+
+typedef struct {
+    bool alive;
+    ItemKind kind;
+    int count;
+    int x, y;
+    bool dropped;       /* put down on purpose: explore leaves it alone */
+} FloorItem;
+
+typedef struct {
+    bool active;
+    ItemKind kind;
+    int sx, sy;         /* thrown from */
+    int path[32];       /* tiles it passes through, ending where it lands */
+    int n;
+    float pos;          /* tiles travelled */
+    bool hit;           /* lands on a monster */
+} Projectile;
+
+/* one-shot visual events for the renderer (sparks, splashes) */
+typedef enum { FX_SPARKS, FX_SHATTER, FX_THUD, FX_FALL } FxKind;
+typedef struct { FxKind kind; int x, y; } Fx;
+#define MAX_FX 16
 
 typedef struct {
     char text[160];
@@ -93,6 +137,16 @@ typedef struct {
     float shake;
     int kills;
     bool level_changed;                 /* renderer must rebuild the view below */
+    bool lower_dirty;                   /* the level below changed (a torch fell in) */
+
+    Slot inv[MAX_INV];
+    int ninv;
+    bool torch_lit;                     /* carrying a burning torch */
+    int torch_fuel;                     /* turns left on the torch in hand (0 = none started) */
+    FloorItem items[MAX_DEPTH + 2][MAX_ITEMS];
+    Projectile proj;
+    Fx fx[MAX_FX];
+    int nfx;
 } Game;
 
 Game *game_new(uint32_t seed);
@@ -120,6 +174,17 @@ void game_jump_answer(Game *g, bool yes);
 int  game_path_preview(Game *g, int x, int y, int *out, int max);
 
 bool game_debug_to_chasm(Game *g);
+
+/* items */
+FloorItem *game_item_at(Game *g, int x, int y);
+FloorItem *game_items(Game *g, int depth);
+const char *game_item_name(ItemKind k, int count, char *buf, size_t n);   /* "3 darts", "a torch" */
+/* The flight of a thrown item toward (tx, ty): tiles until it lands. */
+int  game_throw_path(Game *g, ItemKind k, int tx, int ty, int *out, int max, bool *hits);
+bool game_throw(Game *g, int slot, int tx, int ty);
+bool game_use(Game *g, int slot);       /* light a torch, drink a potion */
+bool game_drop(Game *g, int slot);
+void game_torch_toggle(Game *g);        /* light (using a torch if needed) or snuff */
 
 void game_msg(Game *g, uint32_t color, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
 

@@ -14,7 +14,7 @@
 typedef struct { float r, g, b, v, s; } CF;     /* light, visibility, seen */
 
 typedef struct {
-    float x, y, vx, vy, life, max, size;
+    float x, y, vx, vy, life, max, size, grav;
     uint32_t c;
 } Particle;
 
@@ -45,6 +45,11 @@ typedef struct {
     float time;
     float (*visf)[MAP_W];
     float (*plight)[MAP_W];
+    FloorItem *items;
+    bool torch;             /* the player carries a burning torch */
+    bool projlight;         /* a thrown torch is in the air */
+    float projx, projy;     /* its position, world pixels */
+    int projtx, projty;
 } View;
 
 /* ------------------------------------------------------------ helpers */
@@ -167,6 +172,22 @@ void render_camera(Renderer *r, const Game *g, int ww, int wh, float dt, bool sn
 
 /* --------------------------------------------------------------- light */
 
+typedef struct { Renderer *r; float px, py, rad; } DynCtx;
+
+/* a moving light: weighted by the distance from its true position, not its tile */
+static void dyn_mark(void *vc, int x, int y, float d)
+{
+    (void)d;
+    DynCtx *c = vc;
+    float dx = (x * TILE + TILE / 2 - c->px) / TILE, dy = (y * TILE + TILE / 2 - c->py) / TILE;
+    float dd = sqrtf(dx * dx + dy * dy);
+    if (dd > c->rad) return;
+    float k = 1.0f - dd / c->rad, w = k * k * 1.1f;
+    c->r->tl[y][x][0] += 1.35f * w;
+    c->r->tl[y][x][1] += 0.80f * w;
+    c->r->tl[y][x][2] += 0.40f * w;
+}
+
 static void compute_light(Renderer *r, const View *v)
 {
     const Level *lv = v->lv;
@@ -193,15 +214,26 @@ static void compute_light(Renderer *r, const View *v)
         }
     }
     if (v->plight) {
-        float f = 0.93f + 0.04f * sinf(v->time * 5.3f) + 0.03f * sinf(v->time * 11.1f);
+        float f, cr, cg, cb;
+        if (v->torch) {
+            f = 0.86f + 0.07f * sinf(v->time * 7.7f) + 0.05f * sinf(v->time * 13.3f + 1) + 0.03f * sinf(v->time * 27.0f);
+            cr = 1.30f; cg = 0.78f; cb = 0.40f;
+        } else {
+            f = 0.93f + 0.04f * sinf(v->time * 5.3f) + 0.03f * sinf(v->time * 11.1f);
+            cr = 0.80f; cg = 0.58f; cb = 0.34f;
+        }
         for (int y = 0; y < MAP_H; y++)
             for (int x = 0; x < MAP_W; x++) {
                 float w = v->plight[y][x] * f;
                 if (w <= 0) continue;
-                r->tl[y][x][0] += 0.80f * w;
-                r->tl[y][x][1] += 0.58f * w;
-                r->tl[y][x][2] += 0.34f * w;
+                r->tl[y][x][0] += cr * w;
+                r->tl[y][x][1] += cg * w;
+                r->tl[y][x][2] += cb * w;
             }
+    }
+    if (v->projlight) {
+        DynCtx dc = { r, v->projx, v->projy, 5.5f };
+        fov_cast(lv, v->projtx, v->projty, 6, dyn_mark, &dc);
     }
     for (int cy = 0; cy < CH; cy++)
         for (int cx = 0; cx < CW; cx++) {
@@ -346,7 +378,7 @@ static void draw_chasm(Renderer *r, Canvas *cv, const View *v, int tx, int ty, i
             float rim = smooth01(0.3f, 1.0f, ml + (mr - ml) * u);
             float n = noise_at(r, lx * 0.035f + t * 0.9f, ly * 0.035f + t * 0.35f);
             float n2 = noise_at(r, lx * 0.08f - t * 1.7f + 50, ly * 0.08f + 90);
-            float mist = 0.18f + 0.30f * n * n2 * 1.6f;
+            float mist = 0.26f + 0.34f * n * n2 * 1.6f;
             /* the walls of the pit shade what lies below them */
             float sh = 1.0f;
             if (oN) sh *= smooth01(0, 30, (float)j);
@@ -356,7 +388,7 @@ static void draw_chasm(Renderer *r, Canvas *cv, const View *v, int tx, int ty, i
             if (oE) sh *= 0.2f + 0.8f * smooth01(0, 12, (float)(31 - i));
             if (oS) sh *= 0.55f + 0.45f * smooth01(0, 6, (float)(31 - j));
             c = mix(0x000000, c, (int)(256 * sh));
-            c = mix(c, 0x000000, (int)(256 * (0.15f + 0.45f * (1 - rim))));
+            c = mix(c, 0x000000, (int)(256 * (0.30f + 0.40f * (1 - rim))));
             c = mix(c, RGB(26, 58, 70), (int)(256 * mist * (0.5f + 0.5f * rim)));
             if (v->fog) {
                 CF p;
@@ -487,6 +519,17 @@ static void draw_fixture(Renderer *r, Canvas *cv, const View *v, const Light *l)
                 uint32_t lit = lightc(a & 0xffffff, lr, lg, lb);
                 cv->px[(size_t)y * cv->w + x] = v->fog ? fogmix(lit, memtone(a), vis, seen) : lit;
             }
+    } else if (l->kind == L_FLOORTORCH) {
+        const Image *im = &r->t.item[IT_TORCH];
+        for (int j = 0; j < im->h; j++)
+            for (int i = 0; i < im->w; i++) {
+                uint32_t a = im->px[j * im->w + i];
+                if (!CA(a)) continue;
+                int x = sx + i, y = sy + j;
+                if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
+                uint32_t lit = lightc(a & 0xffffff, c.r + 0.3f, c.g + 0.2f, c.b + 0.1f);
+                cv->px[(size_t)y * cv->w + x] = v->fog ? fogmix(lit, memtone(a), vis, seen) : lit;
+            }
     } else if (l->kind == L_MOSS) {
         /* luminous specks scattered over the floor tile */
         float pulse = light_flicker(l, v->time);
@@ -565,25 +608,58 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
             blend_px(&cv->px[(size_t)y * cv->w + x], col, (int)(255 * alpha));
         }
     }
-    if (is_player) {
+    if (is_player && v->torch) {
+        /* a torch raised in the off hand */
+        int hx = px + (m->flip ? TILE - 8 : 7), hy = py + 21;
+        int tx = px + (m->flip ? TILE - 5 : 4), ty = py + 11;
+        cv_line(cv, hx, hy, tx, ty, 0x5a3a20, 255);
+        cv_line(cv, hx + 1, hy, tx + 1, ty, 0x7a5030, 255);
+        cv_disc(cv, tx + 0.5f, ty - 0.5f, 2.2f, 0x3a2a1c, 255);
+    } else if (is_player) {
         /* the lantern's halo */
         int lx = px + (m->flip ? TILE - 7 : 7), ly = py + 21;
         cv_glow(cv, lx, ly, 18, 0xffb050, 0.30f);
     }
-    if (m->kind == MK_GOBLIN || m->kind == MK_RAT) {
-        /* eyes catch the light */
-        (void)0;
+}
+
+/* the tip of the player's torch, world pixels */
+static void torch_tip(const Mob *m, float *x, float *y)
+{
+    float ox = 0, oy = 0;
+    if (m->bump > 0) {
+        float k = sinf(m->bump * 3.14159f) * 7;
+        float len = sqrtf((float)(m->bdx * m->bdx + m->bdy * m->bdy));
+        if (len > 0) { ox = m->bdx / len * k; oy = m->bdy / len * k; }
+    }
+    *x = m->rx * TILE + ox + (m->flip ? TILE - 5 : 4) + 0.5f;
+    *y = m->ry * TILE + oy - 3 + 11 - 2.0f;
+}
+
+static void flame(Canvas *cv, float x, float y, float size, float t, float phase, float vis)
+{
+    float wob = sinf(t * 9 + phase) * 0.8f * size;
+    float f = 0.9f + 0.1f * sinf(t * 13 + phase);
+    cv_glow(cv, (int)x, (int)y - 3, (int)(44 * size), 0xff9a40, 0.22f * f * vis);
+    cv_glow(cv, (int)x, (int)y - 3, (int)(15 * size), 0xffc070, 0.5f * f * vis);
+    cv_disc(cv, x + wob * 0.5f, y - 1.5f * size, 3.2f * size * f, 0xff8a28, (int)(230 * vis));
+    cv_disc(cv, x + wob, y - 4.0f * size, 2.4f * size * f, 0xffc050, (int)(240 * vis));
+    cv_disc(cv, x + wob * 1.3f, y - 6.5f * size, 1.3f * size * f, 0xffe8a0, (int)(220 * vis));
+    cv_disc(cv, x + wob * 0.4f, y - 2.0f * size, 1.3f * size, 0xfff4d0, (int)(255 * vis));
+}
+
+static void spawn_g(Renderer *r, float x, float y, float vx, float vy, float life, uint32_t c, float size, float grav)
+{
+    for (int i = 0; i < MAX_PART; i++) {
+        Particle *p = &r->part[i];
+        if (p->life > 0) continue;
+        *p = (Particle){ x, y, vx, vy, life, life, size, grav, c };
+        return;
     }
 }
 
 static void spawn(Renderer *r, float x, float y, float vx, float vy, float life, uint32_t c, float size)
 {
-    for (int i = 0; i < MAX_PART; i++) {
-        Particle *p = &r->part[i];
-        if (p->life > 0) continue;
-        *p = (Particle){ x, y, vx, vy, life, life, size, c };
-        return;
-    }
+    spawn_g(r, x, y, vx, vy, life, c, size, 0);
 }
 
 static void draw_effects(Renderer *r, Canvas *cv, const View *v, float dt)
@@ -616,6 +692,17 @@ static void draw_effects(Renderer *r, Canvas *cv, const View *v, float dt)
                           rng_chance(&r->rng, 50) ? 0xffa040 : 0xffd080, 0.9f);
                 }
             }
+        } else if (l->kind == L_FLOORTORCH && v->fog) {
+            float size = 0.85f * (l->fuel >= 0 && l->fuel < 25 ? 0.5f + 0.5f * l->fuel / 25.0f : 1.0f);
+            flame(cv, sx + 23.5f, sy + 15.5f, size, v->time, l->phase, vis);
+            if (v->fog && dt > 0) {
+                r->ember_acc[i] += dt * 2.6f;
+                while (r->ember_acc[i] >= 1) {
+                    r->ember_acc[i] -= 1;
+                    spawn(r, l->fx * TILE + 23.0f, l->fy * TILE + 12.0f, (rng_f(&r->rng) - 0.5f) * 12,
+                          -16 - rng_f(&r->rng) * 20, 0.6f + rng_f(&r->rng) * 0.8f, rng_chance(&r->rng, 50) ? 0xffa040 : 0xffd080, 0.9f);
+                }
+            }
         } else if (l->kind == L_MOSS) {
             cv_glow(cv, sx + 16, sy + 16, 26, 0x40e0b0, 0.16f * f * vis);
         } else if (l->kind == L_CRYSTAL) {
@@ -633,7 +720,8 @@ static void draw_effects(Renderer *r, Canvas *cv, const View *v, float dt)
         p->life -= dt;
         p->x += p->vx * dt;
         p->y += p->vy * dt;
-        p->vx += sinf(v->time * 3 + i) * 12 * dt;
+        p->vx += sinf(v->time * 3 + i) * 12 * dt * (p->grav == 0);
+        p->vy += p->grav * dt;
         float k = p->life / p->max;
         if (k <= 0) continue;
         int x = (int)p->x - v->camx, y = (int)p->y - v->camy;
@@ -642,6 +730,65 @@ static void draw_effects(Renderer *r, Canvas *cv, const View *v, float dt)
         float s = k * 0.9f;
         cv->px[(size_t)y * cv->w + x] = add_sat(cv->px[(size_t)y * cv->w + x], (int)(CR(c) * s), (int)(CG(c) * s), (int)(CB(c) * s));
         if (p->size > 0.85f && k > 0.5f) cv_glow(cv, x, y, 3, c, 0.25f * k);
+    }
+    if (v->player && v->torch) {
+        float tx, ty;
+        torch_tip(v->player, &tx, &ty);
+        flame(cv, tx - v->camx, ty - v->camy, 0.8f, v->time, 1.7f, 1.0f);
+        if (dt > 0) {
+            r->ember_acc[MAX_LIGHTS - 1] += dt * 3.0f;
+            while (r->ember_acc[MAX_LIGHTS - 1] >= 1) {
+                r->ember_acc[MAX_LIGHTS - 1] -= 1;
+                spawn(r, tx, ty - 3, (rng_f(&r->rng) - 0.5f) * 12, -16 - rng_f(&r->rng) * 20,
+                      0.5f + rng_f(&r->rng) * 0.7f, rng_chance(&r->rng, 50) ? 0xffa040 : 0xffd080, 0.9f);
+            }
+        }
+    }
+}
+
+static void draw_items(Renderer *r, Canvas *cv, const View *v)
+{
+    if (!v->items) return;
+    const Level *lv = v->lv;
+    for (int i = 0; i < MAX_ITEMS; i++) {
+        const FloorItem *it = &v->items[i];
+        if (!it->alive) continue;
+        int tx = it->x, ty = it->y;
+        if (v->fog && !(lv->f[ty][tx] & F_SEEN)) continue;
+        int sx = tx * TILE - v->camx, sy = ty * TILE - v->camy;
+        if (sx < -TILE || sy < -TILE || sx > cv->w || sy > cv->h) continue;
+        const Image *im = &r->t.item[it->kind];
+        /* a soft shadow, then the item lit like the floor */
+        for (int j = -2; j <= 2; j++)
+            for (int k = -9; k <= 9; k++) {
+                float d = k * k / 81.0f + j * j / 4.0f;
+                int x = sx + 16 + k, y = sy + 27 + j;
+                if (d <= 1 && (unsigned)x < (unsigned)cv->w && (unsigned)y < (unsigned)cv->h)
+                    blend_px(&cv->px[(size_t)y * cv->w + x], 0, (int)(70 * (1 - d)));
+            }
+        CF c00 = r->corner[ty][tx], c10 = r->corner[ty][tx + 1], c01 = r->corner[ty + 1][tx], c11 = r->corner[ty + 1][tx + 1];
+        draw_lit(cv, sx, sy, im, TILE, TILE, &c00, &c10, &c01, &c11, 1.15f, 1.15f, 0, v->fog, NULL, 0);
+        bool vis = !v->fog || (lv->f[ty][tx] & F_VIS);
+        const Image *gl = &r->t.item_glow[it->kind];
+        if (vis)
+            for (int j = 0; j < TILE; j++)
+                for (int k = 0; k < TILE; k++) {
+                    uint32_t g = gl->px[j * TILE + k];
+                    int x = sx + k, y = sy + j;
+                    if (CA(g) && (unsigned)x < (unsigned)cv->w && (unsigned)y < (unsigned)cv->h)
+                        blend_px(&cv->px[(size_t)y * cv->w + x], g & 0xffffff, 150);
+                }
+        /* now and then a glint catches the eye */
+        if (vis && v->fog) {
+            float ph = fmodf(v->time * 0.45f + (hash2(tx, ty, 5) % 100) / 100.0f, 1.0f);
+            if (ph < 0.12f) {
+                float k = sinf(ph / 0.12f * 3.14159f);
+                int gx = sx + 10 + (int)(hash2(tx, ty, 6) % 12), gy = sy + 12 + (int)(hash2(tx, ty, 7) % 8);
+                cv_glow(cv, gx, gy, 5, 0xffffff, 0.6f * k);
+                cv_blend_rect(cv, gx - 2, gy, 5, 1, 0xffffff, (int)(200 * k));
+                cv_blend_rect(cv, gx, gy - 2, 1, 5, 0xffffff, (int)(200 * k));
+            }
+        }
     }
 }
 
@@ -671,18 +818,52 @@ static void draw_rows(Renderer *r, Canvas *cv, const View *v)
     }
 }
 
+/* soften the level below once, like a camera focused on the near floor */
+static void blur_canvas(Canvas *cv)
+{
+    int w = cv->w, h = cv->h;
+    uint32_t *tmp = malloc((size_t)w * h * 4);
+    if (!tmp) return;
+    for (int pass = 0; pass < 2; pass++) {
+        for (int y = 0; y < h; y++) {          /* horizontal, radius 2 */
+            const uint32_t *row = cv->px + (size_t)y * w;
+            for (int x = 0; x < w; x++) {
+                int r = 0, g = 0, b = 0;
+                for (int k = -2; k <= 2; k++) {
+                    uint32_t c = row[clampi(x + k, 0, w - 1)];
+                    r += CR(c); g += CG(c); b += CB(c);
+                }
+                tmp[(size_t)y * w + x] = RGB(r / 5, g / 5, b / 5);
+            }
+        }
+        for (int y = 0; y < h; y++)            /* vertical */
+            for (int x = 0; x < w; x++) {
+                int r = 0, g = 0, b = 0;
+                for (int k = -2; k <= 2; k++) {
+                    uint32_t c = tmp[(size_t)clampi(y + k, 0, h - 1) * w + x];
+                    r += CR(c); g += CG(c); b += CB(c);
+                }
+                cv->px[(size_t)y * w + x] = RGB(r / 5, g / 5, b / 5);
+            }
+    }
+    free(tmp);
+}
+
 static void render_lower(Renderer *r, Game *g)
 {
     Level *lv = game_level_below(g);
     r->lower_ok = false;
     if (!lv) return;
     if (lv->light_dirty) level_relight(lv);
-    View v = { lv, game_mobs(g, g->depth + 1), NULL, false, false, 0, 0, 0, NULL, NULL };
+    View v = { lv, game_mobs(g, g->depth + 1), NULL, false, false, 0, 0, 0, NULL, NULL,
+               game_items(g, g->depth + 1), false, false, 0, 0, 0, 0 };
     compute_light(r, &v);
     memset(r->lower.px, 0, (size_t)r->lower.w * r->lower.h * 4);
     draw_ground(r, &r->lower, &v);
+    draw_items(r, &r->lower, &v);
     draw_rows(r, &r->lower, &v);
     draw_effects(r, &r->lower, &v, 0);
+    blur_canvas(&r->lower);
     r->lower_ok = true;
     r->lower_depth = g->depth;
 }
@@ -713,12 +894,119 @@ static void draw_path(Canvas *cv, const View *v, const int *path, int plen, int 
     }
 }
 
-void render_world(Renderer *r, Game *g, Canvas *cv, float dt, int hx, int hy, const int *path, int plen)
+/* where a thrown item is after travelling `pos` tiles along its path, and how high it arcs */
+static void flight_point(const Projectile *pr, const int *path, int n, int sx0, int sy0, float pos,
+                         float *x, float *y, float *h, ItemKind k)
+{
+    if (pos < 0) pos = 0;
+    if (pos > n) pos = (float)n;
+    int seg = (int)pos;
+    float f = pos - seg;
+    if (seg >= n) { seg = n - 1; f = 1; }
+    int a = seg == 0 ? sy0 * MAP_W + sx0 : path[seg - 1], b = path[seg];
+    float ax = (a % MAP_W) * TILE + TILE / 2.0f, ay = (a / MAP_W) * TILE + TILE / 2.0f;
+    float bx = (b % MAP_W) * TILE + TILE / 2.0f, by = (b / MAP_W) * TILE + TILE / 2.0f;
+    *x = ax + (bx - ax) * f;
+    *y = ay + (by - ay) * f;
+    float u = n > 0 ? pos / n : 1;
+    float top = k == IT_DART ? 3.0f + n * 0.6f : 6.0f + n * 3.2f;
+    if (top > 30) top = 30;
+    *h = sinf(u * 3.14159f) * top;
+    (void)pr;
+}
+
+static void draw_projectile(Renderer *r, Canvas *cv, const View *v, const Projectile *pr, float dt)
+{
+    float x, y, h;
+    flight_point(pr, pr->path, pr->n, pr->sx, pr->sy, pr->pos, &x, &y, &h, pr->kind);
+    float sx = x - v->camx, sy = y - v->camy;
+    /* the shadow on the ground shows where it really is */
+    cv_disc(cv, sx, sy + 8, 4.0f, 0x000000, 90);
+    float px = sx, py = sy - h;
+    float ex, ey, eh;
+    flight_point(pr, pr->path, pr->n, pr->sx, pr->sy, pr->pos - 0.25f, &ex, &ey, &eh, pr->kind);
+    float dx = px - (ex - v->camx), dy = py - (ey - v->camy - eh);
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len < 0.01f) { dx = 1; dy = 0; len = 1; }
+    dx /= len;
+    dy /= len;
+    switch (pr->kind) {
+    case IT_DART:
+        cv_line(cv, (int)(px - dx * 9), (int)(py - dy * 9), (int)px, (int)py, 0x8a7a6a, 255);
+        cv_line(cv, (int)(px - dx * 3), (int)(py - dy * 3), (int)(px + dx * 2), (int)(py + dy * 2), 0xe8ecf4, 255);
+        cv_line(cv, (int)(px - dx * 9), (int)(py - dy * 9 - 1), (int)(px - dx * 6), (int)(py - dy * 6 - 1), 0xb83a30, 255);
+        break;
+    case IT_TORCH: {
+        float a = pr->pos * 7.0f;
+        float cx = cosf(a), cy = sinf(a);
+        cv_line(cv, (int)(px - cx * 6), (int)(py - cy * 6), (int)(px + cx * 6), (int)(py + cy * 6), 0x6e4828, 255);
+        flame(cv, px + cx * 6, py + cy * 6 + 3, 0.75f, v->time, 0.3f, 1.0f);
+        if (dt > 0)
+            for (int k = 0; k < 3; k++)
+                spawn(r, x + cx * 6 + (rng_f(&r->rng) - 0.5f) * 3, y - h + cy * 6, (rng_f(&r->rng) - 0.5f) * 20,
+                      (rng_f(&r->rng) - 0.5f) * 20, 0.35f + rng_f(&r->rng) * 0.3f, 0xffb050, 0.9f);
+        break;
+    }
+    case IT_POTION:
+        cv_image(cv, &r->t.item[IT_POTION], 0, 0, TILE, TILE, (int)px - 16, (int)py - 20, 0);
+        break;
+    default:
+        break;
+    }
+}
+
+/* burning torches on the level below, animated and seen through the chasms */
+static void draw_flames_below(Renderer *r, Canvas *cv, const View *v, Game *g)
+{
+    Level *lo = game_level_below(g);
+    if (!lo || !r->lower_ok) return;
+    float pcx = v->camx + cv->w * 0.5f, pcy = v->camy + cv->h * 0.5f;
+    for (int i = 0; i < lo->nlights; i++) {
+        const Light *l = &lo->lights[i];
+        if (l->kind != L_FLOORTORCH || !l->lit) continue;
+        float wx = l->fx * TILE + 23.5f, wy = l->fy * TILE + 15.5f;
+        float ux = pcx + (wx - pcx) * LOWER_SCALE, uy = pcy + (wy - pcy) * LOWER_SCALE;
+        int tx = (int)floorf(ux / TILE), ty = (int)floorf(uy / TILE);
+        if (tile_at(v->lv, tx, ty) != T_CHASM || !(v->lv->f[ty][tx] & F_SEEN)) continue;
+        float vis = v->visf[ty][tx];
+        if (vis < 0.05f) continue;
+        float size = 0.6f * (l->fuel >= 0 && l->fuel < 25 ? 0.5f + 0.5f * l->fuel / 25.0f : 1.0f);
+        flame(cv, ux - v->camx, uy - v->camy, size, v->time, l->phase, vis * 0.75f);
+    }
+}
+
+static void draw_throw_preview(Canvas *cv, const View *v, const Overlay *ov, const Mob *p)
+{
+    if (!ov->tlen) return;
+    Projectile fake = { 0 };
+    float t = v->time;
+    float total = (float)ov->tlen;
+    uint32_t col = ov->thit ? 0xff7050 : 0xffd890;
+    for (float d = 0.35f; d < total - 0.2f; d += 0.33f) {
+        float x, y, h;
+        flight_point(&fake, ov->tpath, ov->tlen, p->x, p->y, d, &x, &y, &h, ov->tkind);
+        float pulse = 0.55f + 0.45f * sinf(t * 6 - d * 2.2f);
+        cv_disc(cv, x - v->camx, y - h - v->camy, 1.7f, col, (int)(200 * pulse));
+    }
+    int c = ov->tpath[ov->tlen - 1];
+    float lx = (c % MAP_W) * TILE + TILE / 2.0f - v->camx, ly = (c / MAP_W) * TILE + TILE / 2.0f - v->camy;
+    bool chasm = tile_at(v->lv, c % MAP_W, c / MAP_W) == T_CHASM;
+    uint32_t rc = ov->thit ? 0xff6040 : chasm ? 0x80c8ff : 0xffe0a0;
+    float pr = 11 + sinf(t * 5) * 1.5f;
+    cv_ring(cv, lx, ly + 2, pr, 2.0f, rc, 220);
+    cv_ring(cv, lx, ly + 2, pr * 0.45f, 1.5f, rc, 160);
+}
+
+void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
 {
     if (g->level_changed || r->lower_depth != g->depth) {
         render_lower(r, g);
         g->level_changed = false;
+        g->lower_dirty = false;
         memset(r->part, 0, sizeof r->part);
+    } else if (g->lower_dirty) {
+        render_lower(r, g);
+        g->lower_dirty = false;
     }
     Level *lv = game_level(g);
     if (lv->light_dirty) level_relight(lv);
@@ -727,17 +1015,59 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, int hx, int hy, co
         camx += (int)((rng_f(&r->rng) - 0.5f) * g->shake * 18);
         camy += (int)((rng_f(&r->rng) - 0.5f) * g->shake * 18);
     }
-    View v = { lv, game_mobs(g, g->depth), &g->player, true, true, camx, camy, g->time, g->visf, g->plight };
+    View v = { lv, game_mobs(g, g->depth), &g->player, true, true, camx, camy, g->time, g->visf, g->plight,
+               game_items(g, g->depth), g->torch_lit, false, 0, 0, 0, 0 };
+    if (g->proj.active && g->proj.kind == IT_TORCH) {
+        float x, y, h;
+        flight_point(&g->proj, g->proj.path, g->proj.n, g->proj.sx, g->proj.sy, g->proj.pos, &x, &y, &h, IT_TORCH);
+        v.projlight = true;
+        v.projx = x;
+        v.projy = y - h * 0.5f;
+        v.projtx = clampi((int)(x / TILE), 0, MAP_W - 1);
+        v.projty = clampi((int)(y / TILE), 0, MAP_H - 1);
+    }
+    /* one-shot effects from the game */
+    for (int i = 0; i < g->nfx; i++) {
+        Fx *f = &g->fx[i];
+        float x = f->x * TILE + TILE / 2.0f, y = f->y * TILE + TILE / 2.0f;
+        int n = f->kind == FX_SHATTER ? 26 : f->kind == FX_FALL ? 18 : 16;
+        for (int k = 0; k < n; k++) {
+            float a = rng_f(&r->rng) * 6.283f, sp = 20 + rng_f(&r->rng) * 70;
+            switch (f->kind) {
+            case FX_SPARKS:
+                spawn_g(r, x, y, cosf(a) * sp, sinf(a) * sp - 30, 0.3f + rng_f(&r->rng) * 0.4f,
+                        rng_chance(&r->rng, 50) ? 0xffc060 : 0xffe8b0, 0.9f, 160);
+                break;
+            case FX_SHATTER:
+                spawn_g(r, x, y, cosf(a) * sp, sinf(a) * sp - 40, 0.4f + rng_f(&r->rng) * 0.5f,
+                        k % 3 == 0 ? 0xd0e8f0 : 0xd02838, k % 3 == 0 ? 0.9f : 0.5f, 220);
+                break;
+            case FX_FALL:
+                spawn_g(r, x + (rng_f(&r->rng) - 0.5f) * 14, y, (rng_f(&r->rng) - 0.5f) * 10, 10 + rng_f(&r->rng) * 30,
+                        0.6f + rng_f(&r->rng) * 0.8f, 0xffa040, 0.9f, 40);
+                break;
+            default:
+                break;
+            }
+        }
+    }
+    g->nfx = 0;
     compute_light(r, &v);
     memset(cv->px, 0, (size_t)cv->w * cv->h * 4);
     draw_ground(r, cv, &v);
-    draw_path(cv, &v, path, plen, -1, -1, g->time);
+    draw_items(r, cv, &v);
+    draw_flames_below(r, cv, &v, g);
+    if (!ov->tlen) draw_path(cv, &v, ov->path, ov->plen, -1, -1, g->time);
     draw_rows(r, cv, &v);
     draw_effects(r, cv, &v, dt);
-    if (hx >= 0) draw_path(cv, &v, NULL, 0, hx, hy, g->time);
+    if (g->proj.active) draw_projectile(r, cv, &v, &g->proj, dt);
+    draw_throw_preview(cv, &v, ov, &g->player);
+    if (ov->hx >= 0) draw_path(cv, &v, NULL, 0, ov->hx, ov->hy, g->time);
 }
 
 int render_dump_lower(const Renderer *r, const char *path)
 {
     return r->lower_ok ? canvas_write_png(&r->lower, path) : -1;
 }
+
+const Image *render_item_icons(const Renderer *r) { return r->t.item; }

@@ -15,10 +15,20 @@ void render_free(Renderer *r);
 void render_camera(Renderer *r, const Game *g, int world_w, int world_h, float dt, bool snap);
 void render_cam_pos(const Renderer *r, float *x, float *y);
 
-/* hover: tile under the mouse (or -1); path: tiles of the preview path */
-void render_world(Renderer *r, Game *g, Canvas *cv, float dt, int hover_x, int hover_y,
-                  const int *path, int plen);
+/* what the interface wants drawn over the map */
+typedef struct {
+    int hx, hy;             /* tile under the mouse, or -1 */
+    const int *path;        /* travel preview */
+    int plen;
+    const int *tpath;       /* throw preview: the flight, ending where it lands */
+    int tlen;
+    bool thit;              /* it would hit a creature */
+    ItemKind tkind;
+} Overlay;
 
+void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov);
+
+const Image *render_item_icons(const Renderer *r);        /* IT_COUNT pictures */
 int render_dump_lower(const Renderer *r, const char *path);   /* developer aid */
 
 #endif

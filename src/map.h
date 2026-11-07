@@ -53,7 +53,7 @@ enum {
     F_CORR    = 4,      /* corridor */
 };
 
-typedef enum { L_SCONCE, L_BRAZIER, L_CRYSTAL, L_MOSS, L_PLAYER } LightKind;
+typedef enum { L_SCONCE, L_BRAZIER, L_CRYSTAL, L_MOSS, L_FLOORTORCH, L_PLAYER } LightKind;
 
 typedef struct {
     int x, y;           /* tile the light shines from (for a sconce: the floor in front of it) */
@@ -64,6 +64,7 @@ typedef struct {
     float radius;
     float phase;
     int room;           /* room it belongs to, -1 none */
+    int fuel;           /* turns left, or -1 for a light that never burns out */
 } Light;
 
 typedef struct {
@@ -121,5 +122,6 @@ float level_brightness(const Level *lv, int x, int y);
 /* A sconce on wall (wx, wy) shining into the floor at (fx, fy). */
 int level_add_light(Level *lv, LightKind k, int x, int y, int fx, int fy, bool lit, int room);
 Light *level_light_on(Level *lv, int fx, int fy);   /* the fixture drawn on that tile */
+void level_remove_light(Level *lv, int i);
 
 #endif

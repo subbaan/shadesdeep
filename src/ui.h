@@ -12,7 +12,17 @@
 typedef enum {
     UA_NONE, UA_EXPLORE, UA_REST, UA_STAIRS, UA_HELP, UA_ZOOM_IN, UA_ZOOM_OUT,
     UA_JUMP_YES, UA_JUMP_NO, UA_NEW_GAME, UA_QUIT, UA_CLOSE,
+    UA_INV, UA_THROW, UA_TORCH, UA_PICK, UA_ITEM_THROW, UA_ITEM_USE, UA_ITEM_DROP, UA_MENU_BACK,
 } UiAction;
+
+/* item menus, Brogue style: pick from the pack, then act */
+typedef enum { MENU_NONE, MENU_INV, MENU_THROW, MENU_USE, MENU_DROP, MENU_ITEM } MenuKind;
+
+static inline bool menu_allows(MenuKind m, ItemKind k)
+{
+    if (m == MENU_USE) return ITEM_INFO[k].usable;
+    return true;
+}
 
 typedef struct UI UI;
 
@@ -30,10 +40,15 @@ typedef struct {
     bool quit_armed;        /* Esc pressed once */
     float fps;
     bool show_fps;
+    MenuKind menu;
+    int menu_slot;          /* the item MENU_ITEM is about */
+    bool targeting;         /* aiming a throw */
+    int target_slot;
 } UiFrame;
 
 void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f);
-UiAction ui_hit(const UI *ui, int mx, int my);      /* button under the mouse */
+void ui_set_icons(UI *ui, const Image *icons);          /* item pictures for menus */
+UiAction ui_hit(const UI *ui, int mx, int my, int *arg);    /* button under the mouse */
 bool ui_over_panel(const UI *ui, int mx, int my);   /* mouse is over interface, not the map */
 
 #endif

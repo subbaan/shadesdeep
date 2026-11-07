@@ -23,6 +23,8 @@ typedef struct {
     Image rubble[3];
     Image mob[MK_COUNT];    /* TILE x TILE, feet at the bottom */
     Image mob_glow[MK_COUNT];   /* emissive parts (lantern, eyes) */
+    Image item[IT_COUNT];
+    Image item_glow[IT_COUNT];
 } Tiles;
 
 void tiles_build(Tiles *t);
