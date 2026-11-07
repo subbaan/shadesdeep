@@ -5,14 +5,18 @@
 #include <string.h>
 
 bool tile_opaque(Tile t) { return t == T_ROCK || t == T_WALL || t == T_DOOR; }
-bool tile_walkable(Tile t) { return t == T_FLOOR || t == T_DOOR_OPEN || t == T_DOOR || t == T_STAIRS_DOWN || t == T_STAIRS_UP || t == T_RUBBLE; }
+bool tile_walkable(Tile t)
+{
+    return t == T_FLOOR || t == T_DOOR_OPEN || t == T_DOOR || t == T_STAIRS_DOWN || t == T_STAIRS_UP || t == T_RUBBLE
+        || t == T_SHALLOW || t == T_DEEP;
+}
 bool tile_solid(Tile t) { return t == T_ROCK || t == T_WALL; }
 
 const char *tile_name(Tile t)
 {
     static const char *n[T_COUNT] = {
         "solid rock", "stone wall", "stone floor", "wooden door", "open door",
-        "chasm", "stairs down", "stairs up", "rubble",
+        "chasm", "stairs down", "stairs up", "rubble", "shallow water", "deep water",
     };
     return t < T_COUNT ? n[t] : "?";
 }
@@ -28,6 +32,9 @@ const char *tile_desc(Tile t)
     case T_STAIRS_DOWN: return "A stairway leading deeper into the dark.";
     case T_STAIRS_UP:   return "Stairs climbing back toward the surface.";
     case T_RUBBLE:      return "Broken stone litters the floor.";
+    case T_SHALLOW:     return "Cold, ankle-deep water. Wading through it splashes, and splashing carries.";
+    case T_DEEP:        return "Dark water too deep to wade. Swimming will put out a torch, and anything dropped here sinks. "
+                               "Goblins won't follow you in.";
     default:            return "";
     }
 }
@@ -445,6 +452,62 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
                     if (holes) holes[y][x] = 1;
                 }
             }
+    }
+
+    /* pools of water in some rooms (own generator, so the rest of the layout stays put) */
+    Rng prng = { seed * 7919u + 13 };
+    int npool = (rng_chance(&prng, 70) ? 1 : 0) + (depth >= 2) + (depth >= 5 && rng_chance(&prng, 50));
+    for (int k = 0, tries = 0; k < npool && tries < 60; tries++) {
+        int r = rng_range(&prng, 0, lv->nrooms - 1);
+        Room *rm = &lv->rooms[r];
+        if (r == start || rm->w < 6 || rm->h < 5) continue;
+        if (rm->w * rm->h < 48 && tries < 30) continue;        /* prefer the bigger rooms */
+        if (lv->room[lv->downy][lv->downx] == r) continue;
+        bool busy = false;
+        for (int y = rm->y; y < rm->y + rm->h && !busy; y++)
+            for (int x = rm->x; x < rm->x + rm->w; x++)
+                if (lv->room[y][x] == r && (lv->t[y][x] == T_CHASM || tile_water((Tile)lv->t[y][x]))) { busy = true; break; }
+        if (busy) continue;
+        float ex = ((rm->w - 2) / 2.0f) * (0.85f + 0.25f * rng_f(&prng)), ey = ((rm->h - 2) / 2.0f) * (0.85f + 0.25f * rng_f(&prng));
+        float ccx = rm->x + rm->w / 2.0f + rng_range(&prng, -1, 1) * 0.5f, ccy = rm->y + rm->h / 2.0f + rng_range(&prng, -1, 1) * 0.5f;
+        float ph = rng_f(&prng) * 6.28f;
+        bool deep = ex >= 2.2f && ey >= 1.8f;
+        uint8_t want[MAP_H][MAP_W];
+        memset(want, 0, sizeof want);
+        for (int y = rm->y + 1; y < rm->y + rm->h - 1; y++)
+            for (int x = rm->x + 1; x < rm->x + rm->w - 1; x++) {
+                if (lv->room[y][x] != r || lv->t[y][x] != T_FLOOR) continue;
+                float dx = (x + 0.5f - ccx) / ex, dy = (y + 0.5f - ccy) / ey;
+                float ang = atan2f(dy, dx);
+                float rr = 0.95f + 0.16f * sinf(ang * 2 + ph) + 0.09f * sinf(ang * 5 - ph);
+                float d = (dx * dx + dy * dy) / (rr * rr);
+                if (d <= 1) want[y][x] = deep && d < 0.55f ? T_DEEP : T_SHALLOW;
+            }
+        int made = 0;
+        for (int y = rm->y + 1; y < rm->y + rm->h - 1; y++)
+            for (int x = rm->x + 1; x < rm->x + rm->w - 1; x++) {
+                if (!want[y][x]) continue;
+                /* keep a dry ring next to walls and doors so the room stays crossable */
+                bool ok = true;
+                for (int j = -1; j <= 1 && ok; j++)
+                    for (int i = -1; i <= 1; i++) {
+                        Tile n = tile_at(lv, x + i, y + j);
+                        if (!(n == T_FLOOR || tile_water(n))) { ok = false; break; }
+                    }
+                if (!ok) continue;
+                lv->t[y][x] = want[y][x];
+                made++;
+            }
+        /* deep water touching dry land gets a shallow lip */
+        for (int y = rm->y; y < rm->y + rm->h; y++)
+            for (int x = rm->x; x < rm->x + rm->w; x++) {
+                if (lv->t[y][x] != T_DEEP) continue;
+                for (int d = 0; d < 4; d++) {
+                    static const int DX[4] = { 1, -1, 0, 0 }, DY[4] = { 0, 0, 1, -1 };
+                    if (tile_at(lv, x + DX[d], y + DY[d]) == T_FLOOR) { lv->t[y][x] = T_SHALLOW; break; }
+                }
+            }
+        if (made) k++;
     }
 
     /* lighting: some rooms start dark, their sconces cold */

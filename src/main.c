@@ -242,6 +242,9 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         game_stop(g);
     }
     if (getenv("LUME_DUMP_CHASM") && !game_debug_to_chasm(g)) fprintf(stderr, "%s: no chasm on this level\n", LUME_NAME);
+    /* LUME_DUMP_WATER=0|1|2: stand by a pool, in its shallows, or swimming in it */
+    if (getenv("LUME_DUMP_WATER") && !game_debug_to_water(g, atoi(getenv("LUME_DUMP_WATER"))))
+        fprintf(stderr, "%s: no deep water on this level\n", LUME_NAME);
     /* LUME_DUMP_JUMP=N: jump down N chasms (developer test of level changes) */
     for (int j = getenv("LUME_DUMP_JUMP") ? atoi(getenv("LUME_DUMP_JUMP")) : 0; j > 0 && g->state == GS_PLAY; j--) {
         if (!game_debug_to_chasm(g)) break;

@@ -85,7 +85,7 @@ typedef struct {
 } Projectile;
 
 /* one-shot visual events for the renderer (sparks, splashes) */
-typedef enum { FX_SPARKS, FX_SHATTER, FX_THUD, FX_FALL, FX_BURN, FX_DISSOLVE } FxKind;
+typedef enum { FX_SPARKS, FX_SHATTER, FX_THUD, FX_FALL, FX_BURN, FX_DISSOLVE, FX_SPLASH, FX_STEAM } FxKind;
 typedef struct { FxKind kind; int x, y; } Fx;
 #define MAX_FX 16
 
@@ -117,6 +117,7 @@ typedef struct {
     int regen;
     GameState state;
     int jx, jy;                         /* chasm tile the jump prompt is about */
+    int wade_x, wade_y;                 /* deep water the player was warned about (move again to swim) */
     Rng rng;
 
     /* per-turn view */
@@ -179,6 +180,7 @@ void game_jump_answer(Game *g, bool yes);
 int  game_path_preview(Game *g, int x, int y, int *out, int max);
 
 bool game_debug_to_chasm(Game *g);
+bool game_debug_to_water(Game *g, int wade);   /* developer: 0 shore, 1 shallows, 2 deep */
 bool game_debug_spawn(Game *g, MobKind k, int x, int y);   /* developer: put a monster there */
 
 /* items */

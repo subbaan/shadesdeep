@@ -44,6 +44,8 @@ typedef enum {
     T_STAIRS_DOWN,
     T_STAIRS_UP,
     T_RUBBLE,           /* floor with debris, walkable */
+    T_SHALLOW,          /* wade through: splashes */
+    T_DEEP,             /* swim: puts out a torch, swallows what falls in */
     T_COUNT
 } Tile;
 
@@ -101,6 +103,7 @@ static inline Tile tile_at(const Level *lv, int x, int y) { return in_map(x, y) 
 bool tile_opaque(Tile t);       /* blocks sight and light */
 bool tile_walkable(Tile t);     /* can stand on without falling */
 bool tile_solid(Tile t);        /* drawn as a raised block */
+static inline bool tile_water(Tile t) { return t == T_SHALLOW || t == T_DEEP; }
 const char *tile_name(Tile t);
 const char *tile_desc(Tile t);
 

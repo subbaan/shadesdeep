@@ -18,6 +18,9 @@ typedef struct {
     uint32_t c;
 } Particle;
 
+#define MAX_RIPPLE 48
+typedef struct { float x, y, age, life, str; } Ripple;
+
 struct Renderer {
     Tiles t;
     CF corner[CH][CW];
@@ -30,6 +33,8 @@ struct Renderer {
     bool cam_ok;
     int cam_depth;
     Particle part[MAX_PART];
+    Ripple rip[MAX_RIPPLE];
+    float rip_acc[MAX_MOBS + 1];        /* idle ripples around anything standing in water */
     float ember_acc[MAX_LIGHTS];
     uint8_t noise[256 * 256];
     Rng rng;
@@ -456,6 +461,244 @@ static void draw_scorch(Renderer *r, Canvas *cv, const View *v, int tx, int ty, 
         }
 }
 
+
+/* ---------------------------------------------------------------- water */
+
+static inline float tile_depth(const Level *lv, int x, int y)
+{
+    Tile t = tile_at(lv, x, y);
+    return t == T_DEEP ? 1.0f : t == T_SHALLOW ? 0.45f : 0.0f;
+}
+
+static inline bool water_px(const View *v, int x, int y)
+{
+    int tx = (x + v->camx) >> 5, ty = (y + v->camy) >> 5;     /* TILE == 32 */
+    return tile_water(tile_at(v->lv, tx, ty));
+}
+
+/* surface height and slope, world pixels */
+static inline void waves(float wx, float wy, float t, float *hx, float *hy)
+{
+    float a = 0.31f * wx + 0.12f * wy + 1.7f * t, b = 0.27f * wy - 0.08f * wx - 1.3f * t, c = 0.17f * (wx + wy) + 0.9f * t;
+    *hx = 0.31f * cosf(a) - 0.08f * cosf(b) + 0.17f * cosf(c) * 0.7f;
+    *hy = 0.12f * cosf(a) + 0.27f * cosf(b) + 0.17f * cosf(c) * 0.7f;
+}
+
+static void draw_water(Renderer *r, Canvas *cv, const View *v, int tx, int ty, int sx, int sy)
+{
+    const Level *lv = v->lv;
+    uint32_t h = hash2(tx, ty, lv->seed);
+    const Image *bed = &r->t.floor[h % N_FLOOR];
+    /* water presence and depth at the corners, averaged over the four tiles
+     * around each, so shores round off and the deep fades in */
+    float wc[2][2], dc[2][2];
+    for (int j = 0; j < 2; j++)
+        for (int i = 0; i < 2; i++) {
+            float w = 0, d = 0;
+            for (int b = -1; b <= 0; b++)
+                for (int a = -1; a <= 0; a++) {
+                    w += tile_water(tile_at(lv, tx + i + a, ty + j + b)) ? 1 : 0;
+                    d += tile_depth(lv, tx + i + a, ty + j + b);
+                }
+            wc[j][i] = w / 4;
+            dc[j][i] = d / 4;
+        }
+    float t = v->time;
+    const CF *c00 = &r->corner[ty][tx], *c10 = &r->corner[ty][tx + 1];
+    const CF *c01 = &r->corner[ty + 1][tx], *c11 = &r->corner[ty + 1][tx + 1];
+    for (int j = 0; j < TILE; j++) {
+        int y = sy + j;
+        if ((unsigned)y >= (unsigned)cv->h) continue;
+        float fv = (j + 0.5f) / TILE;
+        CF L, Rr;
+        cf_lerp(&L, c00, c01, fv);
+        cf_lerp(&Rr, c10, c11, fv);
+        uint32_t *row = cv->px + (size_t)y * cv->w;
+        for (int i = 0; i < TILE; i++) {
+            int x = sx + i;
+            if ((unsigned)x >= (unsigned)cv->w) continue;
+            float fu = (i + 0.5f) / TILE;
+            CF p;
+            cf_lerp(&p, &L, &Rr, fu);
+            float wx = (float)(tx * TILE + i), wy = (float)(ty * TILE + j);
+            float wf = (wc[0][0] * (1 - fu) + wc[0][1] * fu) * (1 - fv) + (wc[1][0] * (1 - fu) + wc[1][1] * fu) * fv;
+            float d = (dc[0][0] * (1 - fu) + dc[0][1] * fu) * (1 - fv) + (dc[1][0] * (1 - fu) + dc[1][1] * fu) * fv;
+            wf += 0.22f * sinf(wx * 0.19f + wy * 0.07f + 1.3f) * sinf(wy * 0.17f - wx * 0.09f + 0.4f);
+            uint32_t b = bed->px[j * TILE + i] & 0xffffff;
+            if (wf < 0.42f) {
+                /* dry stone, darker where it's wet */
+                float wet = clampf((wf - 0.30f) / 0.12f, 0, 1);
+                uint32_t a = mix(b, 0x1c1a18, (int)(wet * 90));
+                uint32_t lit = lightc(a, p.r, p.g, p.b);
+                row[x] = v->fog ? fogmix(lit, memtone(a), p.v, p.s) : lit;
+                continue;
+            }
+            float shore = clampf((wf - 0.42f) / 0.14f, 0, 1);
+            float hx, hy;
+            waves(wx, wy, t, &hx, &hy);
+            /* the bed, seen through the water (refraction wobble) */
+            int bi = clampi(i + (int)lroundf(hx * 2.2f), 0, TILE - 1), bj = clampi(j + (int)lroundf(hy * 2.2f), 0, TILE - 1);
+            b = bed->px[bj * TILE + bi] & 0xffffff;
+            float k = clampf(d * 1.5f, 0, 1);
+            uint32_t under = mix(mix(b, 0x2a7c84, 150), 0x05283a, (int)(k * 236));
+            /* caustics dancing on the shallow bed */
+            float ca = sinf(wx * 0.23f + sinf(wy * 0.19f + t * 1.1f) * 2.2f + t * 1.6f) * sinf(wy * 0.21f - sinf(wx * 0.17f - t) * 2.0f - t * 1.3f);
+            ca = ca > 0 ? ca * ca * ca * ca : 0;
+            float caus = 1 + ca * (1 - k) * 1.8f;
+            uint32_t lit = lightc(under, p.r * 0.82f * caus, p.g * 1.02f * caus, p.b * 1.12f * caus);
+            /* light glancing off the ripples */
+            float s = hy * 1.4f - hx * 0.5f;
+            s = s > 0.25f ? (s - 0.25f) * 2.2f : 0;
+            s = s * s;
+            float spec = s * (0.35f + 0.65f * k) * 170;
+            int ar = (int)(spec * p.r), ag = (int)(spec * p.g), ab = (int)(spec * p.b * 0.9f + s * 6);
+            /* a lapping line where the water meets the stone */
+            float lap = 0.45f + 0.35f * sinf(t * 1.8f + (wx + wy) * 0.21f);
+            if (shore < lap) {
+                float e = 1 - shore / lap;
+                ar += (int)(60 * e * p.r); ag += (int)(75 * e * p.g); ab += (int)(78 * e * p.b);
+            }
+            /* a faint cold sheen of its own, so water reads as water even under firelight */
+            float sh = 0.5f + 0.5f * fminf(1.0f, (p.r + p.g + p.b) * 0.6f);
+            ar += (int)(3 * sh); ag += (int)(15 * sh); ab += (int)(19 * sh);
+            lit = add_sat(lit, ar, ag, ab);
+            if (v->fog) lit = fogmix(lit, memtone(mix(b, 0x3a6878, 130)), p.v, p.s);
+            row[x] = lit;
+        }
+    }
+    /* lily pads on the shallows */
+    if (tile_at(lv, tx, ty) == T_SHALLOW && h % 5 == 0) {
+        float cx = (float)(sx + 9 + (int)((h >> 8) % 14)), cy = (float)(sy + 9 + (int)((h >> 12) % 14));
+        cx += sinf(t * 0.8f + (float)(h % 7)) * 0.6f;
+        float rad = 4.5f + (h >> 16) % 3, notch = ((h >> 20) % 628) / 100.0f;
+        CF p;
+        light_at_px(r, cx + v->camx, cy + v->camy, &p);
+        for (int j = -7; j <= 7; j++)
+            for (int i = -7; i <= 7; i++) {
+                float dx = i + 0.5f, dy = (j + 0.5f) * 1.25f, dd = sqrtf(dx * dx + dy * dy);
+                if (dd > rad) continue;
+                float ang = atan2f(dy, dx) - notch;
+                ang = fabsf(atan2f(sinf(ang), cosf(ang)));
+                if (ang < 0.35f && dd > 1.2f) continue;
+                int x = (int)cx + i, y = (int)cy + j;
+                if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
+                uint32_t a = dd > rad - 1.2f ? 0x2a4a1e : (i + j) % 5 == 0 ? 0x5a8a3a : 0x46772e;
+                uint32_t lit = lightc(a, p.r, p.g, p.b);
+                cv->px[(size_t)y * cv->w + x] = v->fog ? fogmix(lit, memtone(a), p.v, p.s) : lit;
+            }
+    }
+}
+
+/* long wavering streaks of firelight on the water under each flame */
+static void reflect_one(Canvas *cv, const View *v, float fx, float fy, float gy, uint32_t col, float str, float width)
+{
+    float hgt = gy - fy;
+    if (hgt < 2) hgt = 2;
+    float cy = gy + hgt, len = hgt * 1.1f + 10;
+    int x0 = (int)(fx - width * 4) - v->camx, x1 = (int)(fx + width * 4) - v->camx;
+    int y0 = (int)gy - v->camy, y1 = (int)(cy + len * 1.6f) - v->camy;
+    float t = v->time;
+    for (int y = y0; y <= y1; y++) {
+        if ((unsigned)y >= (unsigned)cv->h) continue;
+        float wy = (float)(y + v->camy);
+        float along = (wy - cy) / len;
+        float fall = expf(-along * along);
+        if (fall < 0.02f) continue;
+        float wob = sinf(wy * 0.55f + t * 4.6f) * (1.0f + (wy - gy) * 0.05f);
+        float band = 0.45f + 0.55f * fabsf(sinf(wy * 0.9f - t * 5.3f + sinf(wy * 0.21f + t)));
+        float sw = width * (0.8f + (wy - gy) * 0.02f);
+        for (int x = x0; x <= x1; x++) {
+            if ((unsigned)x >= (unsigned)cv->w || !water_px(v, x, y)) continue;
+            int tx = (x + v->camx) >> 5, ty = (y + v->camy) >> 5;
+            float vis = v->fog ? v->visf[ty][tx] : 1;
+            if (vis <= 0.02f) continue;
+            float dx = (x + v->camx - fx - wob) / sw;
+            float k = expf(-dx * dx) * fall * band * str * vis;
+            if (k < 0.01f) continue;
+            uint32_t *px = &cv->px[(size_t)y * cv->w + x];
+            *px = add_sat(*px, (int)(CR(col) * k), (int)(CG(col) * k), (int)(CB(col) * k));
+        }
+    }
+}
+
+static void torch_tip(const Mob *m, float *x, float *y);
+
+static void draw_reflections(Renderer *r, Canvas *cv, const View *v)
+{
+    (void)r;
+    const Level *lv = v->lv;
+    for (int i = 0; i < lv->nlights; i++) {
+        const Light *l = &lv->lights[i];
+        if (!l->lit) continue;
+        float f = light_flicker(l, v->time);
+        float fx = l->fx * TILE + 16.0f;
+        if (l->kind == L_SCONCE)
+            reflect_one(cv, v, fx, l->fy * TILE + TILE - 23.0f, (l->fy + 1) * TILE + 2.0f, 0xffa850, 0.95f * f, 2.4f);
+        else if (l->kind == L_FLOORTORCH)
+            reflect_one(cv, v, fx, l->fy * TILE + 10.0f, l->fy * TILE + 24.0f, 0xffa850, 0.8f * f, 2.2f);
+        else if (l->kind == L_CRYSTAL)
+            reflect_one(cv, v, fx, l->fy * TILE + 14.0f, (l->fy + 1) * TILE + 2.0f, 0x58a8ff, 0.55f * f, 3.0f);
+    }
+    if (v->player && v->torch) {
+        float x, y;
+        torch_tip(v->player, &x, &y);
+        reflect_one(cv, v, x, y, v->player->ry * TILE + 30, 0xffa850, 0.9f, 2.2f);
+    }
+    if (v->projlight) reflect_one(cv, v, v->projx, v->projy, v->projy + 18, 0xffa850, 0.7f, 2.0f);
+}
+
+static void add_ripple(Renderer *r, float x, float y, float str, float life)
+{
+    int best = 0;
+    for (int i = 0; i < MAX_RIPPLE; i++) {
+        if (r->rip[i].age >= r->rip[i].life) { best = i; break; }
+        if (r->rip[i].age / r->rip[i].life > r->rip[best].age / r->rip[best].life) best = i;
+    }
+    r->rip[best] = (Ripple){ x, y, 0, life, str };
+}
+
+static void draw_ripples(Renderer *r, Canvas *cv, const View *v, float dt)
+{
+    for (int k = 0; k < MAX_RIPPLE; k++) {
+        Ripple *rp = &r->rip[k];
+        if (rp->age >= rp->life) continue;
+        rp->age += dt;
+        float a = rp->age / rp->life;
+        if (a >= 1) continue;
+        float rad = 2 + a * 22 * (0.6f + rp->str * 0.5f), alpha = rp->str * (1 - a) * (1 - a);
+        CF c;
+        light_at_px(r, rp->x, rp->y, &c);
+        float lv = (c.r + c.g + c.b) / 3 + 0.06f;
+        int x0 = (int)(rp->x - rad - 2) - v->camx, x1 = (int)(rp->x + rad + 2) - v->camx;
+        int y0 = (int)(rp->y - rad * 0.55f - 2) - v->camy, y1 = (int)(rp->y + rad * 0.55f + 2) - v->camy;
+        for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++) {
+                if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h || !water_px(v, x, y)) continue;
+                float dx = x + v->camx + 0.5f - rp->x, dy = (y + v->camy + 0.5f - rp->y) / 0.55f;
+                float e = fabsf(sqrtf(dx * dx + dy * dy) - rad);
+                if (e > 1.3f) continue;
+                int tx = (x + v->camx) >> 5, ty = (y + v->camy) >> 5;
+                float vis = v->fog ? v->visf[ty][tx] : 1;
+                float s = (1.3f - e) / 1.3f * alpha * vis * 120 * lv;
+                uint32_t *px = &cv->px[(size_t)y * cv->w + x];
+                *px = add_sat(*px, (int)(s * (c.r + 0.2f)), (int)(s * (c.g + 0.3f)), (int)(s * (c.b + 0.35f)));
+            }
+    }
+    /* anything standing in water sends out slow rings */
+    for (int i = 0; i <= MAX_MOBS; i++) {
+        const Mob *m = i < MAX_MOBS ? &v->mobs[i] : v->player;
+        if (!m || !m->alive || m->kind == MK_SHADE) continue;
+        int tx = (int)lroundf(m->rx), ty = (int)lroundf(m->ry);
+        if (!tile_water(tile_at(v->lv, tx, ty))) { r->rip_acc[i] = 0; continue; }
+        if (v->fog && !(v->lv->f[ty][tx] & F_VIS)) continue;
+        r->rip_acc[i] += dt * (m->at < 1 ? 3.0f : 0.7f);
+        if (r->rip_acc[i] >= 1) {
+            r->rip_acc[i] = 0;
+            add_ripple(r, m->rx * TILE + 16, m->ry * TILE + 27, m->at < 1 ? 0.7f : 0.45f, 1.6f);
+        }
+    }
+}
+
 static void draw_ground(Renderer *r, Canvas *cv, const View *v)
 {
     const Level *lv = v->lv;
@@ -469,6 +712,7 @@ static void draw_ground(Renderer *r, Canvas *cv, const View *v)
             if (v->fog && !(lv->f[ty][tx] & F_SEEN)) continue;
             int sx = tx * TILE - v->camx, sy = ty * TILE - v->camy;
             if (t == T_CHASM) { draw_chasm(r, cv, v, tx, ty, sx, sy); continue; }
+            if (tile_water(t)) { draw_water(r, cv, v, tx, ty, sx, sy); continue; }
             uint32_t h = hash2(tx, ty, lv->seed);
             const Image *im = &r->t.floor[h % N_FLOOR];
             const Image *over = NULL;
@@ -717,8 +961,13 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
     light_at_px(r, m->rx * TILE + 16, m->ry * TILE + 20, &c);
     float floor_l = is_player ? 0.32f : 0.12f;
     float lr = c.r < floor_l ? floor_l : c.r, lg = c.g < floor_l ? floor_l : c.g, lb = c.b < floor_l * 1.3f ? floor_l * 1.3f : c.b;
+    /* standing in water: the legs (or most of it) are under the surface */
+    Tile wt = tile_at(lv, (int)lroundf(m->rx), (int)lroundf(m->ry));
+    int sub = wt == T_DEEP ? 14 : wt == T_SHALLOW ? 5 : 0;
+    int wl = (int)lroundf(m->ry * TILE) + 29 - sub - v->camy;     /* waterline, canvas y */
+    if (sub) py += 2 + sub / 4;                                     /* sinks a little */
     /* shadow */
-    for (int j = -3; j <= 3; j++)
+    for (int j = -3; j <= 3 && !sub; j++)
         for (int i = -10; i <= 10; i++) {
             float d = (i * i) / 100.0f + (j * j) / 9.0f;
             if (d > 1) continue;
@@ -730,7 +979,7 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
     int fl = m->flash > 0 ? (int)(m->flash * 230) : 0;
     for (int j = 0; j < TILE; j++) {
         int y = py + j;
-        if ((unsigned)y >= (unsigned)cv->h) continue;
+        if ((unsigned)y >= (unsigned)cv->h || (sub && y > wl)) continue;
         for (int i = 0; i < TILE; i++) {
             int x = px + i;
             if ((unsigned)x >= (unsigned)cv->w) continue;
@@ -742,6 +991,16 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
             if (m->asleep && !CA(g)) col = mix(col, 0x202838, 60);
             if (fl) col = mix(col, 0xffffff, fl);
             blend_px(&cv->px[(size_t)y * cv->w + x], col, (int)(255 * alpha));
+        }
+    }
+    if (sub) {
+        /* a bright ring where the body meets the water */
+        float lum = clampf((lr + lg + lb) / 3, 0.1f, 1.2f);
+        for (int i = -10; i <= 10; i++) {
+            int x = px + 16 + i, y = wl + (i * i) / 45;
+            if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
+            float e = 1 - fabsf((float)i) / 11;
+            blend_px(&cv->px[(size_t)y * cv->w + x], lightc(0xb8e0e8, lr, lg, lb), (int)(150 * e * alpha * lum));
         }
     }
     if (is_player && v->torch) {
@@ -996,6 +1255,7 @@ static void render_lower(Renderer *r, Game *g)
     compute_light(r, &v);
     memset(r->lower.px, 0, (size_t)r->lower.w * r->lower.h * 4);
     draw_ground(r, &r->lower, &v);
+    draw_reflections(r, &r->lower, &v);
     draw_items(r, &r->lower, &v);
     draw_rows(r, &r->lower, &v);
     draw_effects(r, &r->lower, &v, 0);
@@ -1188,6 +1448,22 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
                         -8 - rng_f(&r->rng) * 18, 1.0f + rng_f(&r->rng) * 1.2f,
                         k % 4 ? 0x3a3060 : 0x8a90c0, k % 4 ? 0.5f : 0.9f, -6);
                 break;
+            case FX_SPLASH: {
+                if (k == 0) {
+                    add_ripple(r, x, y + 6, 1.0f, 1.5f);
+                    add_ripple(r, x, y + 6, 0.6f, 2.2f);
+                }
+                CF c;
+                light_at_px(r, x, y, &c);
+                float l = clampf((c.r + c.g + c.b) / 3 + 0.15f, 0, 1.2f);
+                spawn_g(r, x + (rng_f(&r->rng) - 0.5f) * 10, y + 6, cosf(a) * sp * 0.35f, -40 - rng_f(&r->rng) * 50,
+                        0.35f + rng_f(&r->rng) * 0.3f, mix(0, 0xa8d8e0, (int)(l * 200)), 0.5f, 260);
+                break;
+            }
+            case FX_STEAM:
+                spawn_g(r, x + (rng_f(&r->rng) - 0.5f) * 14, y + (rng_f(&r->rng) - 0.5f) * 8, (rng_f(&r->rng) - 0.5f) * 10,
+                        -10 - rng_f(&r->rng) * 20, 0.8f + rng_f(&r->rng) * 1.0f, k % 3 ? 0x505860 : 0x8a9098, 0.6f, -8);
+                break;
             case FX_FALL:
                 spawn_g(r, x + (rng_f(&r->rng) - 0.5f) * 14, y, (rng_f(&r->rng) - 0.5f) * 10, 10 + rng_f(&r->rng) * 30,
                         0.6f + rng_f(&r->rng) * 0.8f, 0xffa040, 0.9f, 40);
@@ -1201,6 +1477,8 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
     compute_light(r, &v);
     memset(cv->px, 0, (size_t)cv->w * cv->h * 4);
     draw_ground(r, cv, &v);
+    draw_reflections(r, cv, &v);
+    draw_ripples(r, cv, &v, dt);
     draw_items(r, cv, &v);
     draw_flames_below(r, cv, &v, g);
     if (!ov->tlen) draw_path(cv, &v, ov->path, ov->plen, -1, -1, g->time);

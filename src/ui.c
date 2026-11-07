@@ -355,6 +355,7 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         title[0] = (char)(title[0] - 32);
         snprintf(desc, sizeof desc, "%s", tile_desc(t));
         if (t == T_CHASM) snprintf(hint, sizeof hint, "Click to jump down to depth %d", g->depth + 1);
+        else if (t == T_DEEP) snprintf(hint, sizeof hint, g->torch_lit ? "Click to swim here (your torch will go out)" : "Click to swim here");
         else if (tile_walkable(t)) snprintf(hint, sizeof hint, "Click to travel here");
         if (!vis) {
             size_t n = strlen(desc);
@@ -428,7 +429,8 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Use", "a  light a torch, drink a potion;  d  drop" },
         { "Torch", "T  light or snuff;  walk onto a burning torch to take it up" },
         { "Shades", "living darkness: firelight keeps them back and burns them" },
-        { "Chasms", "step in to jump down a level (it hurts)" },
+        { "Chasms", "step in to jump down a level (it hurts; water below breaks the fall)" },
+        { "Water", "shallows splash; deep water puts out a torch and goblins won't swim" },
         { "Zoom", "+ and -  or the mouse wheel" },
         { "Text size", "kitty's own font zoom (ctrl+shift+= / -)" },
         { "Quit", "Esc twice" },

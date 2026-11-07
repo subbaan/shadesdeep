@@ -5,7 +5,7 @@ art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.3.0 (things in the dark) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.4.0 (water) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 ## Build and run
 
@@ -45,6 +45,11 @@ FreeType development packages (`sudo pacman -S base-devel libpng zlib freetype2`
   torch in your hand; the cold glow of crystals and moss doesn't count), and
   light burns them. Darts pass straight through; a thrown torch sears them.
   So light keeps shades away while it shows you to everything else.
+- **Water:** wading through the shallows splashes, and the noise carries.
+  Deep water must be swum: it puts out (and ruins) a lit torch, so you are
+  asked twice before swimming with one, and anything dropped in it sinks.
+  Goblins won't follow you in. A torch thrown into water hisses out, and a
+  chasm over water makes for a softer landing.
 - **Chasms:** you can see the real level below through them. Stepping in asks
   whether to jump: it is a quick way down, but the fall hurts. Anything you
   throw into a chasm lands on the level below, and a burning torch keeps
@@ -64,7 +69,8 @@ lights a torch, `LUME_DUMP_MENU=inv|throw|use|item` opens a menu,
 `LUME_DUMP_AIM=dx,dy` aims a torch and `LUME_DUMP_THROW=dx,dy,frac` freezes a
 thrown torch part-way through its flight. `LUME_DUMP_REST=N` waits N turns
 first (e.g. to let a thrown torch burn out). `LUME_DUMP_SHADE="dx,dy;dx,dy"`
-puts shades near the player.
+puts shades near the player. `LUME_DUMP_WATER=0|1|2` stands by a pool, in its
+shallows, or swimming.
 
 The tiles and sprites are procedural placeholders (`src/tiles.c`) until the
 real art arrives. Fonts: Cinzel and Alegreya (SIL Open Font License, see

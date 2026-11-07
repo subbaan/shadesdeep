@@ -380,6 +380,8 @@ static bool mob_free(Game *g, int x, int y)
     return game_mob_at(g, x, y) == NULL;
 }
 
+static void mob_go(Game *g, Mob *m, int nx, int ny);
+
 static void mob_step_toward(Game *g, Mob *m, int tx, int ty)
 {
     Level *lv = game_level(g);
@@ -389,6 +391,7 @@ static void mob_step_toward(Game *g, Mob *m, int tx, int ty)
         int nx = m->x + DX8[d], ny = m->y + DY8[d];
         if (!mob_free(g, nx, ny) || !diag_ok(lv, m->x, m->y, DX8[d], DY8[d])) continue;
         if (shade && game_firelight(g, nx, ny) > SHADE_FEAR) continue;
+        if (m->kind == MK_GOBLIN && lv->t[ny][nx] == T_DEEP) continue;     /* goblins won't swim */
         int dd = cheb(nx, ny, tx, ty) * 10 + abs(nx - tx) + abs(ny - ty);
         if (dd < bd) { bd = dd; best = d; }
     }
@@ -399,10 +402,18 @@ static void mob_step_toward(Game *g, Mob *m, int tx, int ty)
         lv->light_dirty = true;
         return;
     }
-    start_tween(m, nx, ny);
+    mob_go(g, m, nx, ny);
 }
 
 static void push_fx(Game *g, FxKind k, int x, int y);
+static void make_noise(Game *g, int x, int y, int radius);
+
+/* a monster steps to (nx, ny), splashing if it's water */
+static void mob_go(Game *g, Mob *m, int nx, int ny)
+{
+    start_tween(m, nx, ny);
+    if (tile_water(tile_at(game_level(g), nx, ny))) push_fx(g, FX_SPLASH, nx, ny);
+}
 
 /* a shade caught in firelight burns and flees for the darkest ground near it */
 static bool shade_burns(Game *g, Mob *m)
@@ -432,7 +443,7 @@ static bool shade_burns(Game *g, Mob *m)
         float f = game_firelight(g, nx, ny);
         if (f < bf) { bf = f; best = d; }
     }
-    if (best >= 0) start_tween(m, m->x + DX8[best], m->y + DY8[best]);
+    if (best >= 0) mob_go(g, m, m->x + DX8[best], m->y + DY8[best]);
     return true;
 }
 
@@ -478,8 +489,8 @@ static void monsters_act(Game *g)
             int d = rng_range(&g->rng, 0, 7);
             int nx = m->x + DX8[d], ny = m->y + DY8[d];
             if (mob_free(g, nx, ny) && lv->t[ny][nx] != T_DOOR && diag_ok(lv, m->x, m->y, DX8[d], DY8[d])
-                && !(shade && game_firelight(g, nx, ny) > SHADE_FEAR))
-                start_tween(m, nx, ny);
+                && !(shade && game_firelight(g, nx, ny) > SHADE_FEAR) && !(m->kind == MK_GOBLIN && lv->t[ny][nx] == T_DEEP))
+                mob_go(g, m, nx, ny);
         }
     }
 }
@@ -599,7 +610,32 @@ bool game_move(Game *g, int dx, int dy)
         g->jy = ny;
         return false;
     }
+    Tile here = (Tile)lv->t[p->y][p->x];
+    if (t == T_DEEP && here != T_DEEP && g->torch_lit && (g->wade_x != nx || g->wade_y != ny)) {
+        g->wade_x = nx;
+        g->wade_y = ny;
+        game_stop(g);
+        game_msg(g, C_WARN, "that water is deep: swimming will put out your torch. Move again to swim.");
+        return false;
+    }
+    g->wade_x = g->wade_y = -1;
     start_tween(p, nx, ny);
+    if (tile_water(t)) {
+        push_fx(g, FX_SPLASH, nx, ny);
+        if (t == T_DEEP) {
+            if (g->torch_lit) {
+                g->torch_lit = false;
+                g->torch_fuel = 0;
+                push_fx(g, FX_STEAM, nx, ny);
+                game_msg(g, C_WARN, "your torch hisses out as you swim. It's soaked through.");
+            } else if (here != T_DEEP) {
+                game_msg(g, C_DIM, "you swim out into the deep water.");
+            }
+            make_noise(g, nx, ny, 3);
+        } else if (rng_chance(&g->rng, 50)) {
+            make_noise(g, nx, ny, 4);
+        }
+    }
     pickup(g);
     if (t == T_STAIRS_DOWN && g->autom != AUTO_STAIRS)
         game_msg(g, C_INFO, "stairs lead down into the dark (press > or click them again to descend).");
@@ -649,6 +685,19 @@ void game_jump_answer(Game *g, bool yes)
     game_msg(g, C_WARN, "you leap into the chasm and plunge into the darkness below!");
     change_level(g, g->depth + 1, g->jx, g->jy);
     Mob *p = &g->player;
+    bool wet = tile_water(tile_at(game_level(g), p->x, p->y));
+    if (wet) {
+        push_fx(g, FX_SPLASH, p->x, p->y);
+        if (game_level(g)->t[p->y][p->x] == T_DEEP) dmg = dmg / 3 + 1;
+        else dmg = dmg * 2 / 3 + 1;
+        if (g->torch_lit) {
+            g->torch_lit = false;
+            g->torch_fuel = 0;
+            game_msg(g, C_WARN, "you plunge into the water below and your torch is drowned.");
+        } else {
+            game_msg(g, C_INFO, "you plunge into the water below, which breaks your fall.");
+        }
+    }
     p->hp -= dmg;
     p->flash = 1.0f;
     g->shake = 0.6f;
@@ -659,7 +708,7 @@ void game_jump_answer(Game *g, bool yes)
         game_msg(g, C_BAD, "you hit the ground at depth %d and do not get up.", g->depth);
         g->state = GS_DEAD;
     } else {
-        game_msg(g, C_BAD, "you land hard on depth %d (%d damage).", g->depth, dmg);
+        game_msg(g, C_BAD, wet ? "you surface, gasping, on depth %d (%d damage)." : "you land hard on depth %d (%d damage).", g->depth, dmg);
     }
 }
 
@@ -707,7 +756,7 @@ static int find_path(Game *g, int gx, int gy, int *out, int max)
             int X = x + DX8[d], Y = y + DY8[d];
             if (!in_map(X, Y) || par[Y][X] != -2) continue;
             if (!path_ok(g, X, Y, gx, gy) || !diag_ok(lv, x, y, DX8[d], DY8[d])) continue;
-            if (lv->t[Y][X] == T_CHASM && !(X == gx && Y == gy)) continue;
+            if ((lv->t[Y][X] == T_CHASM || lv->t[Y][X] == T_DEEP) && !(X == gx && Y == gy)) continue;
             par[Y][X] = (int16_t)d;
             q[t++] = Y * MAP_W + X;
         }
@@ -885,6 +934,30 @@ bool game_debug_to_chasm(Game *g)
     return false;
 }
 
+/* developer: stand at the edge of a pool (in it, with `wade`) */
+bool game_debug_to_water(Game *g, int wade)
+{
+    Level *lv = game_level(g);
+    for (int y = 1; y < MAP_H - 3; y++)
+        for (int x = 1; x < MAP_W - 1; x++) {
+            if (lv->t[y][x] != T_DEEP) continue;
+            int py = y;
+            while (py < MAP_H - 1 && tile_water((Tile)lv->t[py][x])) py++;
+            if (!tile_walkable((Tile)lv->t[py][x])) continue;
+            if (wade == 1) py--;            /* in the shallows */
+            else if (wade == 2) py = y;     /* swimming */
+            Mob *ms = g->mobs[g->depth];
+            for (int i = 0; i < MAX_MOBS; i++)
+                if (ms[i].alive && ms[i].x == x && ms[i].y == py) ms[i].alive = false;
+            place_player(g, x, py);
+            for (int j = 0; j < MAP_H; j++)
+                for (int i = 0; i < MAP_W; i++) lv->f[j][i] |= F_SEEN;
+            compute_view(g);
+            return true;
+        }
+    return false;
+}
+
 bool game_busy(const Game *g) { return g->player.at < 0.7f || g->proj.active; }
 
 static void resolve_throw(Game *g);
@@ -983,6 +1056,7 @@ static void take_one(Game *g, int slot)
 
 static bool place_item(Game *g, int depth, ItemKind k, int count, int x, int y, bool dropped)
 {
+    if (g->lv[depth] && tile_at(g->lv[depth], x, y) == T_DEEP) return true;     /* sinks out of reach */
     FloorItem *it = g->items[depth];
     for (int i = 0; i < MAX_ITEMS; i++)
         if (it[i].alive && it[i].x == x && it[i].y == y && it[i].kind == k) { it[i].count += count; return true; }
@@ -1030,18 +1104,23 @@ static void pickup(Game *g)
     it->alive = false;
 }
 
-/* a burning torch now lies on (x, y) of `depth` */
-static void floor_torch(Game *g, int depth, int x, int y)
+/* a burning torch now lies on (x, y) of `depth`; false if water put it out */
+static bool floor_torch(Game *g, int depth, int x, int y)
 {
     Level *lv = g->lv[depth];
-    if (!lv) return;
+    if (!lv) return false;
+    if (tile_water(tile_at(lv, x, y))) {
+        if (depth == g->depth) push_fx(g, FX_STEAM, x, y);
+        return false;
+    }
     for (int i = 0; i < lv->nlights; i++) {
         Light *l = &lv->lights[i];
-        if (l->kind == L_FLOORTORCH && l->x == x && l->y == y) { l->fuel = FLOOR_TORCH_FUEL; return; }
+        if (l->kind == L_FLOORTORCH && l->x == x && l->y == y) { l->fuel = FLOOR_TORCH_FUEL; return true; }
     }
     int i = level_add_light(lv, L_FLOORTORCH, x, y, x, y, true, lv->room[y][x]);
     if (i >= 0) lv->lights[i].fuel = FLOOR_TORCH_FUEL;
     level_relight(lv);
+    return true;
 }
 
 /* nearest open floor to (x, y) on a level */
@@ -1167,6 +1246,10 @@ static void resolve_throw(Game *g)
                 place_item(g, g->depth + 1, IT_DART, 1, bx, by, false);
             }
             game_msg(g, C_DIM, "the dart clatters away into the chasm.");
+        } else if (tile_water((Tile)lv->t[y][x])) {
+            push_fx(g, FX_SPLASH, x, y);
+            if (lv->t[y][x] == T_DEEP) game_msg(g, C_DIM, "the dart sinks into the deep water.");
+            else place_item(g, g->depth, IT_DART, 1, x, y, false);
         } else if (rng_chance(&g->rng, 85)) {
             place_item(g, g->depth, IT_DART, 1, x, y, false);
         } else {
@@ -1196,15 +1279,19 @@ static void resolve_throw(Game *g)
         }
         if (into_chasm) {
             int bx = x, by = y;
+            bool burning = false;
             if (g->lv[g->depth + 1]) {
                 nearest_floor(g->lv[g->depth + 1], &bx, &by);
-                floor_torch(g, g->depth + 1, bx, by);
+                burning = floor_torch(g, g->depth + 1, bx, by);
                 g->lower_dirty = true;
             }
             push_fx(g, FX_FALL, x, y);
-            game_msg(g, C_INFO, "the torch tumbles into the chasm and lands far below, still burning.");
+            if (burning) game_msg(g, C_INFO, "the torch tumbles into the chasm and lands far below, still burning.");
+            else game_msg(g, C_DIM, "the torch tumbles into the chasm; far below, a faint hiss, and it is gone.");
+        } else if (!floor_torch(g, g->depth, x, y)) {
+            push_fx(g, FX_SPLASH, x, y);
+            game_msg(g, C_DIM, "the torch hisses out in the water.");
         } else {
-            floor_torch(g, g->depth, x, y);
             push_fx(g, FX_SPARKS, x, y);
             if (!m) game_msg(g, C_TEXT, "the torch lands and burns on the floor.");
         }
@@ -1293,7 +1380,10 @@ bool game_drop(Game *g, int slot)
     for (int i = slot; i < g->ninv - 1; i++) g->inv[i] = g->inv[i + 1];
     g->ninv--;
     char nm[64];
-    game_msg(g, C_TEXT, "you put down %s.", game_item_name(s.kind, s.count, nm, sizeof nm));
+    if (game_level(g)->t[p->y][p->x] == T_DEEP)
+        game_msg(g, C_DIM, "you let go of %s and it sinks out of sight.", game_item_name(s.kind, s.count, nm, sizeof nm));
+    else
+        game_msg(g, C_TEXT, "you put down %s.", game_item_name(s.kind, s.count, nm, sizeof nm));
     end_turn(g);
     return true;
 }
