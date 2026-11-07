@@ -1,0 +1,5 @@
+build/
+/lume
+*.o
+# design references stay local
+concepts/

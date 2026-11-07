@@ -1,0 +1,483 @@
+#include "ui.h"
+
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "font.h"
+#include "version.h"
+
+#define MAX_BTN 24
+#define MAX_PANEL 16
+
+typedef struct { int x, y, w, h; UiAction a; } Btn;
+typedef struct { int x, y, w, h; } Box;
+
+struct UI {
+    Font *head, *body, *small, *big;
+    int cell_h;
+    float scale;
+    int px;                 /* body text size */
+    Btn btn[MAX_BTN];
+    int nbtn;
+    Box panel[MAX_PANEL];
+    int npanel;
+    int banner_depth;
+    float banner_t;
+    float last_time;
+};
+
+static const uint32_t GOLD = 0xc9a45c, GOLD_DIM = 0x6e5a34, INK = 0x0b0907;
+
+UI *ui_new(const char *dir, char *err, size_t errn)
+{
+    UI *ui = calloc(1, sizeof *ui);
+    char p[1024];
+    snprintf(p, sizeof p, "%s/Cinzel.ttf", dir);
+    ui->head = font_open(p, 700);
+    ui->big = font_open(p, 700);
+    snprintf(p, sizeof p, "%s/Alegreya.ttf", dir);
+    ui->body = font_open(p, 500);
+    ui->small = font_open(p, 500);
+    if (!ui->head || !ui->body || !ui->small || !ui->big) {
+        snprintf(err, errn, "cannot load fonts from %s", dir);
+        ui_free(ui);
+        return NULL;
+    }
+    ui->banner_depth = 0;
+    ui_set_scale(ui, 20, 1.0f);
+    return ui;
+}
+
+void ui_free(UI *ui)
+{
+    if (!ui) return;
+    font_close(ui->head);
+    font_close(ui->body);
+    font_close(ui->small);
+    font_close(ui->big);
+    free(ui);
+}
+
+void ui_set_scale(UI *ui, int cell_h, float scale)
+{
+    if (cell_h < 10) cell_h = 10;
+    ui->cell_h = cell_h;
+    ui->scale = scale;
+    int px = (int)lroundf(cell_h * 1.05f * scale);
+    if (px < 13) px = 13;
+    ui->px = px;
+    font_size(ui->body, px);
+    font_size(ui->small, px * 82 / 100);
+    font_size(ui->head, px * 92 / 100);
+    font_size(ui->big, px * 17 / 10);
+}
+
+/* ------------------------------------------------------------- widgets */
+
+static void add_btn(UI *ui, int x, int y, int w, int h, UiAction a)
+{
+    if (ui->nbtn < MAX_BTN) ui->btn[ui->nbtn++] = (Btn){ x, y, w, h, a };
+}
+
+static void add_panel(UI *ui, int x, int y, int w, int h)
+{
+    if (ui->npanel < MAX_PANEL) ui->panel[ui->npanel++] = (Box){ x, y, w, h };
+}
+
+UiAction ui_hit(const UI *ui, int mx, int my)
+{
+    for (int i = ui->nbtn - 1; i >= 0; i--) {
+        const Btn *b = &ui->btn[i];
+        if (mx >= b->x && my >= b->y && mx < b->x + b->w && my < b->y + b->h) return b->a;
+    }
+    return UA_NONE;
+}
+
+bool ui_over_panel(const UI *ui, int mx, int my)
+{
+    for (int i = 0; i < ui->npanel; i++) {
+        const Box *b = &ui->panel[i];
+        if (mx >= b->x && my >= b->y && mx < b->x + b->w && my < b->y + b->h) return true;
+    }
+    return ui_hit(ui, mx, my) != UA_NONE;
+}
+
+static void panel(UI *ui, Canvas *cv, int x, int y, int w, int h, int alpha, bool hit)
+{
+    cv_blend_rect(cv, x, y, w, h, INK, alpha);
+    /* soft vertical sheen */
+    for (int j = 0; j < h / 3; j++) cv_blend_rect(cv, x + 1, y + 1 + j, w - 2, 1, 0x3a2e1c, 40 * (h / 3 - j) / (h / 3 + 1));
+    cv_frame(cv, x, y, w, h, GOLD_DIM, 230);
+    cv_frame(cv, x + 2, y + 2, w - 4, h - 4, 0x2a2214, 200);
+    /* corner studs */
+    int s = ui->px / 5 + 2;
+    cv_fill(cv, x - 1, y - 1, s, s, GOLD);
+    cv_fill(cv, x + w - s + 1, y - 1, s, s, GOLD);
+    cv_fill(cv, x - 1, y + h - s + 1, s, s, GOLD);
+    cv_fill(cv, x + w - s + 1, y + h - s + 1, s, s, GOLD);
+    if (hit) add_panel(ui, x, y, w, h);
+}
+
+static void diamond(Canvas *cv, int cx, int cy, int r, uint32_t c)
+{
+    for (int j = -r; j <= r; j++)
+        for (int i = -r; i <= r; i++)
+            if (abs(i) + abs(j) <= r) cv_blend_rect(cv, cx + i, cy + j, 1, 1, c, abs(i) + abs(j) == r ? 140 : 255);
+}
+
+/* a button: key hint in gold, label in parchment */
+static int button(UI *ui, Canvas *cv, int x, int y, int h, const char *key, const char *label, UiAction a,
+                  int mx, int my, bool enabled)
+{
+    Font *f = ui->head, *fk = ui->small;
+    int pad = ui->px / 2;
+    int kw = key ? font_width(fk, key) + pad : 0;
+    int w = kw + font_width(f, label) + pad * 2;
+    bool hov = mx >= x && my >= y && mx < x + w && my < y + h;
+    cv_blend_rect(cv, x, y, w, h, hov ? 0x3a2c18 : 0x15110c, hov ? 235 : 210);
+    cv_frame(cv, x, y, w, h, hov ? GOLD : GOLD_DIM, 255);
+    int base = y + (h + font_ascent(f) * 7 / 10) / 2;
+    if (key) font_draw(fk, cv, x + pad, base, key, enabled ? GOLD : GOLD_DIM, 255);
+    font_draw(f, cv, x + pad + kw, base, label, enabled ? (hov ? 0xfff2d0 : 0xe2d4b4) : 0x6a6050, 255);
+    add_btn(ui, x, y, w, h, a);
+    return w;
+}
+
+static int button_width(UI *ui, const char *key, const char *label)
+{
+    int pad = ui->px / 2;
+    return (key ? font_width(ui->small, key) + pad : 0) + font_width(ui->head, label) + pad * 2;
+}
+
+/* ---------------------------------------------------------------- parts */
+
+static void hp_bar(Canvas *cv, int x, int y, int w, int h, int hp, int max)
+{
+    cv_blend_rect(cv, x, y, w, h, 0x000000, 200);
+    float k = max > 0 ? clampf((float)hp / max, 0, 1) : 0;
+    uint32_t c = k > 0.6f ? 0x6aa84a : k > 0.3f ? 0xd0a040 : 0xc84434;
+    int fw = (int)(w * k);
+    cv_fill(cv, x, y, fw, h, c);
+    cv_blend_rect(cv, x, y, fw, h / 3 + 1, 0xffffff, 50);
+    cv_frame(cv, x - 1, y - 1, w + 2, h + 2, GOLD_DIM, 255);
+}
+
+static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
+{
+    int h = font_line(ui->head) * 2;
+    int y = cv->h - h;
+    *top = y;
+    cv_blend_rect(cv, 0, y, cv->w, h, INK, 225);
+    cv_fill(cv, 0, y, cv->w, 1, GOLD_DIM);
+    cv_fill(cv, 0, y + 2, cv->w, 1, 0x2a2214);
+    add_panel(ui, 0, y, cv->w, h);
+    Font *hf = ui->head;
+    int base = y + (h + font_ascent(hf) * 7 / 10) / 2;
+    int pad = ui->px;
+    Mob *p = &g->player;
+
+    /* left: health */
+    int x = pad;
+    uint32_t hc = p->hp * 3 <= p->maxhp ? 0xff6a50 : 0xe2d4b4;
+    char buf[64];
+    snprintf(buf, sizeof buf, "HP %d/%d", p->hp, p->maxhp);
+    x = font_draw(hf, cv, x, base, buf, hc, 255) + pad / 2;
+    int bw = ui->px * 5;
+    hp_bar(cv, x, base - font_ascent(hf) * 6 / 10, bw, ui->px / 3 + 2, p->hp, p->maxhp);
+    x += bw + pad;
+
+    diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
+    x += pad;
+    snprintf(buf, sizeof buf, "DEPTH %d", g->depth);
+    x = font_draw(hf, cv, x, base, buf, 0xe2d4b4, 255) + pad;
+    diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
+    x += pad;
+    snprintf(buf, sizeof buf, "TURN %d", g->turn);
+    x = font_draw(hf, cv, x, base, buf, 0xb8aa8c, 255) + pad;
+    int left_end = x;
+
+    /* right: actions */
+    int bh = h * 64 / 100, by = y + (h - bh) / 2;
+    struct { const char *k, *l; UiAction a; } B[] = {
+        { "x", "Explore", UA_EXPLORE }, { "Z", "Rest", UA_REST }, { ">", "Descend", UA_STAIRS }, { "?", "Help", UA_HELP },
+    };
+    int nb = 4, gap = ui->px / 2, tw = 0;
+    for (int i = 0; i < nb; i++) tw += button_width(ui, B[i].k, B[i].l) + gap;
+    bool compact = cv->w - tw - pad < left_end;
+    if (compact) {     /* narrow window: drop the key hints */
+        tw = 0;
+        for (int i = 0; i < nb; i++) tw += button_width(ui, NULL, B[i].l) + gap;
+    }
+    int bx = cv->w - tw - pad / 2;
+    for (int i = 0; i < nb; i++) {
+        bool en = g->state == GS_PLAY;
+        bx += button(ui, cv, bx, by, bh, compact ? NULL : B[i].k, B[i].l, B[i].a, f->mx, f->my, en || B[i].a == UA_HELP) + gap;
+    }
+}
+
+static void messages(UI *ui, Canvas *cv, Game *g, int bottom)
+{
+    Font *bf = ui->body;
+    int line = font_line(bf);
+    int n = g->nmsgs < 5 ? g->nmsgs : 5;
+    int x = ui->px, y = bottom - line / 3;
+    for (int k = 0; k < n; k++) {
+        const Msg *m = &g->msgs[(g->nmsgs - 1 - k) % MAX_MSGS];
+        float fade = k == 0 ? 1.0f : 0.85f - k * 0.13f;
+        if (m->age > 12) fade *= clampf(1.0f - (m->age - 12) / 8.0f, 0.35f, 1);
+        float in = clampf(m->age / 0.25f, 0, 1);
+        int a = (int)(255 * fade * in);
+        char buf[200];
+        if (m->count > 1) snprintf(buf, sizeof buf, "%s (x%d)", m->text, m->count);
+        else snprintf(buf, sizeof buf, "%s", m->text);
+        font_draw_shadow(bf, cv, x, y - k * line, buf, m->color, a);
+    }
+}
+
+static void sidebar(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
+{
+    Level *lv = game_level(g);
+    Mob *ms = game_mobs(g, g->depth);
+    int idx[MAX_MOBS], n = 0;
+    for (int i = 0; i < MAX_MOBS; i++)
+        if (ms[i].alive && (lv->f[ms[i].y][ms[i].x] & F_VIS)) idx[n++] = i;
+    if (!n) return;
+    Font *bf = ui->body, *sf = ui->small;
+    int line = font_line(bf), pad = ui->px / 2;
+    int w = ui->px * 11, h = pad * 2 + n * (line + ui->px / 2);
+    int x = pad, y = pad;
+    panel(ui, cv, x, y, w, h, 180, true);
+    int yy = y + pad;
+    for (int k = 0; k < n; k++) {
+        Mob *m = &ms[idx[k]];
+        bool hov = f->hover_x == m->x && f->hover_y == m->y;
+        if (hov) cv_blend_rect(cv, x + 3, yy - 2, w - 6, line + ui->px / 2, 0x4a3820, 160);
+        char name[48];
+        snprintf(name, sizeof name, "%s", MOB_INFO[m->kind].name);
+        name[0] = (char)(name[0] - 32);
+        font_draw(bf, cv, x + pad, yy + font_ascent(bf), name, 0xe2d4b4, 255);
+        if (m->asleep) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "asleep", C_INFO, 255);
+        else if (m->hunting) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "hunting", C_WARN, 255);
+        hp_bar(cv, x + pad, yy + line, w - pad * 2, ui->px / 5 + 1, m->hp, m->maxhp);
+        yy += line + ui->px / 2;
+    }
+}
+
+static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
+{
+    if (f->hover_x < 0 || f->mx < 0) return;
+    Level *lv = game_level(g);
+    int x = f->hover_x, y = f->hover_y;
+    if (!(lv->f[y][x] & F_SEEN)) return;
+    char title[64], desc[256], hint[96] = "";
+    Mob *m = game_mob_at(g, x, y);
+    Light *l = level_light_on(lv, x, y);
+    Tile t = (Tile)lv->t[y][x];
+    bool vis = lv->f[y][x] & F_VIS;
+    if (g->player.x == x && g->player.y == y) {
+        snprintf(title, sizeof title, "You");
+        snprintf(desc, sizeof desc, "%s", MOB_INFO[MK_PLAYER].desc);
+        snprintf(hint, sizeof hint, t == T_STAIRS_DOWN ? "Click to descend" : t == T_STAIRS_UP ? "Click to climb" : "Click to rest a turn");
+    } else if (m && vis) {
+        snprintf(title, sizeof title, "%s", MOB_INFO[m->kind].name);
+        title[0] = (char)(title[0] - 32);
+        snprintf(desc, sizeof desc, "%s%s", MOB_INFO[m->kind].desc,
+                 m->asleep ? " It is asleep." : m->hunting ? " It is hunting you." : " It hasn't noticed you.");
+        snprintf(hint, sizeof hint, "Click to attack");
+    } else if (l && l->kind == L_SCONCE) {
+        snprintf(title, sizeof title, l->lit ? "Burning sconce" : "Cold sconce");
+        snprintf(desc, sizeof desc, l->lit ? "A torch in an iron bracket lights the room around it. You can be seen in its light."
+                                           : "An unlit torch in an iron bracket. Light it to see the room, but anything here will see you too.");
+        if (!l->lit) snprintf(hint, sizeof hint, "Click to walk over and light it");
+    } else if (l && l->kind == L_MOSS) {
+        snprintf(title, sizeof title, "Glowmoss");
+        snprintf(desc, sizeof desc, "A carpet of moss that gives off a faint green-blue light.");
+        if (tile_walkable(t)) snprintf(hint, sizeof hint, "Click to travel here");
+    } else if (l && l->kind == L_CRYSTAL) {
+        snprintf(title, sizeof title, "Glowcrystal");
+        snprintf(desc, sizeof desc, "Pale blue crystals growing from the rock, shedding a cold, steady light.");
+    } else {
+        if (t == T_ROCK) return;
+        snprintf(title, sizeof title, "%s", tile_name(t));
+        title[0] = (char)(title[0] - 32);
+        snprintf(desc, sizeof desc, "%s", tile_desc(t));
+        if (t == T_CHASM) snprintf(hint, sizeof hint, "Click to jump down to depth %d", g->depth + 1);
+        else if (tile_walkable(t)) snprintf(hint, sizeof hint, "Click to travel here");
+        if (!vis) {
+            size_t n = strlen(desc);
+            snprintf(desc + n, sizeof desc - n, "%sYou remember this place; it is out of sight.", n ? " " : "");
+        }
+    }
+    Font *hf = ui->head, *bf = ui->small;
+    int pad = ui->px * 6 / 10;
+    int w = ui->px * 16;
+    int dh = font_wrap(bf, NULL, 0, 0, w - pad * 2, desc, 0, 0);
+    int h = pad * 2 + font_line(hf) + dh + (hint[0] ? font_line(bf) : 0) + pad / 2;
+    int bx = f->mx + ui->px, by = f->my + ui->px;
+    if (bx + w > cv->w - 4) bx = f->mx - w - ui->px / 2;
+    if (by + h > cv->h - font_line(ui->head) * 2 - 4) by = f->my - h - ui->px / 2;
+    if (bx < 4) bx = 4;
+    if (by < 4) by = 4;
+    panel(ui, cv, bx, by, w, h, 225, false);
+    int yy = by + pad;
+    font_draw(hf, cv, bx + pad, yy + font_ascent(hf), title, GOLD, 255);
+    yy += font_line(hf);
+    yy += font_wrap(bf, cv, bx + pad, yy, w - pad * 2, desc, 0xd8cbb0, 255);
+    if (hint[0]) font_draw(bf, cv, bx + pad, yy + font_ascent(bf) + pad / 3, hint, 0x9ec8e8, 255);
+}
+
+static void floaters(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
+{
+    for (int i = 0; i < MAX_FLOAT; i++) {
+        Floater *fl = &g->fl[i];
+        if (fl->t <= 0) continue;
+        float age = 1 - fl->t;
+        float rise = age * TILE * 0.9f;
+        int sx = (int)((fl->x - f->camx) * f->zoom), sy = (int)((fl->y - rise - f->camy) * f->zoom);
+        int a = (int)(255 * clampf(fl->t * 2.5f, 0, 1));
+        int w = font_width(ui->head, fl->text);
+        font_draw_shadow(ui->head, cv, sx - w / 2, sy, fl->text, fl->color, a);
+    }
+}
+
+static int dialog(UI *ui, Canvas *cv, const char *title, const char *text, int *bx, int *by, int *bh)
+{
+    Font *bf = ui->body;
+    int pad = ui->px;
+    int w = ui->px * 22;
+    if (w > cv->w - 20) w = cv->w - 20;
+    int th = font_wrap(bf, NULL, 0, 0, w - pad * 2, text, 0, 0);
+    int h = pad * 3 + font_line(ui->big) + th + font_line(ui->head) * 2;
+    int x = (cv->w - w) / 2, y = (cv->h - h) / 2 - ui->px * 2;
+    cv_blend_rect(cv, 0, 0, cv->w, cv->h, 0, 90);
+    panel(ui, cv, x, y, w, h, 240, true);
+    int tw = font_width(ui->big, title);
+    font_draw(ui->big, cv, x + (w - tw) / 2, y + pad + font_ascent(ui->big), title, GOLD, 255);
+    int yy = y + pad + font_line(ui->big) + pad / 2;
+    yy += font_wrap(bf, cv, x + pad, yy, w - pad * 2, text, 0xd8cbb0, 255);
+    *bh = font_line(ui->head) * 3 / 2;
+    *by = y + h - pad - *bh;
+    *bx = x;
+    return w;
+}
+
+static void help(UI *ui, Canvas *cv, const UiFrame *f)
+{
+    static const char *L[][2] = {
+        { "Move / attack", "arrows, numpad, or h j k l y u b n" },
+        { "Travel", "click a place; click a monster to attack it" },
+        { "Explore", "x  (stops when something comes into view)" },
+        { "Rest", "z or . a turn,  Z until healed" },
+        { "Stairs", ">  travel to and descend,  <  climb" },
+        { "Light a sconce", "walk into it, or click it" },
+        { "Chasms", "step in to jump down a level (it hurts)" },
+        { "Zoom", "+ and -  or the mouse wheel" },
+        { "Text size", "kitty's own font zoom (ctrl+shift+= / -)" },
+        { "Quit", "Esc twice" },
+    };
+    int n = sizeof L / sizeof *L;
+    Font *hf = ui->head, *bf = ui->body;
+    int pad = ui->px, line = font_line(bf) * 12 / 10;
+    int kw = 0, vw = 0;
+    for (int i = 0; i < n; i++) {
+        int a = font_width(hf, L[i][0]), b = font_width(bf, L[i][1]);
+        if (a > kw) kw = a;
+        if (b > vw) vw = b;
+    }
+    int w = kw + vw + pad * 4, h = pad * 3 + font_line(ui->big) + n * line + font_line(hf) * 2;
+    if (w > cv->w - 10) w = cv->w - 10;
+    int x = (cv->w - w) / 2, y = (cv->h - h) / 2;
+    cv_blend_rect(cv, 0, 0, cv->w, cv->h, 0, 110);
+    panel(ui, cv, x, y, w, h, 240, true);
+    const char *title = "How to play";
+    font_draw(ui->big, cv, x + (w - font_width(ui->big, title)) / 2, y + pad + font_ascent(ui->big), title, GOLD, 255);
+    int yy = y + pad * 2 + font_line(ui->big);
+    for (int i = 0; i < n; i++) {
+        font_draw(hf, cv, x + pad, yy + font_ascent(bf), L[i][0], GOLD, 255);
+        font_draw(bf, cv, x + pad * 2 + kw, yy + font_ascent(bf), L[i][1], 0xd8cbb0, 255);
+        yy += line;
+    }
+    int bh = font_line(hf) * 3 / 2;
+    int bw = button_width(ui, "Esc", "Close");
+    button(ui, cv, x + (w - bw) / 2, y + h - pad - bh, bh, "Esc", "Close", UA_CLOSE, f->mx, f->my, true);
+}
+
+/* ---------------------------------------------------------------- draw */
+
+void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
+{
+    ui->nbtn = 0;
+    ui->npanel = 0;
+    float dt = g->time - ui->last_time;
+    ui->last_time = g->time;
+    if (ui->banner_depth != g->depth) {
+        ui->banner_depth = g->depth;
+        ui->banner_t = 3.0f;
+    }
+    if (ui->banner_t > 0) ui->banner_t -= dt;
+
+    floaters(ui, cv, g, f);
+    int bar_top;
+    status_bar(ui, cv, g, f, &bar_top);
+    messages(ui, cv, g, bar_top - ui->px / 3);
+    sidebar(ui, cv, g, f);
+
+    /* depth banner */
+    if (ui->banner_t > 0) {
+        float a = clampf(ui->banner_t > 2.4f ? (3.0f - ui->banner_t) / 0.6f : ui->banner_t / 1.2f, 0, 1);
+        char buf[48];
+        snprintf(buf, sizeof buf, "Depth %d", g->depth);
+        int w = font_width(ui->big, buf);
+        int y = cv->h / 5;
+        font_draw_shadow(ui->big, cv, (cv->w - w) / 2, y, buf, GOLD, (int)(255 * a));
+        cv_blend_rect(cv, (cv->w - w * 3 / 2) / 2, y + ui->px / 2, w * 3 / 2, 1, GOLD, (int)(200 * a));
+    }
+
+    /* version, top right */
+    char ver[48];
+    snprintf(ver, sizeof ver, "Lume %s", LUME_VERSION);
+    int vw = font_width(ui->small, ver);
+    font_draw_shadow(ui->small, cv, cv->w - vw - ui->px / 2, font_ascent(ui->small) + ui->px / 3, ver, 0x8a7c62, 200);
+    if (f->show_fps) {
+        char fb[32];
+        snprintf(fb, sizeof fb, "%.0f fps", f->fps);
+        font_draw_shadow(ui->small, cv, cv->w - font_width(ui->small, fb) - ui->px / 2,
+                         font_ascent(ui->small) + font_line(ui->small) + ui->px / 3, fb, 0x8a7c62, 200);
+    }
+    if (f->quit_armed) {
+        const char *q = "Press Esc again to quit";
+        int w = font_width(ui->head, q);
+        font_draw_shadow(ui->head, cv, (cv->w - w) / 2, cv->h / 2, q, C_WARN, 255);
+    }
+
+    if (g->state == GS_JUMP_PROMPT) {
+        char text[200];
+        snprintf(text, sizeof text,
+                 "The floor ends in a sheer drop. You can see depth %d far below. "
+                 "Jumping is quick, but the fall will hurt.", g->depth + 1);
+        int bx, by, bh;
+        int w = dialog(ui, cv, "Leap into the chasm?", text, &bx, &by, &bh);
+        int w1 = button_width(ui, "y", "Jump"), w2 = button_width(ui, "n", "Stay");
+        int gap = ui->px;
+        int x0 = bx + (w - w1 - w2 - gap) / 2;
+        button(ui, cv, x0, by, bh, "y", "Jump", UA_JUMP_YES, f->mx, f->my, true);
+        button(ui, cv, x0 + w1 + gap, by, bh, "n", "Stay", UA_JUMP_NO, f->mx, f->my, true);
+    } else if (g->state == GS_DEAD) {
+        char text[200];
+        snprintf(text, sizeof text, "You fell on depth %d after %d turns, having slain %d foe%s.",
+                 g->depth, g->turn, g->kills, g->kills == 1 ? "" : "s");
+        int bx, by, bh;
+        int w = dialog(ui, cv, "You have perished", text, &bx, &by, &bh);
+        int w1 = button_width(ui, "Enter", "New game"), w2 = button_width(ui, "q", "Quit");
+        int gap = ui->px;
+        int x0 = bx + (w - w1 - w2 - gap) / 2;
+        button(ui, cv, x0, by, bh, "Enter", "New game", UA_NEW_GAME, f->mx, f->my, true);
+        button(ui, cv, x0 + w1 + gap, by, bh, "q", "Quit", UA_QUIT, f->mx, f->my, true);
+    } else if (f->help) {
+        help(ui, cv, f);
+    } else {
+        hover_card(ui, cv, g, f);
+    }
+}
