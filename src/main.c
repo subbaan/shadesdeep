@@ -16,6 +16,7 @@
 #include "gfx.h"
 #include "kgfx.h"
 #include "render.h"
+#include "sound.h"
 #include "term.h"
 #include "ui.h"
 #include "version.h"
@@ -71,6 +72,8 @@ static void usage(FILE *f)
         "  -f, --fps=N         target frame rate (default 60)\n"
         "  -m, --mode=MODE     pixel transport: shm (default), direct, directz\n"
         "  -a, --assets=DIR    asset directory (default: found next to the binary)\n"
+        "      --mute          start with the sound off (F2 toggles it in the game)\n"
+        "      --no-sound      don't open the audio device at all\n"
         "      --show-fps      show the frame rate under the version\n"
         "      --probe         report terminal capabilities and exit\n"
         "      --dump=FILE     render one frame to a PNG and exit (no terminal needed)\n"
@@ -81,8 +84,8 @@ static void usage(FILE *f)
         "  -h, --help          show this help\n"
         "  -V, --version       show version\n"
         "\n"
-        "In the game press ? for the controls. Mouse: click to travel or attack,\n"
-        "hover for descriptions, wheel to zoom. Esc twice quits.\n",
+        "In the game press ? for the controls, m for the map. Mouse: click to travel\n"
+        "or attack, hover for descriptions, wheel to zoom. Esc twice quits.\n",
         LUME_NAME);
 }
 
@@ -143,7 +146,95 @@ typedef struct {
     int tslot, tx, ty;      /* item being thrown, aim cursor */
     int tcycle;             /* Tab position among visible monsters */
     bool quit_armed;
+    bool map;               /* the map overview is open */
+    bool map_stale;         /* redraw its picture */
 } Ctl;
+
+/* ---------------------------------------------------------------- sound */
+
+/* play what the game asked for this frame: quieter with distance and out of
+ * sight, panned by where it happened */
+static void play_sounds(Game *g)
+{
+    if (!snd_ready()) { g->nsnd = 0; return; }
+    Level *lv = game_level(g);
+    const Mob *p = &g->player;
+    for (int i = 0; i < g->nsnd; i++) {
+        const SoundEv *e = &g->snd[i];
+        float vol = e->vol, pan = 0;
+        float pitch = 0.95f + (rand() % 100) / 1000.0f;
+        if (e->kind == SND_STEP || e->kind == SND_WADE) pitch = 0.88f + (rand() % 240) / 1000.0f;
+        if (!e->global) {
+            float dx = e->x - p->rx, dy = e->y - p->ry, d = sqrtf(dx * dx + dy * dy);
+            if (d > 15) continue;
+            vol /= 1 + 0.22f * d;
+            if (in_map(e->x, e->y) && !(lv->f[e->y][e->x] & (F_VIS | F_LOS))) vol *= 0.5f;     /* round a corner */
+            pan = clampf(dx / 9, -0.8f, 0.8f);
+        }
+        snd_play(e->kind, vol, pitch, pan, e->delay);
+    }
+    g->nsnd = 0;
+}
+
+/* the layers under everything: the dungeon, your torch, fires and water nearby */
+static void update_loops(Game *g)
+{
+    if (!snd_ready()) return;
+    bool alive = g->state != GS_DEAD;
+    Level *lv = game_level(g);
+    const Mob *p = &g->player;
+    float fire = 0;
+    for (int i = 0; i < lv->nlights; i++) {
+        const Light *l = &lv->lights[i];
+        if (!l->lit || (l->kind != L_SCONCE && l->kind != L_FLOORTORCH)) continue;
+        float dx = l->fx - p->rx, dy = l->fy - p->ry, d = sqrtf(dx * dx + dy * dy);
+        float w = clampf(1 - d / 8, 0, 1);
+        w *= w;
+        if (!(lv->f[l->y][l->x] & F_VIS)) w *= 0.4f;
+        fire += w;
+    }
+    float water = 0;
+    int px = (int)lroundf(p->rx), py = (int)lroundf(p->ry);
+    for (int y = py - 6; y <= py + 6; y++)
+        for (int x = px - 6; x <= px + 6; x++) {
+            if (!tile_water(tile_at(lv, x, y)) || !(lv->f[y][x] & F_SEEN)) continue;
+            float d = sqrtf((float)((x - px) * (x - px) + (y - py) * (y - py)));
+            float w = clampf(1 - d / 6.5f, 0, 1);
+            if (w > water) water = w;
+        }
+    snd_loop(LOOP_AMBIENCE, alive ? 1.0f : 0.5f);
+    snd_loop(LOOP_TORCH, alive && g->torch_lit ? 1.0f : 0);
+    snd_loop(LOOP_FIRE, alive ? clampf(fire, 0, 1) : 0);
+    snd_loop(LOOP_WATER, alive ? water : 0);
+}
+
+/* the map's picture, redrawn when it opens or the window changes */
+static Canvas g_mini;
+static MapLayout g_ml;
+
+static void map_update(Renderer *r, UI *ui, Game *g, const Canvas *screen, Ctl *ctl)
+{
+    MapLayout ml;
+    ui_map_layout(ui, g, screen->w, screen->h, &ml);
+    if (!ctl->map_stale && memcmp(&ml, &g_ml, sizeof ml) == 0 && g_mini.px) return;
+    g_ml = ml;
+    if (g_mini.w != ml.w || g_mini.h != ml.h) {
+        free(g_mini.px);
+        g_mini = (Canvas){ ml.w, ml.h, calloc((size_t)(ml.w > 0 ? ml.w : 1) * (ml.h > 0 ? ml.h : 1), 4) };
+    }
+    if (g_mini.px) render_map(r, g, &g_mini, ml.tx, ml.ty, ml.tw, ml.th);
+    ctl->map_stale = false;
+}
+
+/* the level tile under a click on the map, or false */
+static bool map_tile_at(Game *g, int mx, int my, int *tx, int *ty)
+{
+    const MapLayout *m = &g_ml;
+    if (mx < m->x || my < m->y || mx >= m->x + m->w || my >= m->y + m->h) return false;
+    *tx = m->tx + (int)((mx - m->x) / m->cell);
+    *ty = m->ty + (int)((my - m->y) / m->cell);
+    return in_map(*tx, *ty) && (game_level(g)->f[*ty][*tx] & F_SEEN);
+}
 
 /* the map tile under a window pixel */
 static void hover_tile(const Renderer *r, const Frame *fr, int mx, int my, int *tx, int *ty)
@@ -156,13 +247,13 @@ static void hover_tile(const Renderer *r, const Frame *fr, int mx, int my, int *
     if (!in_map(*tx, *ty)) *tx = *ty = -1;
 }
 
-static void draw_frame(Renderer *r, UI *ui, Game *g, Frame *fr, Hover *hv, const Ctl *ctl, int mx, int my, float dt,
+static void draw_frame(Renderer *r, UI *ui, Game *g, Frame *fr, Hover *hv, Ctl *ctl, int mx, int my, float dt,
                        float fps, bool show_fps)
 {
     hv->hx = hv->hy = -1;
     hv->plen = 0;
     bool over_ui = mx >= 0 && ui_over_panel(ui, mx, my);
-    if (mx >= 0 && !over_ui && g->state == GS_PLAY && !ctl->help) {
+    if (mx >= 0 && !over_ui && g->state == GS_PLAY && !ctl->help && !ctl->map) {
         hover_tile(r, fr, mx, my, &hv->hx, &hv->hy);
         if (hv->hx >= 0 && g->autom == AUTO_NONE && !ctl->targeting && ctl->menu == MENU_NONE && !g->proj.active)
             hv->plen = game_path_preview(g, hv->hx, hv->hy, hv->path, MAX_PATH);
@@ -180,8 +271,10 @@ static void draw_frame(Renderer *r, UI *ui, Game *g, Frame *fr, Hover *hv, const
     cv_upscale(&fr->screen, &fr->world, fr->zoom, 0, 0);
     float cx, cy;
     render_cam_pos(r, &cx, &cy);
+    bool map = ctl->map && g->state == GS_PLAY;
+    if (map) map_update(r, ui, g, &fr->screen, ctl);
     UiFrame uf = { (float)lroundf(cx), (float)lroundf(cy), fr->zoom, mx, my, ux, uy, ctl->help, ctl->quit_armed,
-                   fps, show_fps, ctl->menu, ctl->menu_slot, ctl->targeting, ctl->tslot };
+                   fps, show_fps, ctl->menu, ctl->menu_slot, ctl->targeting, ctl->tslot, map, &g_mini, g_ml };
     ui_draw(ui, g, &fr->screen, &uf);
 }
 
@@ -234,6 +327,7 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         game_explore(g);
         for (int i = 0; i < steps * 40 && g->state != GS_DEAD; i++) {
             if (g->state == GS_JUMP_PROMPT) game_jump_answer(g, false);
+            if (g->player.hp < g->player.maxhp / 2) g->player.hp = g->player.maxhp;  /* a sight-seeing tour */
             if (g->autom == AUTO_NONE) {
                 if (i % 40 == 0) game_explore(g);
             }
@@ -262,6 +356,7 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     /* developer views: LUME_DUMP_TORCH=1 lights a torch, LUME_DUMP_MENU=inv|throw|use|item,
      * LUME_DUMP_AIM="dx,dy" aims a torch, LUME_DUMP_THROW="dx,dy,frac" freezes one mid-flight */
     if (getenv("LUME_DUMP_TORCH")) game_torch_toggle(g);
+    if (getenv("LUME_DUMP_MAP")) { ctl.map = true; ctl.map_stale = true; }
     const char *dm = getenv("LUME_DUMP_MENU");
     if (dm) ctl.menu = !strcmp(dm, "throw") ? MENU_THROW : !strcmp(dm, "use") ? MENU_USE : !strcmp(dm, "item") ? MENU_ITEM : MENU_INV;
     int adx, ady;
@@ -333,7 +428,7 @@ int main(int argc, char **argv)
 {
     TxMode tx = TX_SHM;
     uint32_t seed = 0;
-    bool seed_given = false, probe_only = false, show_fps = false;
+    bool seed_given = false, probe_only = false, show_fps = false, start_muted = false, no_sound = false;
     int fps = 60, zoom_opt = 0, dump_w = 1300, dump_h = 700, dump_cell = 20, steps = 0, hover_x = -1, hover_y = -1;
     float tscale = 1.0f;
     const char *dump_path = NULL, *assets_opt = NULL;
@@ -346,6 +441,8 @@ int main(int argc, char **argv)
         { "mode",     required_argument, 0, 'm' },
         { "assets",   required_argument, 0, 'a' },
         { "show-fps", no_argument,       0, 'F' },
+        { "mute",     no_argument,       0, 'Q' },
+        { "no-sound", no_argument,       0, 'N' },
         { "probe",    no_argument,       0, 'P' },
         { "dump",     required_argument, 0, 'D' },
         { "size",     required_argument, 0, 'S' },
@@ -366,6 +463,8 @@ int main(int argc, char **argv)
         case 'm': if (kgfx_parse_tx(optarg, &tx)) { fprintf(stderr, "%s: bad mode '%s'\n", LUME_NAME, optarg); return 2; } break;
         case 'a': assets_opt = optarg; break;
         case 'F': show_fps = true; break;
+        case 'Q': start_muted = true; break;
+        case 'N': no_sound = true; break;
         case 'P': probe_only = true; break;
         case 'D': dump_path = optarg; break;
         case 'S': if (sscanf(optarg, "%dx%d", &dump_w, &dump_h) != 2) { fprintf(stderr, "%s: bad size\n", LUME_NAME); return 2; } break;
@@ -424,6 +523,10 @@ int main(int argc, char **argv)
     Game *g = game_new(seed);
     Renderer *r = render_new();
     ui_set_icons(ui, render_item_icons(r));
+    if (!no_sound) {
+        if (snd_init(assets) != 0) game_msg(g, C_DIM, "(no sound: %s)", snd_status());
+        else if (start_muted) snd_toggle_mute();
+    }
     Frame fr = { 0 };
     int zoom = zoom_opt ? zoom_opt : auto_zoom(ts.ypix);
     frame_resize(&fr, ts.xpix, ts.ypix, zoom);
@@ -479,7 +582,8 @@ int main(int argc, char **argv)
 
         /* Esc twice quits; once closes whatever is open */
         if (pr[K_ESC]) {
-            if (ctl.help) ctl.help = false;
+            if (ctl.map) ctl.map = false;
+            else if (ctl.help) ctl.help = false;
             else if (g->state == GS_JUMP_PROMPT) game_jump_answer(g, false);
             else if (ctl.targeting) ctl.targeting = false;
             else if (ctl.menu == MENU_ITEM) ctl.menu = MENU_INV;
@@ -495,13 +599,21 @@ int main(int argc, char **argv)
         UiAction click = UA_NONE;
         int carg = 0;
         if (g_input.mclick[0]) click = ui_hit(ui, mx, my, &carg);
+        if (click != UA_NONE) snd_play(SND_CLICK, 1, 1, 0, 0);
+        if (pr[K_F2]) {
+            snd_toggle_mute();
+            if (snd_ready()) game_msg(g, C_DIM, snd_muted() ? "sound off (F2 turns it back on)." : "sound on.");
+        }
         bool map_click = g_input.mclick[0] && click == UA_NONE && hv.hx >= 0 && !ui_over_panel(ui, mx, my);
         /* the status bar buttons work from any menu */
         if (click == UA_INV || click == UA_THROW || click == UA_TORCH || click == UA_EXPLORE || click == UA_REST ||
-            click == UA_STAIRS || click == UA_HELP) {
-            bool same = (click == UA_INV && ctl.menu == MENU_INV) || (click == UA_THROW && ctl.menu == MENU_THROW);
+            click == UA_STAIRS || click == UA_HELP || click == UA_MAP) {
+            bool same = (click == UA_INV && ctl.menu == MENU_INV) || (click == UA_THROW && ctl.menu == MENU_THROW)
+                     || (click == UA_MAP && ctl.map);
             ctl.menu = MENU_NONE;
             ctl.targeting = false;
+            ctl.map = false;
+            ctl.help = false;
             if (same) click = UA_NONE;
         }
         bool busy = game_busy(g);
@@ -521,6 +633,14 @@ int main(int argc, char **argv)
             else if (pr['n'] || click == UA_JUMP_NO) game_jump_answer(g, false);
         } else if (ctl.help) {
             if (click == UA_CLOSE || pr[K_ENTER] || pr['?'] || SHIFTED('/')) ctl.help = false;
+        } else if (ctl.map) {
+            int tx, ty;
+            if (pr['m'] || pr['M'] || pr[K_ENTER] || g_input.mclick[2]) {
+                ctl.map = false;
+            } else if (g_input.mclick[0] && click == UA_NONE) {
+                if (map_tile_at(g, mx, my, &tx, &ty)) game_travel_to(g, tx, ty);
+                ctl.map = false;
+            }
         } else if (busy && g->proj.active) {
             /* something is in the air: wait for it */
         } else if (ctl.targeting) {
@@ -610,6 +730,10 @@ int main(int argc, char **argv)
             } else if (SHIFTED('/') || pr['?'] || click == UA_HELP) {
                 ctl.help = true;
                 game_stop(g);
+            } else if (pr['m'] || pr['M'] || click == UA_MAP) {
+                ctl.map = true;
+                ctl.map_stale = true;
+                game_stop(g);
             } else if (pr['='] || pr['+'] || pr[K_KPPLUS] || click == UA_ZOOM_IN || g_input.wheel > 0) {
                 if (zoom < 6) zoom++;
                 zoom_opt = zoom;
@@ -627,6 +751,8 @@ int main(int argc, char **argv)
 
         frame_resize(&fr, ts.xpix, ts.ypix, zoom);
         game_update(g, dt);
+        play_sounds(g);
+        update_loops(g);
         render_camera(r, g, fr.world.w, fr.world.h, dt, false);
 
         unsigned inflight = kg.sent - (g_input.gfx_ok + g_input.gfx_err);
@@ -641,6 +767,7 @@ int main(int argc, char **argv)
         }
     }
 
+    snd_shutdown();
     kgfx_cleanup(&kg);
     term_restore();
     free(fr.screen.px);

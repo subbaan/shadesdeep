@@ -1,0 +1,37 @@
+# Which files each game event plays: event  file[,file...]  volume
+# Several files means one is picked at random each time. Edit freely;
+# tools/make_sounds.py only writes this file when it is missing.
+step        step_a.wav,step_b.wav,step_c.wav,step_d.wav  0.22
+wade        wade_a.wav,wade_b.wav,wade_c.wav             0.35
+swim        swim_a.wav,swim_b.wav                        0.45
+splash      splash_a.wav,splash_b.wav                    0.55
+swing       swing_a.wav,swing_b.wav,swing_c.wav          0.35
+hit         hit_a.wav,hit_b.wav,hit_c.wav                0.55
+hurt        hurt_a.wav,hurt_b.wav                        0.60
+die         die.wav                                      0.70
+kill        kill_a.wav,kill_b.wav                        0.50
+rat         rat_a.wav,rat_b.wav,rat_c.wav                0.35
+goblin      goblin_a.wav,goblin_b.wav,goblin_c.wav       0.45
+shade       shade_a.wav,shade_b.wav,shade_c.wav          0.50
+burn        burn_a.wav,burn_b.wav                        0.50
+dissolve    dissolve.wav                                 0.55
+alert       alert.wav                                    0.45
+ignite      ignite_a.wav,ignite_b.wav                    0.50
+sconce      sconce.wav                                   0.55
+snuff       snuff_a.wav,snuff_b.wav                      0.40
+hiss        hiss.wav                                     0.45
+throw       throw_a.wav,throw_b.wav                      0.35
+clink       clink_a.wav,clink_b.wav,clink_c.wav          0.40
+thud        thud_a.wav,thud_b.wav                        0.45
+shatter     shatter.wav                                  0.50
+drink       drink.wav                                    0.50
+pickup      pickup_a.wav,pickup_b.wav                    0.35
+door        door_a.wav,door_b.wav,door_c.wav             0.45
+stairs      stairs.wav                                   0.55
+fall        fall.wav                                     0.55
+land        land.wav                                     0.65
+click       click.wav                                    0.25
+ambience    ambience.wav                                 0.50
+torch_loop  torch_loop.wav                               0.35
+fire_loop   fire_loop.wav                                0.30
+water_loop  water_loop.wav                               0.30

@@ -5,7 +5,7 @@ art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.4.0 (water) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.5.0 (map and sound) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 ## Build and run
 
@@ -14,8 +14,10 @@ make            # builds build/lume and symlinks ./lume
 ./lume          # run inside kitty
 ```
 
-Needs a C compiler (GNU C11), Make, pkg-config, and the libpng, zlib and
-FreeType development packages (`sudo pacman -S base-devel libpng zlib freetype2`).
+Needs a C compiler (GNU C11), Make, pkg-config, and the libpng, zlib,
+FreeType and SDL3 development packages
+(`sudo pacman -S base-devel libpng zlib freetype2 sdl3`). SDL3 is only used for
+sound; if no audio device opens, the game runs silent.
 
 ## Playing
 
@@ -25,8 +27,16 @@ FreeType development packages (`sudo pacman -S base-devel libpng zlib freetype2`
 - **Keys:** arrows / numpad / `h j k l y u b n` move and attack; `x` explore;
   `z` or `.` rest a turn, `Z` rest until healed; `>` travel to the stairs
   down and descend, `<` climb; `i` items, `t` throw, `a` / `q` use,
-  `d` drop, `T` light or snuff your torch; `+` / `-` zoom; `?` help;
-  Esc twice quits.
+  `d` drop, `T` light or snuff your torch; `m` map; `+` / `-` zoom;
+  F2 sound on/off; `?` help; Esc twice quits.
+- **Map:** `m` (or the Map button) shows the whole explored level, drawn
+  with the game's own graphics: you, the stairs and any creatures you can make
+  out are marked. Click a place on it to travel there.
+- **Sound:** footsteps, splashes, steel, the creatures' voices, torches
+  catching and hissing out, a low dungeon ambience, and crackling fire and
+  lapping water that rise as you get near. Sounds are panned by where they
+  happen and muffled out of sight. `--mute` starts silent, `--no-sound` never
+  opens the audio device.
 - **Items:** every action has an on-screen button. Press Throw (or `t`) and
   your throwable items are listed; pick one, then aim with the mouse or the
   direction keys (Tab cycles visible monsters) and click or press Enter.
@@ -70,7 +80,12 @@ lights a torch, `LUME_DUMP_MENU=inv|throw|use|item` opens a menu,
 thrown torch part-way through its flight. `LUME_DUMP_REST=N` waits N turns
 first (e.g. to let a thrown torch burn out). `LUME_DUMP_SHADE="dx,dy;dx,dy"`
 puts shades near the player. `LUME_DUMP_WATER=0|1|2` stands by a pool, in its
-shallows, or swimming.
+shallows, or swimming. `LUME_DUMP_MAP=1` opens the map.
+
+The sounds are synthesized by `tools/make_sounds.py` (Python 3 with numpy and
+scipy) into `assets/sounds`; `assets/sounds/sounds.txt` says which file(s)
+each event plays and how loud, and is only written when missing, so edit it
+freely. `python3 tools/make_sounds.py --only step door` re-renders just those.
 
 The tiles and sprites are procedural placeholders (`src/tiles.c`) until the
 real art arrives. Fonts: Cinzel and Alegreya (SIL Open Font License, see

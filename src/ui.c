@@ -225,11 +225,11 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     struct { const char *k, *l; UiAction a; bool en; } B[] = {
         { "x", "Explore", UA_EXPLORE, true }, { "Z", "Rest", UA_REST, true }, { "t", "Throw", UA_THROW, g->ninv > 0 },
         { "i", "Items", UA_INV, true }, { "T", tl, UA_TORCH, has_torch || g->torch_lit }, { ">", "Descend", UA_STAIRS, true },
-        { NULL, "?", UA_HELP, true },
+        { "m", "Map", UA_MAP, true }, { NULL, "?", UA_HELP, true },
     };
-    int nb = 7, gap = ui->px / 2, tw = 0;
+    int nb = 8, gap = ui->px / 2, tw = 0;
     for (int i = 0; i < nb; i++) tw += button_width(ui, B[i].k, B[i].l) + gap;
-    bool compact = cv->w - tw - pad < left_end;
+    bool compact = cv->w - tw - pad < turn_x;       /* the turn counter goes before the key hints do */
     if (compact) {     /* narrow window: drop the key hints */
         tw = 0;
         for (int i = 0; i < nb; i++) tw += button_width(ui, NULL, B[i].l) + gap;
@@ -239,7 +239,8 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     int bx = cv->w - tw - pad / 2;
     for (int i = 0; i < nb; i++) {
         bool en = g->state == GS_PLAY && B[i].en;
-        bx += button(ui, cv, bx, by, bh, compact ? NULL : B[i].k, B[i].l, B[i].a, f->mx, f->my, en || B[i].a == UA_HELP) + gap;
+        bx += button(ui, cv, bx, by, bh, compact ? NULL : B[i].k, B[i].l, B[i].a, f->mx, f->my,
+                     en || B[i].a == UA_HELP || B[i].a == UA_MAP) + gap;
     }
 }
 
@@ -430,8 +431,10 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Torch", "T  light or snuff;  walk onto a burning torch to take it up" },
         { "Shades", "living darkness: firelight keeps them back and burns them" },
         { "Chasms", "step in to jump down a level (it hurts; water below breaks the fall)" },
+        { "Map", "m  the whole level; click a place on it to travel there" },
         { "Water", "shallows splash; deep water puts out a torch and goblins won't swim" },
         { "Zoom", "+ and -  or the mouse wheel" },
+        { "Sound", "F2 turns it off and on" },
         { "Text size", "kitty's own font zoom (ctrl+shift+= / -)" },
         { "Quit", "Esc twice" },
     };
@@ -544,6 +547,111 @@ static void targeting_banner(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
 
 /* ---------------------------------------------------------------- draw */
 
+
+/* ------------------------------------------------------------------ map */
+
+void ui_map_layout(const UI *ui, Game *g, int sw, int sh, MapLayout *m)
+{
+    Level *lv = game_level(g);
+    int x0 = MAP_W, y0 = MAP_H, x1 = -1, y1 = -1;
+    for (int y = 0; y < MAP_H; y++)
+        for (int x = 0; x < MAP_W; x++)
+            if (lv->f[y][x] & F_SEEN) {
+                if (x < x0) x0 = x;
+                if (x > x1) x1 = x;
+                if (y < y0) y0 = y;
+                if (y > y1) y1 = y;
+            }
+    if (x1 < 0) { x0 = g->player.x; x1 = x0; y0 = g->player.y; y1 = y0; }
+    x0 -= 1; y0 -= 1; x1 += 1; y1 += 1;
+    /* not too zoomed in on a small explored patch */
+    int tw = x1 - x0 + 1, th = y1 - y0 + 1;
+    int mw = MAP_W / 2, mh = MAP_H / 2;
+    if (tw < mw) { x0 -= (mw - tw) / 2; tw = mw; }
+    if (th < mh) { y0 -= (mh - th) / 2; th = mh; }
+    x0 = clampi(x0, 0, MAP_W - tw);
+    y0 = clampi(y0, 0, MAP_H - th);
+    int top = ui->px * 4, bottom = font_line(ui->head) * 2 + ui->px * 4, side = ui->px * 2;
+    float aw = (float)(sw - side * 2), ah = (float)(sh - top - bottom);
+    float cell = fminf(aw / tw, ah / th);
+    float cap = fmaxf(12.0f, sh / 28.0f);
+    if (cell > cap) cell = cap;
+    if (cell < 2) cell = 2;
+    m->tx = x0; m->ty = y0; m->tw = tw; m->th = th;
+    m->cell = cell;
+    m->w = (int)(cell * tw);
+    m->h = (int)(cell * th);
+    m->x = (sw - m->w) / 2;
+    m->y = top + ((int)ah - m->h) / 2;
+}
+
+static void map_view(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
+{
+    const MapLayout *m = &f->ml;
+    Level *lv = game_level(g);
+    int pad = ui->px;
+    cv_blend_rect(cv, 0, 0, cv->w, cv->h, 0, 170);
+    int th = font_line(ui->head) + pad;
+    panel(ui, cv, m->x - pad, m->y - pad - th, m->w + pad * 2, m->h + pad * 2 + th + font_line(ui->body) + pad / 2, 245, true);
+    char title[64];
+    snprintf(title, sizeof title, "Map of depth %d", g->depth);
+    font_draw(ui->head, cv, m->x + (m->w - font_width(ui->head, title)) / 2, m->y - pad / 2 - font_line(ui->head) / 3, title, GOLD, 255);
+    if (f->mini && f->mini->px) {
+        for (int y = 0; y < f->mini->h && m->y + y < cv->h; y++) {
+            if (m->y + y < 0) continue;
+            int n = f->mini->w;
+            if (m->x + n > cv->w) n = cv->w - m->x;
+            if (n > 0 && m->x >= 0) memcpy(cv->px + (size_t)(m->y + y) * cv->w + m->x, f->mini->px + (size_t)y * f->mini->w, (size_t)n * 4);
+        }
+    }
+    cv_frame(cv, m->x - 1, m->y - 1, m->w + 2, m->h + 2, GOLD_DIM, 255);
+    float c = m->cell;
+    #define MX(X_) (m->x + ((X_) - m->tx) * c + c / 2)
+    #define MY(Y_) (m->y + ((Y_) - m->ty) * c + c / 2)
+    /* stairs */
+    float dr = fmaxf(3, c * 0.45f);
+    if (lv->f[lv->downy][lv->downx] & F_SEEN) {
+        cv_disc(cv, MX(lv->downx), MY(lv->downy), dr + 2, 0, 200);
+        cv_disc(cv, MX(lv->downx), MY(lv->downy), dr, GOLD, 255);
+        cv_disc(cv, MX(lv->downx), MY(lv->downy), dr * 0.45f, 0x3a2810, 255);
+    }
+    if (lv->f[lv->upy][lv->upx] & F_SEEN) cv_ring(cv, MX(lv->upx), MY(lv->upy), dr, 1.6f, GOLD_DIM, 230);
+    /* creatures you can make out */
+    Mob *ms = game_mobs(g, g->depth);
+    for (int i = 0; i < MAX_MOBS; i++) {
+        if (!game_mob_noticed(g, &ms[i])) continue;
+        bool eyes = !(lv->f[ms[i].y][ms[i].x] & F_VIS);
+        cv_disc(cv, MX(ms[i].x), MY(ms[i].y), fmaxf(2.5f, c * 0.32f) + 1.5f, 0, 220);
+        cv_disc(cv, MX(ms[i].x), MY(ms[i].y), fmaxf(2.5f, c * 0.32f), eyes ? 0xa8d0ff : 0xe04a3a, 255);
+    }
+    /* you, pulsing */
+    float pulse = 0.5f + 0.5f * sinf(g->time * 4);
+    float px = MX(g->player.x), py = MY(g->player.y);
+    cv_ring(cv, px, py, c * 0.9f + 3 + pulse * c * 0.4f, 2.0f, 0xfff0c0, (int)(120 + 120 * (1 - pulse)));
+    cv_disc(cv, px, py, fmaxf(3, c * 0.38f) + 1.5f, 0, 220);
+    cv_disc(cv, px, py, fmaxf(3, c * 0.38f), 0xfff0c0, 255);
+    /* the place under the mouse */
+    const char *what = "Click a place to travel there.   m or Esc closes the map.";
+    char buf[160];
+    if (f->mx >= m->x && f->my >= m->y && f->mx < m->x + m->w && f->my < m->y + m->h) {
+        int tx = m->tx + (int)((f->mx - m->x) / c), ty = m->ty + (int)((f->my - m->y) / c);
+        if (in_map(tx, ty) && (lv->f[ty][tx] & F_SEEN)) {
+            cv_frame(cv, (int)(m->x + (tx - m->tx) * c), (int)(m->y + (ty - m->ty) * c), (int)c + 1, (int)c + 1, 0xfff0c0, 230);
+            Mob *mm = game_mob_at(g, tx, ty);
+            const char *nm = tile_name((Tile)lv->t[ty][tx]);
+            if (g->player.x == tx && g->player.y == ty) nm = "you";
+            else if (mm && (lv->f[ty][tx] & F_VIS)) nm = MOB_INFO[mm->kind].name;
+            else if (mm && game_mob_noticed(g, mm)) nm = "eyes in the dark";
+            else if (tx == lv->downx && ty == lv->downy) nm = "stairs down";
+            snprintf(buf, sizeof buf, "%c%s  \xc2\xb7  click to travel there", nm[0] >= 'a' && nm[0] <= 'z' ? nm[0] - 32 : nm[0], nm + 1);
+            what = buf;
+        }
+    }
+    font_draw(ui->body, cv, m->x + (m->w - font_width(ui->body, what)) / 2, m->y + m->h + pad / 2 + font_ascent(ui->body), what, 0xd8cbb0, 255);
+    #undef MX
+    #undef MY
+}
+
 void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
 {
     ui->nbtn = 0;
@@ -615,6 +723,8 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
         button(ui, cv, x0 + w1 + gap, by, bh, "q", "Quit", UA_QUIT, f->mx, f->my, true);
     } else if (f->help) {
         help(ui, cv, f);
+    } else if (f->map) {
+        map_view(ui, cv, g, f);
     } else {
         if (f->menu != MENU_NONE) menu_panel(ui, cv, g, f, bar_top);
         targeting_banner(ui, cv, g, f);

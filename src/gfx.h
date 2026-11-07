@@ -55,6 +55,8 @@ void cv_image_scaled(Canvas *cv, const Image *im, int x, int y, int s, int alpha
 void cv_line(Canvas *cv, int x0, int y0, int x1, int y1, uint32_t c, int a);
 /* Draw an image (sprite rect sx,sy,sw,sh) with alpha at x,y; flip mirrors it. */
 void cv_image(Canvas *cv, const Image *im, int sx, int sy, int sw, int sh, int x, int y, int flip);
+/* Area-averaged shrink of the src rectangle (sx, sy, sw, sh) to fill dst. */
+void cv_downscale(Canvas *dst, const Canvas *src, int sx, int sy, int sw, int sh);
 /* Nearest-neighbour integer upscale of src into dst at (ox, oy). */
 void cv_upscale(Canvas *dst, const Canvas *src, int s, int ox, int oy);
 

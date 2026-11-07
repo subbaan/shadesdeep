@@ -28,6 +28,10 @@ typedef struct {
 
 void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov);
 
+/* The map: render the whole level (as remembered and seen) and shrink the
+ * tile rectangle (tx, ty, tw, th) of it into dst. */
+void render_map(Renderer *r, Game *g, Canvas *dst, int tx, int ty, int tw, int th);
+
 const Image *render_item_icons(const Renderer *r);        /* IT_COUNT pictures */
 int render_dump_lower(const Renderer *r, const char *path);   /* developer aid */
 

@@ -27,6 +27,7 @@ struct Renderer {
     float chasmc[CH][CW];
     float tl[MAP_H][MAP_W][3];
     Canvas lower;
+    Canvas full;                /* the whole current level, for the map */
     bool lower_ok;
     int lower_depth;
     float camx, camy;
@@ -144,6 +145,7 @@ void render_free(Renderer *r)
     if (!r) return;
     tiles_free(&r->t);
     free(r->lower.px);
+    free(r->full.px);
     free(r);
 }
 
@@ -562,7 +564,7 @@ static void draw_water(Renderer *r, Canvas *cv, const View *v, int tx, int ty, i
             float sh = 0.5f + 0.5f * fminf(1.0f, (p.r + p.g + p.b) * 0.6f);
             ar += (int)(3 * sh); ag += (int)(15 * sh); ab += (int)(19 * sh);
             lit = add_sat(lit, ar, ag, ab);
-            if (v->fog) lit = fogmix(lit, memtone(mix(b, 0x3a6878, 130)), p.v, p.s);
+            if (v->fog) lit = fogmix(lit, mix(memtone(b), 0x184a5a, (int)(110 + 90 * k)), p.v, p.s);
             row[x] = lit;
         }
     }
@@ -1492,6 +1494,37 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
 int render_dump_lower(const Renderer *r, const char *path)
 {
     return r->lower_ok ? canvas_write_png(&r->lower, path) : -1;
+}
+
+void render_map(Renderer *r, Game *g, Canvas *dst, int tx, int ty, int tw, int th)
+{
+    if (!r->full.px) {
+        r->full.w = MAP_W * TILE;
+        r->full.h = MAP_H * TILE;
+        r->full.px = calloc((size_t)r->full.w * r->full.h, 4);
+        if (!r->full.px) return;
+    }
+    Level *lv = game_level(g);
+    if (lv->light_dirty) level_relight(lv);
+    View v = { lv, game_mobs(g, g->depth), &g->player, true, true, 0, 0, g->time, g->visf, g->plight,
+               game_items(g, g->depth), g->torch_lit, false, 0, 0, 0, 0 };
+    Canvas *cv = &r->full;
+    compute_light(r, &v);
+    memset(cv->px, 0, (size_t)cv->w * cv->h * 4);
+    draw_ground(r, cv, &v);
+    draw_reflections(r, cv, &v);
+    draw_items(r, cv, &v);
+    draw_rows(r, cv, &v);
+    draw_effects(r, cv, &v, 0);
+    cv_downscale(dst, cv, tx * TILE, ty * TILE - WALL_R, tw * TILE, th * TILE);
+    /* lift the shadows: a map should be readable */
+    static uint8_t lift[256];
+    if (!lift[255])
+        for (int i = 0; i < 256; i++) lift[i] = (uint8_t)lroundf(255 * powf(i / 255.0f, 0.62f));
+    for (size_t i = 0, n = (size_t)dst->w * dst->h; i < n; i++) {
+        uint32_t c = dst->px[i];
+        dst->px[i] = RGB(lift[CR(c)], lift[CG(c)], lift[CB(c)]);
+    }
 }
 
 const Image *render_item_icons(const Renderer *r) { return r->t.item; }

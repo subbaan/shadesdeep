@@ -70,6 +70,24 @@ static void floater(Game *g, int tx, int ty, uint32_t color, const char *text)
     }
 }
 
+/* ---------------------------------------------------------------- sound */
+
+static void sfx_ex(Game *g, SoundKind k, int x, int y, bool global, float delay, float vol)
+{
+    if (g->nsnd >= MAX_SND) return;
+    g->snd[g->nsnd++] = (SoundEv){ k, x, y, global, delay, vol };
+}
+
+static void sfx(Game *g, SoundKind k, int x, int y) { sfx_ex(g, k, x, y, false, 0, 1); }
+static void push_fx(Game *g, FxKind k, int x, int y);
+
+/* a creature's voice */
+static void vocal(Game *g, const Mob *m)
+{
+    SoundKind k = m->kind == MK_RAT ? SND_RAT : m->kind == MK_GOBLIN ? SND_GOBLIN : m->kind == MK_SHADE ? SND_SHADE : SND_COUNT;
+    if (k != SND_COUNT) sfx(g, k, m->x, m->y);
+}
+
 /* ---------------------------------------------------------------- levels */
 
 Level *game_level(Game *g) { return g->lv[g->depth]; }
@@ -225,6 +243,11 @@ static void compute_view(Game *g)
     fov_cast(lv, g->player.x, g->player.y, g->torch_lit ? 8 : 4, plight_mark, &c);
     fov_cast(lv, g->player.x, g->player.y, 24, view_mark, &c);
     int n = count_visible_mobs(g);
+    bool fresh = false;
+    Mob *all = g->mobs[g->depth];
+    for (int i = 0; i < MAX_MOBS; i++)
+        if (game_mob_noticed(g, &all[i]) && !all[i].known) { all[i].known = true; fresh = true; }
+    if (fresh) sfx_ex(g, SND_ALERT, 0, 0, true, 0, 1);     /* something new is here */
     if (n > g->seen_mobs && g->autom != AUTO_NONE) {
         Mob *m = g->mobs[g->depth];
         for (int i = 0; i < MAX_MOBS; i++)
@@ -313,6 +336,8 @@ static void attack(Game *g, Mob *a, Mob *d)
     a->bump = 1.0f;
     a->bdx = d->x - a->x;
     a->bdy = d->y - a->y;
+    if (a->kind != MK_SHADE) sfx_ex(g, SND_SWING, a->x, a->y, false, 0, pl_att ? 1.0f : 0.7f);
+    if (!pl_att && rng_chance(&g->rng, 30)) vocal(g, a);
     if (a->bdx) a->flip = a->bdx < 0;
     int chance = ai->acc - di->def;
     if (d->asleep) chance = 100;
@@ -327,6 +352,7 @@ static void attack(Game *g, Mob *a, Mob *d)
     int dmg = rng_range(&g->rng, ai->dmin, ai->dmax);
     d->hp -= dmg;
     d->flash = 1.0f;
+    sfx_ex(g, pl_def ? SND_HURT : SND_HIT, d->x, d->y, false, 0.06f, 1);
     char t[16];
     snprintf(t, sizeof t, "%d", dmg);
     floater(g, d->x, d->y, pl_def ? 0xff5a4a : 0xffd27a, t);
@@ -336,6 +362,7 @@ static void attack(Game *g, Mob *a, Mob *d)
         if (d->hp <= 0) {
             game_msg(g, C_BAD, "the %s kills you...", ai->name);
             g->state = GS_DEAD;
+            sfx_ex(g, SND_DIE, d->x, d->y, true, 0.25f, 1);
         } else {
             game_msg(g, C_BAD, "the %s hits you.", ai->name);
         }
@@ -344,6 +371,8 @@ static void attack(Game *g, Mob *a, Mob *d)
     if (d->hp <= 0) {
         kill_mob(g, d);
         game_msg(g, C_GOOD, "you slay the %s!", di->name);
+        if (d->kind == MK_SHADE) { push_fx(g, FX_DISSOLVE, d->x, d->y); sfx(g, SND_DISSOLVE, d->x, d->y); }
+        else sfx_ex(g, SND_KILL, d->x, d->y, false, 0.1f, 1);
     } else {
         game_msg(g, C_TEXT, "you hit the %s.", di->name);
     }
@@ -400,6 +429,7 @@ static void mob_step_toward(Game *g, Mob *m, int tx, int ty)
     if (lv->t[ny][nx] == T_DOOR) {
         lv->t[ny][nx] = T_DOOR_OPEN;
         lv->light_dirty = true;
+        sfx(g, SND_DOOR, nx, ny);
         return;
     }
     mob_go(g, m, nx, ny);
@@ -412,7 +442,11 @@ static void make_noise(Game *g, int x, int y, int radius);
 static void mob_go(Game *g, Mob *m, int nx, int ny)
 {
     start_tween(m, nx, ny);
-    if (tile_water(tile_at(game_level(g), nx, ny))) push_fx(g, FX_SPLASH, nx, ny);
+    Tile t = tile_at(game_level(g), nx, ny);
+    if (tile_water(t)) push_fx(g, FX_SPLASH, nx, ny);
+    if (m->kind == MK_SHADE) return;        /* it makes no sound as it moves */
+    float v = m->kind == MK_RAT ? 0.3f : 0.55f;
+    sfx_ex(g, t == T_DEEP ? SND_SWIM : t == T_SHALLOW ? SND_WADE : SND_STEP, nx, ny, false, 0, v);
 }
 
 /* a shade caught in firelight burns and flees for the darkest ground near it */
@@ -428,9 +462,11 @@ static bool shade_burns(Game *g, Mob *m)
     snprintf(t, sizeof t, "%d", dmg);
     floater(g, m->x, m->y, 0xffa040, t);
     push_fx(g, FX_BURN, m->x, m->y);
+    sfx(g, SND_BURN, m->x, m->y);
     if (m->hp <= 0) {
         kill_mob(g, m);
         push_fx(g, FX_DISSOLVE, m->x, m->y);
+        sfx(g, SND_DISSOLVE, m->x, m->y);
         if (seen) game_msg(g, C_GOOD, "the shade burns away to nothing.");
         return true;
     }
@@ -473,10 +509,17 @@ static void monsters_act(Game *g)
                 m->hunting = true;
                 m->tx = p->x; m->ty = p->y;
                 if (lv->f[m->y][m->x] & F_VIS) game_msg(g, C_WARN, "the %s wakes up!", mi->name);
+                vocal(g, m);
             }
             continue;
         }
-        if (sees) { m->hunting = true; m->tx = p->x; m->ty = p->y; }
+        if (sees) {
+            if (!m->hunting) vocal(g, m);           /* it has spotted you */
+            m->hunting = true;
+            m->tx = p->x; m->ty = p->y;
+        } else if (shade && m->hunting && dist <= 7 && rng_chance(&g->rng, 6)) {
+            vocal(g, m);                            /* whispering in the dark */
+        }
         if (dist == 1 && diag_ok(lv, m->x, m->y, p->x - m->x, p->y - m->y) && (sees || m->hunting)
             && !(shade && game_firelight(g, p->x, p->y) > SHADE_FEAR)) {
             attack(g, m, p);
@@ -506,6 +549,7 @@ static void burn_floor_torches(Game *g, int d)
         if (d == g->depth && (lv->f[l->y][l->x] & F_VIS))
             game_msg(g, C_DIM, "a torch on the floor gutters and goes out, leaving a charred stub.");
         lv->scorch[l->y][l->x] = 1;
+        if (d == g->depth) sfx_ex(g, SND_SNUFF, l->x, l->y, false, 0, 0.7f);
         level_remove_light(lv, i);
         if (d == g->depth + 1) g->lower_dirty = true;
     }
@@ -521,6 +565,7 @@ static void end_turn(Game *g)
             g->torch_lit = false;
             g->torch_fuel = 0;
             game_msg(g, C_WARN, "your torch burns out. Only your lantern's glow remains.");
+            sfx(g, SND_SNUFF, g->player.x, g->player.y);
             game_stop(g);
         }
     }
@@ -588,6 +633,7 @@ bool game_move(Game *g, int dx, int dy)
             lv->light_dirty = true;
             if (l->room >= 0) lv->rooms[l->room].dark = false;
             game_msg(g, C_WARN, "you light the sconce. Warm light spills across the room.");
+            sfx(g, SND_SCONCE, l->fx, l->fy);
             game_stop(g);
             end_turn(g);
             return true;
@@ -600,6 +646,7 @@ bool game_move(Game *g, int dx, int dy)
     if (t == T_DOOR) {
         lv->t[ny][nx] = T_DOOR_OPEN;
         lv->light_dirty = true;
+        sfx(g, SND_DOOR, nx, ny);
         end_turn(g);
         return true;
     }
@@ -620,6 +667,7 @@ bool game_move(Game *g, int dx, int dy)
     }
     g->wade_x = g->wade_y = -1;
     start_tween(p, nx, ny);
+    sfx(g, t == T_DEEP ? SND_SWIM : t == T_SHALLOW ? SND_WADE : SND_STEP, nx, ny);
     if (tile_water(t)) {
         push_fx(g, FX_SPLASH, nx, ny);
         if (t == T_DEEP) {
@@ -627,6 +675,7 @@ bool game_move(Game *g, int dx, int dy)
                 g->torch_lit = false;
                 g->torch_fuel = 0;
                 push_fx(g, FX_STEAM, nx, ny);
+                sfx(g, SND_HISS, nx, ny);
                 game_msg(g, C_WARN, "your torch hisses out as you swim. It's soaked through.");
             } else if (here != T_DEEP) {
                 game_msg(g, C_DIM, "you swim out into the deep water.");
@@ -661,6 +710,7 @@ bool game_descend(Game *g)
     place_player(g, nl->upx, nl->upy);
     compute_view(g);
     game_msg(g, C_INFO, "you descend to depth %d.", g->depth);
+    sfx_ex(g, SND_STAIRS, 0, 0, true, 0, 1);
     return true;
 }
 
@@ -673,6 +723,7 @@ bool game_ascend(Game *g)
     Level *up = g->lv[g->depth - 1];
     change_level(g, g->depth - 1, up->downx, up->downy);
     game_msg(g, C_INFO, "you climb back up to depth %d.", g->depth);
+    sfx_ex(g, SND_STAIRS, 0, 0, true, 0, 0.8f);
     return true;
 }
 
@@ -683,9 +734,11 @@ void game_jump_answer(Game *g, bool yes)
     if (!yes) return;
     int dmg = 3 + rng_range(&g->rng, 0, 3) + g->depth / 3;
     game_msg(g, C_WARN, "you leap into the chasm and plunge into the darkness below!");
+    sfx_ex(g, SND_FALL, 0, 0, true, 0, 1);
     change_level(g, g->depth + 1, g->jx, g->jy);
     Mob *p = &g->player;
     bool wet = tile_water(tile_at(game_level(g), p->x, p->y));
+    sfx_ex(g, wet ? SND_SPLASH : SND_LAND, 0, 0, true, 0.75f, 1);
     if (wet) {
         push_fx(g, FX_SPLASH, p->x, p->y);
         if (game_level(g)->t[p->y][p->x] == T_DEEP) dmg = dmg / 3 + 1;
@@ -1083,6 +1136,7 @@ static void take_floor_torch(Game *g)
         level_remove_light(lv, i);
         level_relight(lv);
         game_msg(g, C_GOOD, "you take up the burning torch (%d turns left in it).", fuel);
+        sfx(g, SND_PICKUP, p->x, p->y);
         return;
     }
 }
@@ -1101,6 +1155,7 @@ static void pickup(Game *g)
     int slot = 0;
     for (int i = 0; i < g->ninv; i++) if (g->inv[i].kind == it->kind) slot = i;
     game_msg(g, C_GOOD, "you pick up %s (%c).", game_item_name(it->kind, it->count, nm, sizeof nm), 'a' + slot);
+    sfx(g, SND_PICKUP, p->x, p->y);
     it->alive = false;
 }
 
@@ -1181,6 +1236,7 @@ bool game_throw(Game *g, int slot, int tx, int ty)
     pr->hit = hits;
     take_one(g, slot);
     Mob *p = &g->player;
+    sfx(g, SND_THROW, p->x, p->y);
     int lx = pr->path[n - 1] % MAP_W;
     if (lx != p->x) p->flip = lx < p->x;
     p->bump = 0.6f;
@@ -1231,7 +1287,8 @@ static void resolve_throw(Game *g)
                 m->flash = 1;
                 snprintf(t, sizeof t, "%d", dmg);
                 floater(g, x, y, 0xffd27a, t);
-                if (m->hp <= 0) { kill_mob(g, m); game_msg(g, C_GOOD, "the dart kills the %s!", mn); }
+                sfx_ex(g, SND_HIT, x, y, false, 0, 0.7f);
+                if (m->hp <= 0) { kill_mob(g, m); game_msg(g, C_GOOD, "the dart kills the %s!", mn); sfx(g, SND_KILL, x, y); }
                 else game_msg(g, C_TEXT, "the dart hits the %s.", mn);
             } else {
                 floater(g, x, y, 0xb0b0b0, "miss");
@@ -1246,14 +1303,18 @@ static void resolve_throw(Game *g)
                 place_item(g, g->depth + 1, IT_DART, 1, bx, by, false);
             }
             game_msg(g, C_DIM, "the dart clatters away into the chasm.");
+            sfx_ex(g, SND_CLINK, x, y, false, 0.7f, 0.3f);
         } else if (tile_water((Tile)lv->t[y][x])) {
             push_fx(g, FX_SPLASH, x, y);
+            sfx_ex(g, SND_WADE, x, y, false, 0, 0.6f);
             if (lv->t[y][x] == T_DEEP) game_msg(g, C_DIM, "the dart sinks into the deep water.");
             else place_item(g, g->depth, IT_DART, 1, x, y, false);
         } else if (rng_chance(&g->rng, 85)) {
             place_item(g, g->depth, IT_DART, 1, x, y, false);
+            if (!m) sfx(g, SND_CLINK, x, y);
         } else {
             game_msg(g, C_DIM, "the dart snaps.");
+            sfx(g, SND_CLINK, x, y);
         }
         make_noise(g, x, y, 5);
         break;
@@ -1265,7 +1326,8 @@ static void resolve_throw(Game *g)
             snprintf(t, sizeof t, "%d", dmg);
             floater(g, x, y, 0xffa040, t);
             push_fx(g, FX_BURN, x, y);
-            if (m->hp <= 0) { kill_mob(g, m); push_fx(g, FX_DISSOLVE, x, y); game_msg(g, C_GOOD, "the torch sears the shade and it burns away to nothing!"); }
+            sfx(g, SND_BURN, x, y);
+            if (m->hp <= 0) { kill_mob(g, m); push_fx(g, FX_DISSOLVE, x, y); sfx(g, SND_DISSOLVE, x, y); game_msg(g, C_GOOD, "the torch sears the shade and it burns away to nothing!"); }
             else game_msg(g, C_TEXT, "the torch sears the shade!");
         } else if (m) {
             int dmg = rng_range(&g->rng, 1, 3);
@@ -1274,7 +1336,8 @@ static void resolve_throw(Game *g)
             m->asleep = false;
             snprintf(t, sizeof t, "%d", dmg);
             floater(g, x, y, 0xffa040, t);
-            if (m->hp <= 0) { kill_mob(g, m); game_msg(g, C_GOOD, "the torch bursts over the %s and it dies in the flames!", mn); }
+            sfx_ex(g, SND_HIT, x, y, false, 0, 0.6f);
+            if (m->hp <= 0) { kill_mob(g, m); sfx(g, SND_KILL, x, y); game_msg(g, C_GOOD, "the torch bursts over the %s and it dies in the flames!", mn); }
             else game_msg(g, C_TEXT, "the torch bursts against the %s in a shower of sparks!", mn);
         }
         if (into_chasm) {
@@ -1286,19 +1349,24 @@ static void resolve_throw(Game *g)
                 g->lower_dirty = true;
             }
             push_fx(g, FX_FALL, x, y);
+            sfx_ex(g, burning ? SND_THUD : SND_HISS, x, y, false, 0.8f, 0.35f);
             if (burning) game_msg(g, C_INFO, "the torch tumbles into the chasm and lands far below, still burning.");
             else game_msg(g, C_DIM, "the torch tumbles into the chasm; far below, a faint hiss, and it is gone.");
         } else if (!floor_torch(g, g->depth, x, y)) {
             push_fx(g, FX_SPLASH, x, y);
+            sfx(g, SND_HISS, x, y);
             game_msg(g, C_DIM, "the torch hisses out in the water.");
         } else {
             push_fx(g, FX_SPARKS, x, y);
+            sfx(g, SND_THUD, x, y);
+            sfx_ex(g, SND_IGNITE, x, y, false, 0.05f, 0.6f);
             if (!m) game_msg(g, C_TEXT, "the torch lands and burns on the floor.");
         }
         make_noise(g, x, y, 3);
         break;
     case IT_POTION:
         push_fx(g, FX_SHATTER, x, y);
+        sfx_ex(g, SND_SHATTER, x, y, false, into_chasm ? 0.8f : 0, into_chasm ? 0.4f : 1);
         if (m) game_msg(g, C_DIM, "the flask shatters against the %s, wasted.", mn);
         else game_msg(g, C_DIM, "the flask shatters%s. Healing potions are better drunk.", into_chasm ? " far below" : "");
         make_noise(g, x, y, 6);
@@ -1316,6 +1384,7 @@ void game_torch_toggle(Game *g)
     if (g->torch_lit) {
         g->torch_lit = false;
         game_msg(g, C_DIM, "you snuff out your torch (%d turns of it left). The dark closes in.", g->torch_fuel);
+        sfx(g, SND_SNUFF, g->player.x, g->player.y);
         end_turn(g);
         return;
     }
@@ -1330,6 +1399,7 @@ void game_torch_toggle(Game *g)
         game_msg(g, C_WARN, "you relight your torch.");
     }
     g->torch_lit = true;
+    sfx(g, SND_IGNITE, g->player.x, g->player.y);
     end_turn(g);
 }
 
@@ -1344,6 +1414,7 @@ bool game_use(Game *g, int slot)
             take_one(g, slot);
             g->torch_fuel = TORCH_FUEL;
             game_msg(g, C_WARN, "you light a fresh torch from the old one.");
+            sfx(g, SND_IGNITE, p->x, p->y);
             end_turn(g);
         } else if (g->torch_fuel > 0) {
             game_torch_toggle(g);
@@ -1360,6 +1431,7 @@ bool game_use(Game *g, int slot)
         snprintf(t, sizeof t, "+%d", heal);
         floater(g, p->x, p->y, 0x8ee070, t);
         game_msg(g, C_GOOD, "you drink the potion. Warmth floods through you.");
+        sfx(g, SND_DRINK, p->x, p->y);
         end_turn(g);
         return true;
     }
@@ -1380,10 +1452,13 @@ bool game_drop(Game *g, int slot)
     for (int i = slot; i < g->ninv - 1; i++) g->inv[i] = g->inv[i + 1];
     g->ninv--;
     char nm[64];
-    if (game_level(g)->t[p->y][p->x] == T_DEEP)
+    if (game_level(g)->t[p->y][p->x] == T_DEEP) {
         game_msg(g, C_DIM, "you let go of %s and it sinks out of sight.", game_item_name(s.kind, s.count, nm, sizeof nm));
-    else
+        sfx_ex(g, SND_SWIM, p->x, p->y, false, 0, 0.6f);
+    } else {
         game_msg(g, C_TEXT, "you put down %s.", game_item_name(s.kind, s.count, nm, sizeof nm));
+        sfx_ex(g, SND_PICKUP, p->x, p->y, false, 0, 0.7f);
+    }
     end_turn(g);
     return true;
 }

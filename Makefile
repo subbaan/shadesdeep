@@ -1,8 +1,8 @@
 CC      ?= cc
 CFLAGS  ?= -O2 -g
 CFLAGS  += -std=gnu11 -Wall -Wextra -D_GNU_SOURCE
-CFLAGS  += $(shell pkg-config --cflags libpng freetype2)
-LDLIBS  += $(shell pkg-config --libs libpng freetype2) -lm -lz
+CFLAGS  += $(shell pkg-config --cflags libpng freetype2 sdl3)
+LDLIBS  += $(shell pkg-config --libs libpng freetype2 sdl3) -lm -lz
 
 BUILD := build
 BIN   := $(BUILD)/lume

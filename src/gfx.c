@@ -158,6 +158,33 @@ void cv_upscale(Canvas *dst, const Canvas *src, int s, int ox, int oy)
     }
 }
 
+void cv_downscale(Canvas *dst, const Canvas *src, int sx, int sy, int sw, int sh)
+{
+    if (dst->w <= 0 || dst->h <= 0 || sw <= 0 || sh <= 0) return;
+    for (int y = 0; y < dst->h; y++) {
+        int y0 = sy + (int)((long)y * sh / dst->h), y1 = sy + (int)((long)(y + 1) * sh / dst->h);
+        if (y1 <= y0) y1 = y0 + 1;
+        y0 = clampi(y0, 0, src->h - 1);
+        y1 = clampi(y1, y0 + 1, src->h);
+        for (int x = 0; x < dst->w; x++) {
+            int x0 = sx + (int)((long)x * sw / dst->w), x1 = sx + (int)((long)(x + 1) * sw / dst->w);
+            if (x1 <= x0) x1 = x0 + 1;
+            x0 = clampi(x0, 0, src->w - 1);
+            x1 = clampi(x1, x0 + 1, src->w);
+            unsigned r = 0, g = 0, b = 0, n = 0;
+            for (int yy = y0; yy < y1; yy++) {
+                const uint32_t *row = src->px + (size_t)yy * src->w;
+                for (int xx = x0; xx < x1; xx++) {
+                    uint32_t c = row[xx];
+                    r += CR(c); g += CG(c); b += CB(c);
+                    n++;
+                }
+            }
+            dst->px[(size_t)y * dst->w + x] = RGB(r / n, g / n, b / n);
+        }
+    }
+}
+
 int image_alloc(Image *im, int w, int h)
 {
     im->w = w;

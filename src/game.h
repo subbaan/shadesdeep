@@ -44,6 +44,7 @@ typedef struct {
     float flash;        /* hit flash timer */
     bool flip;
     float idle;         /* phase for idle bob */
+    bool known;         /* the player has seen it before */
 } Mob;
 
 /* ---------------------------------------------------------------- items */
@@ -88,6 +89,25 @@ typedef struct {
 typedef enum { FX_SPARKS, FX_SHATTER, FX_THUD, FX_FALL, FX_BURN, FX_DISSOLVE, FX_SPLASH, FX_STEAM } FxKind;
 typedef struct { FxKind kind; int x, y; } Fx;
 #define MAX_FX 16
+
+/* sounds the game asks for; the front end plays them (game.c stays silent) */
+typedef enum {
+    SND_STEP, SND_WADE, SND_SWIM, SND_SPLASH, SND_SWING, SND_HIT, SND_HURT, SND_DIE, SND_KILL,
+    SND_RAT, SND_GOBLIN, SND_SHADE, SND_BURN, SND_DISSOLVE, SND_ALERT,
+    SND_IGNITE, SND_SCONCE, SND_SNUFF, SND_HISS, SND_THROW, SND_CLINK, SND_THUD, SND_SHATTER,
+    SND_DRINK, SND_PICKUP, SND_DOOR, SND_STAIRS, SND_FALL, SND_LAND, SND_CLICK,
+    SND_COUNT
+} SoundKind;
+
+typedef struct {
+    SoundKind kind;
+    int x, y;           /* where on the current level */
+    bool global;        /* not placed: heard at full volume (falls, the alert sting) */
+    float delay;        /* seconds */
+    float vol;          /* extra gain, 1 = normal */
+} SoundEv;
+
+#define MAX_SND 32
 
 typedef struct {
     char text[160];
@@ -150,6 +170,8 @@ typedef struct {
     Projectile proj;
     Fx fx[MAX_FX];
     int nfx;
+    SoundEv snd[MAX_SND];
+    int nsnd;
 } Game;
 
 Game *game_new(uint32_t seed);

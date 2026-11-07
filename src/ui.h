@@ -13,7 +13,15 @@ typedef enum {
     UA_NONE, UA_EXPLORE, UA_REST, UA_STAIRS, UA_HELP, UA_ZOOM_IN, UA_ZOOM_OUT,
     UA_JUMP_YES, UA_JUMP_NO, UA_NEW_GAME, UA_QUIT, UA_CLOSE,
     UA_INV, UA_THROW, UA_TORCH, UA_PICK, UA_ITEM_THROW, UA_ITEM_USE, UA_ITEM_DROP, UA_MENU_BACK,
+    UA_MAP,
 } UiAction;
+
+/* where the map overview sits on screen, and which tiles it shows */
+typedef struct {
+    int x, y, w, h;         /* the map picture, screen pixels */
+    int tx, ty, tw, th;     /* tile rectangle shown */
+    float cell;             /* screen pixels per tile */
+} MapLayout;
 
 /* item menus, Brogue style: pick from the pack, then act */
 typedef enum { MENU_NONE, MENU_INV, MENU_THROW, MENU_USE, MENU_DROP, MENU_ITEM } MenuKind;
@@ -44,7 +52,12 @@ typedef struct {
     int menu_slot;          /* the item MENU_ITEM is about */
     bool targeting;         /* aiming a throw */
     int target_slot;
+    bool map;               /* the map overview is open */
+    const Canvas *mini;     /* its picture */
+    MapLayout ml;
 } UiFrame;
+
+void ui_map_layout(const UI *ui, Game *g, int sw, int sh, MapLayout *m);
 
 void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f);
 void ui_set_icons(UI *ui, const Image *icons);          /* item pictures for menus */
