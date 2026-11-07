@@ -2,6 +2,6 @@
 #define VERSION_H
 
 #define LUME_NAME    "lume"
-#define LUME_VERSION "0.2.1"
+#define LUME_VERSION "0.3.0"
 
 #endif

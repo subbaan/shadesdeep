@@ -268,7 +268,7 @@ static void sidebar(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
     Mob *ms = game_mobs(g, g->depth);
     int idx[MAX_MOBS], n = 0;
     for (int i = 0; i < MAX_MOBS; i++)
-        if (ms[i].alive && (lv->f[ms[i].y][ms[i].x] & F_VIS)) idx[n++] = i;
+        if (game_mob_noticed(g, &ms[i])) idx[n++] = i;
     if (!n) return;
     Font *bf = ui->body, *sf = ui->small;
     int line = font_line(bf), pad = ui->px / 2;
@@ -281,12 +281,14 @@ static void sidebar(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         bool hov = f->hover_x == m->x && f->hover_y == m->y;
         if (hov) cv_blend_rect(cv, x + 3, yy - 2, w - 6, line + ui->px / 2, 0x4a3820, 160);
         char name[48];
-        snprintf(name, sizeof name, "%s", MOB_INFO[m->kind].name);
+        bool dark = !(lv->f[m->y][m->x] & F_VIS);
+        snprintf(name, sizeof name, "%s", dark ? "eyes in the dark" : MOB_INFO[m->kind].name);
         name[0] = (char)(name[0] - 32);
         font_draw(bf, cv, x + pad, yy + font_ascent(bf), name, 0xe2d4b4, 255);
-        if (m->asleep) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "asleep", C_INFO, 255);
+        if (dark) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "watching", C_WARN, 255);
+        else if (m->asleep) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "asleep", C_INFO, 255);
         else if (m->hunting) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "hunting", C_WARN, 255);
-        hp_bar(cv, x + pad, yy + line, w - pad * 2, ui->px / 5 + 1, m->hp, m->maxhp);
+        if (!dark) hp_bar(cv, x + pad, yy + line, w - pad * 2, ui->px / 5 + 1, m->hp, m->maxhp);
         yy += line + ui->px / 2;
     }
 }
@@ -296,7 +298,7 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
     if (f->hover_x < 0 || f->mx < 0) return;
     Level *lv = game_level(g);
     int x = f->hover_x, y = f->hover_y;
-    if (!(lv->f[y][x] & F_SEEN)) return;
+    if (!(lv->f[y][x] & F_SEEN) && !(game_mob_at(g, x, y) && game_mob_noticed(g, game_mob_at(g, x, y)))) return;
     char title[64], desc[256], hint[96] = "";
     Mob *m = game_mob_at(g, x, y);
     Light *l = level_light_on(lv, x, y);
@@ -310,8 +312,13 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         snprintf(title, sizeof title, "%s", MOB_INFO[m->kind].name);
         title[0] = (char)(title[0] - 32);
         snprintf(desc, sizeof desc, "%s%s", MOB_INFO[m->kind].desc,
-                 m->asleep ? " It is asleep." : m->hunting ? " It is hunting you." : " It hasn't noticed you.");
+                 m->kind == MK_SHADE && game_firelight(g, g->player.x, g->player.y) > SHADE_FEAR ? " It hangs back from your light."
+                 : m->asleep ? " It is asleep." : m->hunting ? " It is hunting you." : " It hasn't noticed you.");
         snprintf(hint, sizeof hint, "Click to attack");
+    } else if (m && game_mob_noticed(g, m)) {
+        snprintf(title, sizeof title, "Eyes in the dark");
+        snprintf(desc, sizeof desc, "Two pale eyes watch you from beyond your light. Whatever owns them is darker than the dark.");
+        snprintf(hint, sizeof hint, "Throw a torch to see what it is");
     } else if (l && l->kind == L_SCONCE) {
         snprintf(title, sizeof title, l->lit ? "Burning sconce" : "Cold sconce");
         snprintf(desc, sizeof desc, l->lit ? "A torch in an iron bracket lights the room around it. You can be seen in its light."
@@ -420,6 +427,7 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Throw", "t  then aim with the mouse or keys, Tab to cycle targets" },
         { "Use", "a  light a torch, drink a potion;  d  drop" },
         { "Torch", "T  light or snuff;  walk onto a burning torch to take it up" },
+        { "Shades", "living darkness: firelight keeps them back and burns them" },
         { "Chasms", "step in to jump down a level (it hurts)" },
         { "Zoom", "+ and -  or the mouse wheel" },
         { "Text size", "kitty's own font zoom (ctrl+shift+= / -)" },

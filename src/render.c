@@ -606,10 +606,98 @@ static void draw_fixture(Renderer *r, Canvas *cv, const View *v, const Light *l)
     }
 }
 
+/* a shade: a hooded knot of darkness with pale eyes. In the dark only the
+ * eyes show; in light it is a hole in the light. */
+static void draw_shade(Canvas *cv, const View *v, const Mob *m, float ox, float oy, float alpha, bool body)
+{
+    float t = v->time + m->idle * 3;
+    float bob = sinf(t * 1.7f) * 2.0f;
+    float cx = m->rx * TILE + ox + 16 - v->camx, cy = m->ry * TILE + oy + 16 + bob - v->camy;
+    float sway = sinf(t * 1.1f) * 2.5f;
+    bool burn = m->flash > 0;
+    if (body) {
+        /* blobs: hood, shoulders, a body that thins into a swaying tail */
+        float bx[7], by[7], br[7];
+        static const float BY[7] = { -10, -4, -4, 2, 7, 11, 14 }, BR[7] = { 8.5f, 7, 7, 7.5f, 5.8f, 4.2f, 2.8f };
+        static const float BX[7] = { 0, -5.5f, 5.5f, 0, 0, 0, 0 };
+        /* it drinks the light around it */
+        for (int j = -22; j <= 22; j++)
+            for (int i = -22; i <= 22; i++) {
+                int x = (int)cx + i, y = (int)cy + j;
+                if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
+                float d = (i * i + j * j) / 484.0f;
+                if (d >= 1) continue;
+                blend_px(&cv->px[(size_t)y * cv->w + x], 0x020104, (int)(95 * (1 - d) * (1 - d) * alpha));
+            }
+        for (int k = 0; k < 7; k++) {
+            float w = k >= 3 ? (k - 2) / 4.0f : 0;
+            bx[k] = BX[k] + sway * w * w * 1.6f + sinf(t * 2.3f + k * 1.7f) * 0.8f;
+            by[k] = BY[k] + cosf(t * 1.9f + k) * 0.6f;
+            br[k] = BR[k] * (1 + 0.08f * sinf(t * 3.1f + k * 2.1f));
+        }
+        int x0 = (int)cx - 16, y0 = (int)cy - 20;
+        for (int j = 0; j < 38; j++) {
+            int y = y0 + j;
+            if ((unsigned)y >= (unsigned)cv->h) continue;
+            for (int i = 0; i < 32; i++) {
+                int x = x0 + i;
+                if ((unsigned)x >= (unsigned)cv->w) continue;
+                float fx = x - cx + 0.5f, fy = y - cy + 0.5f, dens = 0;
+                for (int k = 0; k < 7; k++) {
+                    float dx = fx - bx[k], dy = fy - by[k];
+                    float q = 1 - (dx * dx + dy * dy) / (br[k] * br[k]);
+                    if (q > 0) dens += q * q;
+                }
+                if (dens <= 0.02f) continue;
+                /* churning edge */
+                float n = sinf(fx * 0.9f + t * 2.7f) * sinf(fy * 0.8f - t * 2.1f);
+                dens = dens * (0.85f + 0.3f * n) - 0.05f;
+                if (dens <= 0) continue;
+                float a = clampf(dens * 1.6f, 0, 0.94f) * alpha;
+                uint32_t rim = burn ? mix(0x401c30, 0xff7020, (int)(m->flash * 256)) : 0x2c2140;
+                uint32_t col = mix(rim, 0x040306, (int)(clampf(dens * 1.3f, 0, 1) * 256));
+                blend_px(&cv->px[(size_t)y * cv->w + x], col, (int)(a * 255));
+            }
+        }
+        /* wisps curling off the hood */
+        for (int k = 0; k < 6; k++) {
+            float ph = fmodf(t * 0.6f + k / 6.0f, 1.0f);
+            float wx = cx + sinf(k * 2.4f + t * 1.3f) * (3 + ph * 6), wy = cy - 15 - ph * 14;
+            float a = (1 - ph) * 0.7f * alpha;
+            cv_disc(cv, wx, wy, 1.6f * (1 - ph * 0.5f), burn ? 0x60301c : 0x0a0710, (int)(a * 255));
+        }
+    }
+    /* eyes, blinking now and then */
+    if (fmodf(t * 0.7f, 4.3f) < 0.12f) return;
+    float look = m->flip ? -1.5f : 1.5f;
+    float ex = cx + look, ey = cy - 10;
+    uint32_t ec = burn ? 0xffd090 : 0xd4ecff;
+    cv_glow(cv, (int)ex, (int)ey, 9, burn ? 0xff8040 : 0x6aa8ff, 0.28f);
+    for (int e = -1; e <= 1; e += 2) {
+        int x = (int)(ex + e * 3.0f), y = (int)ey;
+        for (int j = 0; j < 2; j++)
+            for (int i = 0; i < 2; i++)
+                if ((unsigned)(x + i) < (unsigned)cv->w && (unsigned)(y + j) < (unsigned)cv->h)
+                    cv->px[(size_t)(y + j) * cv->w + x + i] = j ? mix(ec, 0x405870, 90) : ec;
+    }
+}
+
 static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool is_player)
 {
     const Level *lv = v->lv;
     float alpha = 1.0f;
+    if (m->kind == MK_SHADE) {
+        bool body = !v->fog || (lv->f[m->y][m->x] & F_VIS);
+        if (v->fog && !body && !(lv->f[m->y][m->x] & F_LOS)) return;
+        float ox = 0, oy = 0;
+        if (m->bump > 0) {
+            float k = sinf(m->bump * 3.14159f) * 7;
+            float len = sqrtf((float)(m->bdx * m->bdx + m->bdy * m->bdy));
+            if (len > 0) { ox = m->bdx / len * k; oy = m->bdy / len * k; }
+        }
+        draw_shade(cv, v, m, ox, oy, v->fog && body ? fmaxf(v->visf[m->y][m->x], 0.3f) : 1.0f, body);
+        return;
+    }
     if (v->fog && !is_player) {
         if (!(lv->f[m->y][m->x] & F_VIS)) return;
         alpha = v->visf[m->y][m->x];
@@ -1078,7 +1166,7 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
     for (int i = 0; i < g->nfx; i++) {
         Fx *f = &g->fx[i];
         float x = f->x * TILE + TILE / 2.0f, y = f->y * TILE + TILE / 2.0f;
-        int n = f->kind == FX_SHATTER ? 26 : f->kind == FX_FALL ? 18 : 16;
+        int n = f->kind == FX_SHATTER ? 26 : f->kind == FX_FALL ? 18 : f->kind == FX_DISSOLVE ? 40 : 16;
         for (int k = 0; k < n; k++) {
             float a = rng_f(&r->rng) * 6.283f, sp = 20 + rng_f(&r->rng) * 70;
             switch (f->kind) {
@@ -1089,6 +1177,16 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
             case FX_SHATTER:
                 spawn_g(r, x, y, cosf(a) * sp, sinf(a) * sp - 40, 0.4f + rng_f(&r->rng) * 0.5f,
                         k % 3 == 0 ? 0xd0e8f0 : 0xd02838, k % 3 == 0 ? 0.9f : 0.5f, 220);
+                break;
+            case FX_BURN:
+                spawn_g(r, x + (rng_f(&r->rng) - 0.5f) * 18, y + (rng_f(&r->rng) - 0.5f) * 18, cosf(a) * sp * 0.4f,
+                        -20 - rng_f(&r->rng) * 40, 0.3f + rng_f(&r->rng) * 0.5f,
+                        k % 3 ? 0xff8030 : 0xffd080, 0.9f, -20);
+                break;
+            case FX_DISSOLVE:
+                spawn_g(r, x + (rng_f(&r->rng) - 0.5f) * 20, y + (rng_f(&r->rng) - 0.5f) * 24, cosf(a) * 8,
+                        -8 - rng_f(&r->rng) * 18, 1.0f + rng_f(&r->rng) * 1.2f,
+                        k % 4 ? 0x3a3060 : 0x8a90c0, k % 4 ? 0.5f : 0.9f, -6);
                 break;
             case FX_FALL:
                 spawn_g(r, x + (rng_f(&r->rng) - 0.5f) * 14, y, (rng_f(&r->rng) - 0.5f) * 10, 10 + rng_f(&r->rng) * 30,

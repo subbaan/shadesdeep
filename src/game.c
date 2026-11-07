@@ -11,6 +11,9 @@ const MobInfo MOB_INFO[MK_COUNT] = {
     [MK_RAT]    = { "rat", "A rat the size of a dog. Quick to bite, quicker to die.", 5, 70, 1, 3, 0, 6 },
     [MK_GOBLIN] = { "goblin", "A wiry goblin with a rusty blade. It sees well in the dark, but even better in the light.",
                     11, 70, 2, 4, 10, 8 },
+    [MK_SHADE]  = { "shade", "A scrap of living darkness that hunts by the warmth of the living. It cannot bear firelight: "
+                    "a torch keeps it at bay and burns it, and darts pass straight through it.",
+                    10, 80, 2, 5, 20, 9 },
 };
 
 const ItemInfo ITEM_INFO[IT_COUNT] = {
@@ -94,6 +97,21 @@ static void mob_init(Mob *m, MobKind k, int x, int y)
     m->idle = (float)(hash2(x, y, 9) % 628) / 100.0f;
 }
 
+/* firelight from a level's fixed lights: the warm part of the light, so the
+ * cold glow of crystals and moss doesn't count */
+static float level_fire(const Level *lv, int x, int y)
+{
+    if (!in_map(x, y)) return 0;
+    float f = lv->lr[y][x] - 0.5f * lv->lb[y][x];
+    return f > 0 ? f : 0;
+}
+
+float game_firelight(Game *g, int x, int y)
+{
+    if (!in_map(x, y)) return 0;
+    return level_fire(game_level(g), x, y) + (g->torch_lit ? g->plight[y][x] : 0);
+}
+
 static void spawn_mobs(Game *g, int d)
 {
     Level *lv = g->lv[d];
@@ -108,9 +126,14 @@ static void spawn_mobs(Game *g, int d)
             if (g->mobs[d][i].x == x && g->mobs[d][i].y == y) taken = true;
         if (taken) continue;
         MobKind k = rng_chance(&r, d == 1 ? 30 : 30 + d * 12) ? MK_GOBLIN : MK_RAT;
+        /* shades gather in the dark rooms from depth 2 */
+        int rm = lv->room[y][x];
+        if (d >= 2 && level_fire(lv, x, y) < SHADE_FEAR * 0.5f
+            && rng_chance(&r, lv->rooms[rm].dark ? 35 + d * 5 : 4 + d * 2))
+            k = MK_SHADE;
         Mob *m = &g->mobs[d][placed++];
         mob_init(m, k, x, y);
-        m->asleep = rng_chance(&r, 65);
+        m->asleep = k != MK_SHADE && rng_chance(&r, 65);
         m->flip = rng_chance(&r, 50);
     }
 }
@@ -169,16 +192,25 @@ static void view_mark(void *vc, int x, int y, float d)
     Tile t = (Tile)lv->t[y][x];
     Light *fix = level_light_on(lv, x, y);
     bool see = d <= 1.5f || tile_bright(c->g, x, y) > 0.10f || t == T_CHASM || (fix && fix->lit);
+    lv->f[y][x] |= F_LOS;
     if (see) lv->f[y][x] |= F_VIS | F_SEEN;
+}
+
+/* a monster you can make out: in view, or a shade's eyes in the dark */
+bool game_mob_noticed(Game *g, const Mob *m)
+{
+    Level *lv = game_level(g);
+    if (!m->alive) return false;
+    uint8_t f = lv->f[m->y][m->x];
+    return (f & F_VIS) || (m->kind == MK_SHADE && (f & F_LOS));
 }
 
 static int count_visible_mobs(Game *g)
 {
-    Level *lv = game_level(g);
     int n = 0;
     Mob *m = g->mobs[g->depth];
     for (int i = 0; i < MAX_MOBS; i++)
-        if (m[i].alive && (lv->f[m[i].y][m[i].x] & F_VIS)) n++;
+        if (game_mob_noticed(g, &m[i])) n++;
     return n;
 }
 
@@ -187,7 +219,7 @@ static void compute_view(Game *g)
     Level *lv = game_level(g);
     if (lv->light_dirty) level_relight(lv);
     for (int y = 0; y < MAP_H; y++)
-        for (int x = 0; x < MAP_W; x++) lv->f[y][x] &= (uint8_t)~F_VIS;
+        for (int x = 0; x < MAP_W; x++) lv->f[y][x] &= (uint8_t)~(F_VIS | F_LOS);
     memset(g->plight, 0, sizeof g->plight);
     ViewCtx c = { g, lv };
     fov_cast(lv, g->player.x, g->player.y, g->torch_lit ? 8 : 4, plight_mark, &c);
@@ -196,8 +228,9 @@ static void compute_view(Game *g)
     if (n > g->seen_mobs && g->autom != AUTO_NONE) {
         Mob *m = g->mobs[g->depth];
         for (int i = 0; i < MAX_MOBS; i++)
-            if (m[i].alive && (lv->f[m[i].y][m[i].x] & F_VIS)) {
-                game_msg(g, C_WARN, "you see a %s%s.", MOB_INFO[m[i].kind].name, m[i].asleep ? " (asleep)" : "");
+            if (game_mob_noticed(g, &m[i])) {
+                if (!(lv->f[m[i].y][m[i].x] & F_VIS)) game_msg(g, C_WARN, "two pale eyes watch you from the dark.");
+                else game_msg(g, C_WARN, "you see a %s%s.", MOB_INFO[m[i].kind].name, m[i].asleep ? " (asleep)" : "");
                 break;
             }
         game_stop(g);
@@ -350,10 +383,12 @@ static bool mob_free(Game *g, int x, int y)
 static void mob_step_toward(Game *g, Mob *m, int tx, int ty)
 {
     Level *lv = game_level(g);
+    bool shade = m->kind == MK_SHADE;
     int best = -1, bd = cheb(m->x, m->y, tx, ty) * 10 + 5;
     for (int d = 0; d < 8; d++) {
         int nx = m->x + DX8[d], ny = m->y + DY8[d];
         if (!mob_free(g, nx, ny) || !diag_ok(lv, m->x, m->y, DX8[d], DY8[d])) continue;
+        if (shade && game_firelight(g, nx, ny) > SHADE_FEAR) continue;
         int dd = cheb(nx, ny, tx, ty) * 10 + abs(nx - tx) + abs(ny - ty);
         if (dd < bd) { bd = dd; best = d; }
     }
@@ -365,6 +400,40 @@ static void mob_step_toward(Game *g, Mob *m, int tx, int ty)
         return;
     }
     start_tween(m, nx, ny);
+}
+
+static void push_fx(Game *g, FxKind k, int x, int y);
+
+/* a shade caught in firelight burns and flees for the darkest ground near it */
+static bool shade_burns(Game *g, Mob *m)
+{
+    Level *lv = game_level(g);
+    if (game_firelight(g, m->x, m->y) <= SHADE_FEAR) return false;
+    bool seen = lv->f[m->y][m->x] & (F_VIS | F_LOS);
+    int dmg = rng_range(&g->rng, 1, 3);
+    m->hp -= dmg;
+    m->flash = 1;
+    char t[16];
+    snprintf(t, sizeof t, "%d", dmg);
+    floater(g, m->x, m->y, 0xffa040, t);
+    push_fx(g, FX_BURN, m->x, m->y);
+    if (m->hp <= 0) {
+        kill_mob(g, m);
+        push_fx(g, FX_DISSOLVE, m->x, m->y);
+        if (seen) game_msg(g, C_GOOD, "the shade burns away to nothing.");
+        return true;
+    }
+    if (seen) game_msg(g, C_TEXT, "the shade writhes in the light!");
+    int best = -1;
+    float bf = game_firelight(g, m->x, m->y);
+    for (int d = 0; d < 8; d++) {
+        int nx = m->x + DX8[d], ny = m->y + DY8[d];
+        if (!mob_free(g, nx, ny) || !diag_ok(lv, m->x, m->y, DX8[d], DY8[d]) || lv->t[ny][nx] == T_DOOR) continue;
+        float f = game_firelight(g, nx, ny);
+        if (f < bf) { bf = f; best = d; }
+    }
+    if (best >= 0) start_tween(m, m->x + DX8[best], m->y + DY8[best]);
+    return true;
 }
 
 static void monsters_act(Game *g)
@@ -380,6 +449,11 @@ static void monsters_act(Game *g)
         const MobInfo *mi = &MOB_INFO[m->kind];
         int dist = cheb(m->x, m->y, p->x, p->y);
         float range = pb > 0.30f ? (float)mi->perception : 2.5f;
+        bool shade = m->kind == MK_SHADE;
+        if (shade) {
+            if (shade_burns(g, m)) continue;
+            range = (float)mi->perception;          /* it feels your warmth, lit or not */
+        }
         bool sees = dist <= range && los(lv, m->x, m->y, p->x, p->y);
         if (m->asleep) {
             int pct = !sees ? 0 : dist <= 2 ? 45 : 20;
@@ -392,7 +466,8 @@ static void monsters_act(Game *g)
             continue;
         }
         if (sees) { m->hunting = true; m->tx = p->x; m->ty = p->y; }
-        if (dist == 1 && diag_ok(lv, m->x, m->y, p->x - m->x, p->y - m->y) && (sees || m->hunting)) {
+        if (dist == 1 && diag_ok(lv, m->x, m->y, p->x - m->x, p->y - m->y) && (sees || m->hunting)
+            && !(shade && game_firelight(g, p->x, p->y) > SHADE_FEAR)) {
             attack(g, m, p);
             continue;
         }
@@ -402,7 +477,8 @@ static void monsters_act(Game *g)
         } else if (rng_chance(&g->rng, 35)) {
             int d = rng_range(&g->rng, 0, 7);
             int nx = m->x + DX8[d], ny = m->y + DY8[d];
-            if (mob_free(g, nx, ny) && lv->t[ny][nx] != T_DOOR && diag_ok(lv, m->x, m->y, DX8[d], DY8[d]))
+            if (mob_free(g, nx, ny) && lv->t[ny][nx] != T_DOOR && diag_ok(lv, m->x, m->y, DX8[d], DY8[d])
+                && !(shade && game_firelight(g, nx, ny) > SHADE_FEAR))
                 start_tween(m, nx, ny);
         }
     }
@@ -780,6 +856,19 @@ static void auto_step(Game *g)
 }
 
 /* developer: stand at the edge of the first chasm, with the level revealed */
+bool game_debug_spawn(Game *g, MobKind k, int x, int y)
+{
+    if (!in_map(x, y) || !mob_free(g, x, y)) return false;
+    Mob *ms = g->mobs[g->depth];
+    for (int i = 0; i < MAX_MOBS; i++)
+        if (!ms[i].alive) {
+            mob_init(&ms[i], k, x, y);
+            compute_view(g);
+            return true;
+        }
+    return false;
+}
+
 bool game_debug_to_chasm(Game *g)
 {
     Level *lv = game_level(g);
@@ -1049,6 +1138,11 @@ static void resolve_throw(Game *g)
     char t[16];
     switch (pr->kind) {
     case IT_DART:
+        if (m && m->kind == MK_SHADE) {
+            game_msg(g, C_DIM, "the dart passes straight through the shade.");
+            m->hunting = true;
+            m = NULL;
+        }
         if (m) {
             int chance = m->asleep ? 100 : 88 - MOB_INFO[m->kind].def;
             m->asleep = false;
@@ -1081,7 +1175,16 @@ static void resolve_throw(Game *g)
         make_noise(g, x, y, 5);
         break;
     case IT_TORCH:
-        if (m) {
+        if (m && m->kind == MK_SHADE) {
+            int dmg = rng_range(&g->rng, 4, 8);
+            m->hp -= dmg;
+            m->flash = 1;
+            snprintf(t, sizeof t, "%d", dmg);
+            floater(g, x, y, 0xffa040, t);
+            push_fx(g, FX_BURN, x, y);
+            if (m->hp <= 0) { kill_mob(g, m); push_fx(g, FX_DISSOLVE, x, y); game_msg(g, C_GOOD, "the torch sears the shade and it burns away to nothing!"); }
+            else game_msg(g, C_TEXT, "the torch sears the shade!");
+        } else if (m) {
             int dmg = rng_range(&g->rng, 1, 3);
             m->hp -= dmg;
             m->flash = 1;

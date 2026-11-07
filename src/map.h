@@ -51,6 +51,7 @@ enum {
     F_SEEN    = 1,      /* remembered */
     F_VIS     = 2,      /* in view this turn */
     F_CORR    = 4,      /* corridor */
+    F_LOS     = 8,      /* in line of sight this turn, lit or not (eyes in the dark) */
 };
 
 typedef enum { L_SCONCE, L_BRAZIER, L_CRYSTAL, L_MOSS, L_FLOORTORCH, L_PLAYER } LightKind;

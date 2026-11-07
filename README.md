@@ -5,7 +5,7 @@ art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.2.1 (torches and items) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.3.0 (things in the dark) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 ## Build and run
 
@@ -39,6 +39,12 @@ FreeType development packages (`sudo pacman -S base-devel libpng zlib freetype2`
   burns on the floor for a while), or to lure monsters with the noise. Walk
   onto a burning torch with your hand free to take it up again; one that
   burns out leaves a charred stub.
+- **Shades** (from depth 2) are living darkness. They gather in unlit rooms,
+  hunt you by your warmth whether you are lit or not, and in the dark you see
+  only their eyes. They cannot enter firelight (sconces, burning torches, a
+  torch in your hand; the cold glow of crystals and moss doesn't count), and
+  light burns them. Darts pass straight through; a thrown torch sears them.
+  So light keeps shades away while it shows you to everything else.
 - **Chasms:** you can see the real level below through them. Stepping in asks
   whether to jump: it is a quick way down, but the fall hurts. Anything you
   throw into a chasm lands on the level below, and a burning torch keeps
@@ -57,7 +63,8 @@ chasm with the level revealed, `LUME_DUMP_JUMP=N` jumps down N chasms, and
 lights a torch, `LUME_DUMP_MENU=inv|throw|use|item` opens a menu,
 `LUME_DUMP_AIM=dx,dy` aims a torch and `LUME_DUMP_THROW=dx,dy,frac` freezes a
 thrown torch part-way through its flight. `LUME_DUMP_REST=N` waits N turns
-first (e.g. to let a thrown torch burn out).
+first (e.g. to let a thrown torch burn out). `LUME_DUMP_SHADE="dx,dy;dx,dy"`
+puts shades near the player.
 
 The tiles and sprites are procedural placeholders (`src/tiles.c`) until the
 real art arrives. Fonts: Cinzel and Alegreya (SIL Open Font License, see

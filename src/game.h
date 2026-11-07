@@ -14,7 +14,9 @@
 #define MAX_FLOAT 32
 #define MAX_PATH  (MAP_W * MAP_H)
 
-typedef enum { MK_PLAYER, MK_RAT, MK_GOBLIN, MK_COUNT } MobKind;
+typedef enum { MK_PLAYER, MK_RAT, MK_GOBLIN, MK_SHADE, MK_COUNT } MobKind;
+
+#define SHADE_FEAR 0.30f   /* firelight a shade cannot bear */
 
 typedef struct {
     const char *name;
@@ -83,7 +85,7 @@ typedef struct {
 } Projectile;
 
 /* one-shot visual events for the renderer (sparks, splashes) */
-typedef enum { FX_SPARKS, FX_SHATTER, FX_THUD, FX_FALL } FxKind;
+typedef enum { FX_SPARKS, FX_SHATTER, FX_THUD, FX_FALL, FX_BURN, FX_DISSOLVE } FxKind;
 typedef struct { FxKind kind; int x, y; } Fx;
 #define MAX_FX 16
 
@@ -158,6 +160,9 @@ Mob  *game_mob_at(Game *g, int x, int y);
 
 void game_update(Game *g, float dt);                /* animation + automatic movement */
 bool game_busy(const Game *g);                      /* the player's move is still animating */
+/* firelight on a tile (sconces, burning torches, a torch in your hand): what shades fear */
+float game_firelight(Game *g, int x, int y);
+bool  game_mob_noticed(Game *g, const Mob *m);    /* in view, or a shade's eyes in the dark */
 
 /* Player commands. Each returns true if a turn passed. */
 bool game_move(Game *g, int dx, int dy);
@@ -174,6 +179,7 @@ void game_jump_answer(Game *g, bool yes);
 int  game_path_preview(Game *g, int x, int y, int *out, int max);
 
 bool game_debug_to_chasm(Game *g);
+bool game_debug_spawn(Game *g, MobKind k, int x, int y);   /* developer: put a monster there */
 
 /* items */
 FloorItem *game_item_at(Game *g, int x, int y);

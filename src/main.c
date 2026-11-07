@@ -188,11 +188,10 @@ static void draw_frame(Renderer *r, UI *ui, Game *g, Frame *fr, Hover *hv, const
 /* visible monsters, nearest first */
 static int visible_mobs(Game *g, Mob **out, int max)
 {
-    Level *lv = game_level(g);
     Mob *ms = game_mobs(g, g->depth);
     int n = 0;
     for (int i = 0; i < MAX_MOBS && n < max; i++)
-        if (ms[i].alive && (lv->f[ms[i].y][ms[i].x] & F_VIS)) out[n++] = &ms[i];
+        if (game_mob_noticed(g, &ms[i])) out[n++] = &ms[i];
     Mob *p = &g->player;
     for (int i = 1; i < n; i++)
         for (int j = i; j > 0; j--) {
@@ -273,6 +272,18 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         if (game_throw(g, 0, g->player.x + adx, g->player.y + ady))
             while (g->proj.active && g->proj.pos < g->proj.n * frac) game_update(g, 1.0f / 240);
         if (frac >= 1) for (int i = 0; i < 60; i++) game_update(g, 1.0f / 60);
+    }
+    /* LUME_DUMP_SHADE="dx,dy[;dx,dy...]": shades near the player */
+    if (getenv("LUME_DUMP_SHADE")) {
+        const char *s = getenv("LUME_DUMP_SHADE");
+        int sx, sy, used;
+        while (sscanf(s, "%d,%d%n", &sx, &sy, &used) == 2) {
+            if (!game_debug_spawn(g, MK_SHADE, g->player.x + sx, g->player.y + sy))
+                fprintf(stderr, "%s: no room for a shade at %+d,%+d\n", LUME_NAME, sx, sy);
+            s += used;
+            if (*s != ';') break;
+            s++;
+        }
     }
     /* LUME_DUMP_REST=N: wait N turns (lets thrown torches burn out) */
     for (int n = getenv("LUME_DUMP_REST") ? atoi(getenv("LUME_DUMP_REST")) : 0; n > 0 && g->state == GS_PLAY; n--) {
