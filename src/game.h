@@ -16,7 +16,8 @@
 
 typedef enum { MK_PLAYER, MK_RAT, MK_GOBLIN, MK_SHADE, MK_COUNT } MobKind;
 
-#define SHADE_FEAR 0.30f   /* firelight a shade cannot bear */
+#define SHADE_FEAR 0.30f   /* firelight a shade cannot bear: it won't enter it, and a fixed fire
+                              * (sconce, torch on the floor) burns it; a carried torch only drives it off */
 
 typedef struct {
     const char *name;
@@ -45,6 +46,7 @@ typedef struct {
     bool flip;
     float idle;         /* phase for idle bob */
     bool known;         /* the player has seen it before */
+    int stun;           /* turns a shade is held by a sudden blaze */
 } Mob;
 
 /* ---------------------------------------------------------------- items */
@@ -166,6 +168,10 @@ typedef struct {
     int ninv;
     bool torch_lit;                     /* carrying a burning torch */
     int torch_fuel;                     /* turns left on the torch in hand (0 = none started) */
+    int chill;                          /* max HP lost to shades' touch, until warmed by a fire */
+    int warm_t;                         /* turns spent warming */
+    int torches_made;                   /* torches put on the floor so far (the supply is paced) */
+    bool gnaw_told;                     /* explained that shades eat your torch's fuel */
     FloorItem items[MAX_DEPTH + 2][MAX_ITEMS];
     Projectile proj;
     Fx fx[MAX_FX];
@@ -185,6 +191,8 @@ void game_update(Game *g, float dt);                /* animation + automatic mov
 bool game_busy(const Game *g);                      /* the player's move is still animating */
 /* firelight on a tile (sconces, burning torches, a torch in your hand): what shades fear */
 float game_firelight(Game *g, int x, int y);
+int   game_max_hp(const Game *g);                 /* max HP less the chill */
+bool  game_by_fire(Game *g);                      /* standing in a fixed fire's warmth */
 bool  game_mob_noticed(Game *g, const Mob *m);    /* in view, or a shade's eyes in the dark */
 
 /* Player commands. Each returns true if a turn passed. */
@@ -204,7 +212,8 @@ int  game_path_preview(Game *g, int x, int y, int *out, int max);
 bool game_debug_to_chasm(Game *g);
 bool game_debug_to_water(Game *g, int wade);   /* developer: 0 shore, 1 shallows, 2 deep */
 bool game_debug_spawn(Game *g, MobKind k, int x, int y);
-bool game_debug_to_spot(Game *g, int kind);   /* developer: 0 corridor, 1 side door, 2 south wall */   /* developer: put a monster there */
+bool game_debug_to_spot(Game *g, int kind);   /* developer: 0 corridor, 1 side door, 2 south wall,
+                                                 * 3 by a cold sconce with a shade near, 4 and light it */   /* developer: put a monster there */
 
 /* items */
 FloorItem *game_item_at(Game *g, int x, int y);

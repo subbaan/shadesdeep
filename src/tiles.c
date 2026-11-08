@@ -273,20 +273,37 @@ static void build_door_open(Image *im, bool side)
         }
 }
 
+/* A torch in an iron sconce: a riveted backplate on the wall, a cup on a short
+ * arm, and the torch standing in it. 16 x 22; the torch head's top is at y 4. */
 static void build_sconce(Image *im)
 {
-    image_alloc(im, 12, 18);
-    /* iron bracket (bottom) and wooden torch (top) */
-    for (int y = 0; y < 18; y++)
-        for (int x = 0; x < 12; x++) {
+    const int W = 16, H = 22;
+    image_alloc(im, W, H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
             uint32_t c = 0;
-            if (y >= 4 && y < 13 && x >= 5 && x <= 6) c = A(x == 5 ? 0x7a5230 : 0x50341c);   /* torch */
-            if (y >= 1 && y < 5 && x >= 4 && x <= 7) c = A(0x3a2a1c);                        /* head (char) */
-            if (y == 11 && x >= 3 && x <= 8) c = A(0x4a4848);                                /* ring */
-            if (y >= 12 && y < 17 && x == 6) c = A(0x3a3838);                                /* arm */
-            if (y == 16 && x >= 4 && x <= 8) c = A(0x2a2828);                                /* plate */
-            if (y == 17 && x >= 3 && x <= 9) c = A(0x1a1818);
-            im->px[y * 12 + x] = c;
+            /* backplate: a small iron shield, rounded at the foot */
+            float dx = x - 7.5f;
+            bool plate = y >= 9 && y <= 20 && fabsf(dx) <= 5.5f && !(y >= 17 && dx * dx + (y - 14.5f) * (y - 14.5f) * 1.6f > 40);
+            if (plate) {
+                bool edge = fabsf(dx) > 4.5f || y == 9 || (y >= 16 && dx * dx + (y - 14.5f) * (y - 14.5f) * 1.6f > 26);
+                c = edge ? (dx < 0 || y == 9 ? 0x9a948c : 0x2a2624) : jitter(0x55504a, (int)((fbm(x * 0.5f, y * 0.5f, 31) - 0.5f) * 24));
+                if ((x == 4 || x == 11) && (y == 11 || y == 17)) c = 0xc8c0b0;          /* rivets */
+                c = A(c);
+            }
+            /* arm from the plate to the cup */
+            if (y >= 14 && y <= 16 && x >= 7 && x <= 8) c = A(x == 7 ? 0x7a7672 : 0x3a3634);
+            /* the torch handle, lit from the left */
+            if (y >= 7 && y <= 14 && x >= 6 && x <= 9) c = A(x == 6 ? 0xa06a3a : x == 9 ? 0x4a3018 : 0x7a5028);
+            /* the cup */
+            if (y >= 11 && y <= 13 && x >= 5 && x <= 10) c = A(y == 11 ? 0x9a9690 : x == 5 ? 0x7a7672 : 0x3e3a38);
+            /* the pitch-wrapped head */
+            if (y >= 3 && y <= 7 && x >= 5 && x <= 10 && !(y == 3 && (x == 5 || x == 10))) {
+                uint32_t h = (y + x) % 3 == 0 ? 0x4a3422 : 0x241a12;
+                if (x == 5) h = 0x5a4430;
+                c = A(h);
+            }
+            im->px[y * W + x] = c;
         }
 }
 

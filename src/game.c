@@ -11,9 +11,11 @@ const MobInfo MOB_INFO[MK_COUNT] = {
     [MK_RAT]    = { "rat", "A rat the size of a dog. Quick to bite, quicker to die.", 5, 70, 1, 3, 0, 6 },
     [MK_GOBLIN] = { "goblin", "A wiry goblin with a rusty blade. It sees well in the dark, but even better in the light.",
                     11, 70, 2, 4, 10, 8 },
-    [MK_SHADE]  = { "shade", "A scrap of living darkness that hunts by the warmth of the living. It cannot bear firelight: "
-                    "a torch keeps it at bay and burns it, and darts pass straight through it.",
-                    10, 80, 2, 5, 20, 9 },
+    [MK_SHADE]  = { "shade", "A scrap of living darkness that hunts by the warmth of the living. A carried torch keeps "
+                    "it at bay, but it gnaws at the flame from the edge of the light. Only a fixed fire burns it: a "
+                    "sconce lit around it, or a torch thrown at it. Its touch leaves a chill that only a fire drives "
+                    "out, and darts pass straight through it.",
+                    10, 80, 1, 3, 20, 9 },
 };
 
 const ItemInfo ITEM_INFO[IT_COUNT] = {
@@ -130,6 +132,19 @@ float game_firelight(Game *g, int x, int y)
     return level_fire(game_level(g), x, y) + (g->torch_lit ? g->plight[y][x] : 0);
 }
 
+int game_max_hp(const Game *g)
+{
+    int m = g->player.maxhp - g->chill;
+    return m < 1 ? 1 : m;
+}
+
+bool game_by_fire(Game *g)
+{
+    return level_fire(game_level(g), g->player.x, g->player.y) > SHADE_FEAR;
+}
+
+#define TORCHES_PER_LEVEL 0.75f    /* the paced supply of torches on the floor */
+
 static void spawn_mobs(Game *g, int d)
 {
     Level *lv = g->lv[d];
@@ -169,9 +184,24 @@ static void spawn_items(Game *g, int d)
             if (g->items[d][i].x == x && g->items[d][i].y == y) taken = true;
         if (taken) continue;
         int roll = rng_range(&r, 0, 99);
+        ItemKind k = roll < 22 ? IT_TORCH : roll < 62 ? IT_DART : IT_POTION;
+        /* torches are the clock: don't let luck run far ahead of the pace */
+        if (k == IT_TORCH && g->torches_made + 1 > d * TORCHES_PER_LEVEL + 1.5f) k = IT_DART;
+        if (k == IT_TORCH) g->torches_made++;
         FloorItem *it = &g->items[d][placed++];
-        *it = (FloorItem){ true, roll < 45 ? IT_TORCH : roll < 75 ? IT_DART : IT_POTION, 1, x, y, false };
+        *it = (FloorItem){ true, k, 1, x, y, false };
         if (it->kind == IT_DART) it->count = rng_range(&r, 2, 4);
+    }
+    /* ...nor fall far behind it */
+    for (int tries = 0; tries < 2000 && g->torches_made < (int)(d * TORCHES_PER_LEVEL) && placed < MAX_ITEMS; tries++) {
+        int x = rng_range(&r, 1, MAP_W - 2), y = rng_range(&r, 1, MAP_H - 2);
+        if (lv->t[y][x] != T_FLOOR || lv->room[y][x] < 0) continue;
+        bool taken = false;
+        for (int i = 0; i < placed; i++)
+            if (g->items[d][i].x == x && g->items[d][i].y == y) taken = true;
+        if (taken) continue;
+        g->items[d][placed++] = (FloorItem){ true, IT_TORCH, 1, x, y, false };
+        g->torches_made++;
     }
 }
 
@@ -350,6 +380,16 @@ static void attack(Game *g, Mob *a, Mob *d)
         return;
     }
     int dmg = rng_range(&g->rng, ai->dmin, ai->dmax);
+    int chill = 0;
+    if (a->kind == MK_SHADE && pl_def) {
+        /* the cold of its touch takes from your max HP until a fire warms you */
+        chill = rng_range(&g->rng, 1, 2);
+        if (g->chill + chill > d->maxhp / 2) chill = d->maxhp / 2 - g->chill;     /* it can take half, no more */
+        if (chill < 0) chill = 0;
+        g->chill += chill;
+        g->warm_t = 0;
+        if (d->hp > game_max_hp(g)) d->hp = game_max_hp(g);
+    }
     d->hp -= dmg;
     d->flash = 1.0f;
     sfx_ex(g, pl_def ? SND_HURT : SND_HIT, d->x, d->y, false, 0.06f, 1);
@@ -363,6 +403,9 @@ static void attack(Game *g, Mob *a, Mob *d)
             game_msg(g, C_BAD, "the %s kills you...", ai->name);
             g->state = GS_DEAD;
             sfx_ex(g, SND_DIE, d->x, d->y, true, 0.25f, 1);
+        } else if (chill) {
+            game_msg(g, C_BAD, "the shade's touch chills you to the bone (max HP -%d until a fire warms you).", chill);
+            floater(g, d->x, d->y, 0x9ad8ff, "chill");
         } else {
             game_msg(g, C_BAD, "the %s hits you.", ai->name);
         }
@@ -450,12 +493,20 @@ static void mob_go(Game *g, Mob *m, int nx, int ny)
 }
 
 /* a shade caught in firelight burns and flees for the darkest ground near it */
+static void shade_flee(Game *g, Mob *m);
+
 static bool shade_burns(Game *g, Mob *m)
 {
     Level *lv = game_level(g);
     if (game_firelight(g, m->x, m->y) <= SHADE_FEAR) return false;
     bool seen = lv->f[m->y][m->x] & (F_VIS | F_LOS);
-    int dmg = rng_range(&g->rng, 1, 3);
+    if (level_fire(lv, m->x, m->y) <= SHADE_FEAR) {
+        /* only your torch's light: it can't hurt the shade, but it can't stay in it either */
+        if (seen && rng_chance(&g->rng, 40)) game_msg(g, C_DIM, "the shade recoils from your torch.");
+        shade_flee(g, m);
+        return true;
+    }
+    int dmg = rng_range(&g->rng, 3, 5);
     m->hp -= dmg;
     m->flash = 1;
     char t[16];
@@ -470,7 +521,31 @@ static bool shade_burns(Game *g, Mob *m)
         if (seen) game_msg(g, C_GOOD, "the shade burns away to nothing.");
         return true;
     }
-    if (seen) game_msg(g, C_TEXT, "the shade writhes in the light!");
+    if (m->stun > 0) {
+        m->stun--;
+        if (seen) game_msg(g, C_TEXT, "the shade writhes in the blaze, unable to flee!");
+        return true;
+    }
+    if (seen) game_msg(g, C_TEXT, "the shade writhes in the firelight!");
+    shade_flee(g, m);
+    return true;
+}
+
+/* A fire just flared up (a sconce lit, a torch landing): shades caught in it are
+ * held for a moment, so the blaze has time to burn them. */
+static void flare(Game *g)
+{
+    Level *lv = game_level(g);
+    if (lv->light_dirty) level_relight(lv);
+    Mob *ms = g->mobs[g->depth];
+    for (int i = 0; i < MAX_MOBS; i++)
+        if (ms[i].alive && ms[i].kind == MK_SHADE && level_fire(lv, ms[i].x, ms[i].y) > SHADE_FEAR) ms[i].stun = 2;
+}
+
+/* step to the darkest ground next to it */
+static void shade_flee(Game *g, Mob *m)
+{
+    Level *lv = game_level(g);
     int best = -1;
     float bf = game_firelight(g, m->x, m->y);
     for (int d = 0; d < 8; d++) {
@@ -480,13 +555,25 @@ static bool shade_burns(Game *g, Mob *m)
         if (f < bf) { bf = f; best = d; }
     }
     if (best >= 0) mob_go(g, m, m->x + DX8[best], m->y + DY8[best]);
-    return true;
+}
+
+/* bring the level's light and the torch's glow up to date (a sconce just lit,
+ * a torch just struck) before the monsters judge them */
+static void update_light(Game *g)
+{
+    Level *lv = game_level(g);
+    if (lv->light_dirty) level_relight(lv);
+    memset(g->plight, 0, sizeof g->plight);
+    ViewCtx c = { g, lv };
+    fov_cast(lv, g->player.x, g->player.y, g->torch_lit ? 8 : 4, plight_mark, &c);
 }
 
 static void monsters_act(Game *g)
 {
+    update_light(g);
     Level *lv = game_level(g);
     Mob *p = &g->player;
+    int gnaw = 0;
     /* the player stands out when a lamp or torch is on them; their own glow is dim */
     float pb = level_brightness(lv, p->x, p->y) + (g->torch_lit ? 1.0f : 0.0f);
     Mob *ms = g->mobs[g->depth];
@@ -498,6 +585,8 @@ static void monsters_act(Game *g)
         float range = pb > 0.30f ? (float)mi->perception : 2.5f;
         bool shade = m->kind == MK_SHADE;
         if (shade) {
+            /* a shade within your torch's glow gnaws at the flame */
+            if (g->torch_lit && g->plight[m->y][m->x] > 0 && dist <= 8) gnaw++;
             if (shade_burns(g, m)) continue;
             range = (float)mi->perception;          /* it feels your warmth, lit or not */
         }
@@ -534,6 +623,15 @@ static void monsters_act(Game *g)
             if (mob_free(g, nx, ny) && lv->t[ny][nx] != T_DOOR && diag_ok(lv, m->x, m->y, DX8[d], DY8[d])
                 && !(shade && game_firelight(g, nx, ny) > SHADE_FEAR) && !(m->kind == MK_GOBLIN && lv->t[ny][nx] == T_DEEP))
                 mob_go(g, m, nx, ny);
+        }
+    }
+    if (gnaw && g->torch_lit && g->state != GS_DEAD) {
+        if (gnaw > 3) gnaw = 3;
+        g->torch_fuel -= gnaw;
+        if (g->torch_fuel < 1) g->torch_fuel = 1;
+        if (!g->gnaw_told) {
+            g->gnaw_told = true;
+            game_msg(g, C_WARN, "your torch gutters: something in the dark is feeding on its flame.");
         }
     }
 }
@@ -573,9 +671,18 @@ static void end_turn(Game *g)
     burn_floor_torches(g, g->depth + 1);
     monsters_act(g);
     Mob *p = &g->player;
-    if (++g->regen >= 9) {
+    if (g->chill > 0 && g->state != GS_DEAD) {
+        /* a fixed fire warms you quickly, a torch in hand slowly, the dark not at all */
+        int need = game_by_fire(g) ? 2 : g->torch_lit ? 12 : 0;
+        if (need && ++g->warm_t >= need) {
+            g->warm_t = 0;
+            g->chill--;
+            if (!g->chill) game_msg(g, C_GOOD, "the last of the chill leaves your bones.");
+        }
+    }
+    if (++g->regen >= (game_by_fire(g) ? 5 : 9)) {
         g->regen = 0;
-        if (p->hp < p->maxhp && g->state != GS_DEAD) p->hp++;
+        if (p->hp < game_max_hp(g) && g->state != GS_DEAD) p->hp++;
     }
     compute_view(g);
 }
@@ -633,6 +740,7 @@ bool game_move(Game *g, int dx, int dy)
             lv->light_dirty = true;
             if (l->room >= 0) lv->rooms[l->room].dark = false;
             game_msg(g, C_WARN, "you light the sconce. Warm light spills across the room.");
+            flare(g);
             sfx(g, SND_SCONCE, l->fx, l->fy);
             game_stop(g);
             end_turn(g);
@@ -884,7 +992,10 @@ void game_explore(Game *g)
 void game_rest_long(Game *g)
 {
     if (g->state != GS_PLAY) return;
-    if (g->player.hp >= g->player.maxhp) { game_msg(g, C_DIM, "you are already at full health."); return; }
+    if (g->player.hp >= game_max_hp(g) && !(g->chill && (game_by_fire(g) || g->torch_lit))) {
+        game_msg(g, C_DIM, g->chill ? "you are as well as you'll get without a fire to warm you." : "you are already at full health.");
+        return;
+    }
     game_msg(g, C_DIM, "you rest...");
     g->autom = AUTO_REST;
     g->auto_t = 0;
@@ -913,8 +1024,8 @@ static void auto_step(Game *g)
     switch (g->autom) {
     case AUTO_NONE: return;
     case AUTO_REST:
-        if (p->hp >= p->maxhp || ++g->pi > 200) {
-            if (p->hp >= p->maxhp) game_msg(g, C_GOOD, "you feel rested.");
+        if ((p->hp >= game_max_hp(g) && !(g->chill && (game_by_fire(g) || g->torch_lit))) || ++g->pi > 200) {
+            if (p->hp >= game_max_hp(g)) game_msg(g, C_GOOD, "you feel rested.");
             game_stop(g);
             return;
         }
@@ -1017,6 +1128,27 @@ static bool place_item(Game *g, int depth, ItemKind k, int count, int x, int y, 
 bool game_debug_to_spot(Game *g, int kind)
 {
     Level *lv = game_level(g);
+    if (kind == 3 || kind == 4) {
+        /* in front of a cold sconce, a shade two steps away; 4 also lights the sconce */
+        for (int i = 0; i < lv->nlights; i++) {
+            Light *l = &lv->lights[i];
+            if (l->kind != L_SCONCE || l->lit) continue;
+            int px = l->x, py = l->y;
+            if (!tile_walkable((Tile)lv->t[py + 2][px]) || !tile_walkable((Tile)lv->t[py + 1][px])) continue;
+            Mob *ms = g->mobs[g->depth];
+            for (int j = 0; j < MAX_MOBS; j++)
+                if (ms[j].alive && abs(ms[j].x - px) < 6 && abs(ms[j].y - py) < 6) ms[j].alive = false;
+            place_player(g, px, py);
+            for (int j = 0; j < MAX_MOBS; j++)
+                if (!ms[j].alive) { mob_init(&ms[j], MK_SHADE, px, py + 2); ms[j].hunting = true; ms[j].tx = px; ms[j].ty = py; break; }
+            for (int y = 0; y < MAP_H; y++)
+                for (int x = 0; x < MAP_W; x++) lv->f[y][x] |= F_SEEN;
+            compute_view(g);
+            if (kind == 4) game_move(g, 0, -1);
+            return true;
+        }
+        return false;
+    }
     for (int y = 2; y < MAP_H - 3; y++)
         for (int x = 3; x < MAP_W - 3; x++) {
             Tile t = (Tile)lv->t[y][x];
@@ -1217,6 +1349,7 @@ static bool floor_torch(Game *g, int depth, int x, int y)
     int i = level_add_light(lv, L_FLOORTORCH, x, y, x, y, true, lv->room[y][x]);
     if (i >= 0) lv->lights[i].fuel = FLOOR_TORCH_FUEL;
     level_relight(lv);
+    if (depth == g->depth) flare(g);
     return true;
 }
 
@@ -1425,6 +1558,8 @@ void game_torch_toggle(Game *g)
     if (g->state != GS_PLAY) return;
     if (g->torch_lit) {
         g->torch_lit = false;
+        g->torch_fuel -= 5;          /* the charred head takes some burning to catch again */
+        if (g->torch_fuel < 1) g->torch_fuel = 1;
         game_msg(g, C_DIM, "you snuff out your torch (%d turns of it left). The dark closes in.", g->torch_fuel);
         sfx(g, SND_SNUFF, g->player.x, g->player.y);
         end_turn(g);
@@ -1467,7 +1602,7 @@ bool game_use(Game *g, int slot)
     case IT_POTION: {
         take_one(g, slot);
         int heal = 15;
-        if (p->hp + heal > p->maxhp) heal = p->maxhp - p->hp;
+        if (p->hp + heal > game_max_hp(g)) heal = game_max_hp(g) - p->hp;
         p->hp += heal;
         char t[16];
         snprintf(t, sizeof t, "+%d", heal);

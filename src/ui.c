@@ -191,12 +191,19 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
 
     /* left: health */
     int x = pad;
-    uint32_t hc = p->hp * 3 <= p->maxhp ? 0xff6a50 : 0xe2d4b4;
+    int mhp = game_max_hp(g);
+    uint32_t hc = p->hp * 3 <= p->maxhp ? 0xff6a50 : g->chill ? 0xb8e0ff : 0xe2d4b4;
     char buf[64];
-    snprintf(buf, sizeof buf, "HP %d/%d", p->hp, p->maxhp);
+    snprintf(buf, sizeof buf, "HP %d/%d", p->hp, mhp);
     x = font_draw(hf, cv, x, base, buf, hc, 255) + pad / 2;
-    int bw = ui->px * 5;
-    hp_bar(cv, x, base - font_ascent(hf) * 6 / 10, bw, ui->px / 3 + 2, p->hp, p->maxhp);
+    int bw = ui->px * 5, hbh = ui->px / 3 + 2, byy = base - font_ascent(hf) * 6 / 10;
+    hp_bar(cv, x, byy, bw, hbh, p->hp, p->maxhp);
+    if (g->chill) {
+        /* the part of the bar the chill has taken: frosted over */
+        int cx0 = x + bw * mhp / p->maxhp;
+        cv_fill(cv, cx0, byy, x + bw - cx0, hbh, 0x5a8cb0);
+        for (int i = cx0; i < x + bw; i += 3) cv_fill(cv, i, byy, 1, hbh, 0xc8ecff);
+    }
     x += bw + pad;
 
     diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
@@ -300,14 +307,18 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
     Level *lv = game_level(g);
     int x = f->hover_x, y = f->hover_y;
     if (!(lv->f[y][x] & F_SEEN) && !(game_mob_at(g, x, y) && game_mob_noticed(g, game_mob_at(g, x, y)))) return;
-    char title[64], desc[256], hint[96] = "";
+    char title[64], desc[480], hint[96] = "";
     Mob *m = game_mob_at(g, x, y);
     Light *l = level_light_on(lv, x, y);
     Tile t = (Tile)lv->t[y][x];
     bool vis = lv->f[y][x] & F_VIS;
     if (g->player.x == x && g->player.y == y) {
         snprintf(title, sizeof title, "You");
-        snprintf(desc, sizeof desc, "%s", MOB_INFO[MK_PLAYER].desc);
+        if (g->chill)
+            snprintf(desc, sizeof desc, "%s A shade's chill has taken %d from your max HP. Stand by a fire (a lit "
+                     "sconce or a torch on the floor) to warm up%s.", MOB_INFO[MK_PLAYER].desc, g->chill,
+                     g->torch_lit ? "; your torch helps, slowly" : "");
+        else snprintf(desc, sizeof desc, "%s", MOB_INFO[MK_PLAYER].desc);
         snprintf(hint, sizeof hint, t == T_STAIRS_DOWN ? "Click to descend" : t == T_STAIRS_UP ? "Click to climb" : "Click to rest a turn");
     } else if (m && vis) {
         snprintf(title, sizeof title, "%s", MOB_INFO[m->kind].name);
@@ -322,8 +333,10 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         snprintf(hint, sizeof hint, "Throw a torch to see what it is");
     } else if (l && l->kind == L_SCONCE) {
         snprintf(title, sizeof title, l->lit ? "Burning sconce" : "Cold sconce");
-        snprintf(desc, sizeof desc, l->lit ? "A torch in an iron bracket lights the room around it. You can be seen in its light."
-                                           : "An unlit torch in an iron bracket. Light it to see the room, but anything here will see you too.");
+        snprintf(desc, sizeof desc, l->lit ? "A torch in an iron bracket lights the room around it. You can be seen in its light, "
+                                             "but its warmth drives out a shade's chill and no shade can bear it."
+                                           : "An unlit torch in an iron bracket. Light it to see the room, but anything here will "
+                                             "see you too. A shade caught in the sudden light will burn.");
         if (!l->lit) snprintf(hint, sizeof hint, "Click to walk over and light it");
     } else if (l && l->kind == L_FLOORTORCH) {
         snprintf(title, sizeof title, "Burning torch");
@@ -429,7 +442,8 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Throw", "t  then aim with the mouse or keys, Tab to cycle targets" },
         { "Use", "a  light a torch, drink a potion;  d  drop" },
         { "Torch", "T  light or snuff;  walk onto a burning torch to take it up" },
-        { "Shades", "living darkness: firelight keeps them back and burns them" },
+        { "Shades", "your torch keeps them back; a sconce lit around one, or a thrown torch, burns it" },
+        { "Chill", "a shade's touch lowers max HP until you warm up by a fire" },
         { "Chasms", "step in to jump down a level (it hurts; water below breaks the fall)" },
         { "Map", "m  the whole level; click a place on it to travel there" },
         { "Water", "shallows splash; deep water puts out a torch and goblins won't swim" },
@@ -447,7 +461,11 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         if (a > kw) kw = a;
         if (b > vw) vw = b;
     }
-    int w = kw + vw + pad * 4, h = pad * 3 + font_line(ui->big) + n * line + font_line(hf) * 2;
+    int extra = pad * 3 + font_line(ui->big) + font_line(hf) * 2;
+    /* close up the rows in a short window rather than run off the screen */
+    if (extra + n * line > cv->h - 8) line = (cv->h - 8 - extra) / n;
+    if (line < font_line(bf)) line = font_line(bf);
+    int w = kw + vw + pad * 4, h = extra + n * line;
     if (w > cv->w - 10) w = cv->w - 10;
     int x = (cv->w - w) / 2, y = (cv->h - h) / 2;
     cv_blend_rect(cv, 0, 0, cv->w, cv->h, 0, 110);

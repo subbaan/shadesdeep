@@ -5,7 +5,7 @@ art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.5.1 (cut-down front walls, side doors, quieter drips, sleepy tooltips) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.6.0 (shades and the torch clock) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 ## Build and run
 
@@ -46,17 +46,24 @@ sound; if no audio device opens, the game runs silent.
 - **Darkness:** some rooms start unlit. Lighting a sconce shows you the room,
   but anything in the light can see you too. In the dark, monsters only notice
   you when you are close.
-- **Torches:** a lit torch lights a wide circle around you but burns out and
-  makes you visible from afar. Throw one to light a room from a distance (it
-  burns on the floor for a while), or to lure monsters with the noise. Walk
-  onto a burning torch with your hand free to take it up again; one that
-  burns out leaves a charred stub.
+- **Torches** are the clock, the way food is in other roguelikes: you find
+  about three for every four levels, so light is precious. A lit torch lights
+  a wide circle around you but burns out and makes you visible from afar.
+  Lighting or snuffing it takes a turn, and snuffing wastes a little fuel.
+  Throw one to light a room from a distance (it burns on the floor for a
+  while), or to lure monsters with the noise. Walk onto a burning torch with
+  your hand free to take it up again; one that burns out leaves a charred stub.
 - **Shades** (from depth 2) are living darkness. They gather in unlit rooms,
   hunt you by your warmth whether you are lit or not, and in the dark you see
-  only their eyes. They cannot enter firelight (sconces, burning torches, a
-  torch in your hand; the cold glow of crystals and moss doesn't count), and
-  light burns them. Darts pass straight through; a thrown torch sears them.
-  So light keeps shades away while it shows you to everything else.
+  only their eyes. They cannot enter firelight (the cold glow of crystals and
+  moss doesn't count), but your carried torch only drives them off: they
+  circle at the edge of its light and gnaw at the flame, so each one nearby
+  burns an extra turn of fuel. Only a fixed fire burns them: a sconce lit
+  while a shade is close (the sudden blaze holds it there until it burns
+  away), or a torch thrown at it. Darts pass straight through. Their touch
+  chills: it takes max HP (up to half) until you warm up by a lit sconce or a
+  torch on the floor; a torch in hand warms you only slowly. Resting by a fire
+  also heals faster.
 - **Water:** wading through the shallows splashes, and the noise carries.
   Deep water must be swum: it puts out (and ruins) a lit torch, so you are
   asked twice before swimming with one, and anything dropped in it sinks.
@@ -82,9 +89,10 @@ lights a torch, `LUME_DUMP_MENU=inv|throw|use|item` opens a menu,
 thrown torch part-way through its flight. `LUME_DUMP_REST=N` waits N turns
 first (e.g. to let a thrown torch burn out). `LUME_DUMP_SHADE="dx,dy;dx,dy"`
 puts shades near the player. `LUME_DUMP_WATER=0|1|2` stands by a pool, in its
-shallows, or swimming. `LUME_DUMP_SPOT=0|1|2` stands in an east-west corridor
-(with a rat and darts beside you), beside a door in a side wall, or just north
-of a room's south wall. `LUME_DUMP_MAP=1` opens the map.
+shallows, or swimming. `LUME_DUMP_SPOT=0..4` stands in an east-west corridor
+(with a rat and darts beside you), beside a door in a side wall, just north
+of a room's south wall, or in front of a cold sconce with a shade two steps
+away (4 also lights the sconce). It applies after `LUME_DUMP_JUMP`. `LUME_DUMP_MAP=1` opens the map and `LUME_DUMP_HELP=1` the help.
 
 The sounds are synthesized by `tools/make_sounds.py` (Python 3 with numpy and
 scipy) into `assets/sounds` (files already there are kept, so sounds you swapped in survive; `--only

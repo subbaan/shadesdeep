@@ -355,9 +355,6 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     /* LUME_DUMP_WATER=0|1|2: stand by a pool, in its shallows, or swimming in it */
     if (getenv("LUME_DUMP_WATER") && !game_debug_to_water(g, atoi(getenv("LUME_DUMP_WATER"))))
         fprintf(stderr, "%s: no deep water on this level\n", LUME_NAME);
-    /* LUME_DUMP_SPOT=0|1|2: an east-west corridor, a side-wall door, a room's south wall */
-    if (getenv("LUME_DUMP_SPOT") && !game_debug_to_spot(g, atoi(getenv("LUME_DUMP_SPOT"))))
-        fprintf(stderr, "%s: no such spot on this level\n", LUME_NAME);
     /* LUME_DUMP_JUMP=N: jump down N chasms (developer test of level changes) */
     for (int j = getenv("LUME_DUMP_JUMP") ? atoi(getenv("LUME_DUMP_JUMP")) : 0; j > 0 && g->state == GS_PLAY; j--) {
         if (!game_debug_to_chasm(g)) break;
@@ -368,6 +365,10 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         g->player.hp = g->player.maxhp;
         for (int i = 0; i < 200; i++) game_update(g, 0.02f);
     }
+    /* LUME_DUMP_SPOT=0..4: an east-west corridor, a side-wall door, a room's south wall,
+     * a cold sconce with a shade near (4: and light it). After LUME_DUMP_JUMP */
+    if (getenv("LUME_DUMP_SPOT") && !game_debug_to_spot(g, atoi(getenv("LUME_DUMP_SPOT"))))
+        fprintf(stderr, "%s: no such spot on this level\n", LUME_NAME);
     for (int i = 0; i < 120; i++) game_update(g, 1.0f / 60);
     static Hover hv;
     hv.awake = hv.tip_live = hv.tip_arm = mx >= 0;
@@ -377,6 +378,7 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
      * LUME_DUMP_AIM="dx,dy" aims a torch, LUME_DUMP_THROW="dx,dy,frac" freezes one mid-flight */
     if (getenv("LUME_DUMP_TORCH")) game_torch_toggle(g);
     if (getenv("LUME_DUMP_MAP")) { ctl.map = true; ctl.map_stale = true; }
+    if (getenv("LUME_DUMP_HELP")) ctl.help = true;
     const char *dm = getenv("LUME_DUMP_MENU");
     if (dm) ctl.menu = !strcmp(dm, "throw") ? MENU_THROW : !strcmp(dm, "use") ? MENU_USE : !strcmp(dm, "item") ? MENU_ITEM : MENU_INV;
     int adx, ady;

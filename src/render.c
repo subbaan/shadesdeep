@@ -842,9 +842,13 @@ static void draw_fixture(Renderer *r, Canvas *cv, const View *v, const Light *l)
             for (int i = 0; i < im->w; i++) {
                 uint32_t a = im->px[j * im->w + i];
                 if (!CA(a)) continue;
-                int x = sx + 10 + i, y = sy + TILE - im->h - 1 + j;
+                int x = sx + 8 + i, y = sy + TILE - im->h + j;
                 if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
                 float lr = c.r + k, lg = c.g + k * 0.6f, lb = c.b + k * 0.3f;
+                /* a cold sconce still catches a glint, so you can find it in a dark room */
+                if (lr < 0.42f) lr = 0.42f;
+                if (lg < 0.40f) lg = 0.40f;
+                if (lb < 0.38f) lb = 0.38f;
                 uint32_t lit = lightc(a & 0xffffff, lr, lg, lb);
                 cv->px[(size_t)y * cv->w + x] = v->fog ? fogmix(lit, memtone(a), vis, seen) : lit;
             }
