@@ -7,6 +7,8 @@ hover descriptions and clickable actions.
 
 Version: 0.7.0 (gear, embers and the forge) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
+How to play, in full: **[the player's manual](docs/MANUAL.md)**.
+
 ## Build and run
 
 ```sh
