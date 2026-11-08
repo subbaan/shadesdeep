@@ -105,6 +105,25 @@ static const int DY8[8] = { -1, 0, 1, 0, -1, 1, 1, -1 };
 
 /* ------------------------------------------------------------- messages */
 
+/* How the run ended, for the hall of fame. It isn't saved with the game: death
+ * is final, so the run is recorded in the session it ends in. */
+static char g_cause[80];
+
+static void set_cause(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void set_cause(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(g_cause, sizeof g_cause, fmt, ap);
+    va_end(ap);
+}
+
+const char *game_death_cause(const Game *g)
+{
+    (void)g;
+    return g_cause;
+}
+
 void game_msg(Game *g, uint32_t color, const char *fmt, ...)
 {
     char buf[160];
@@ -544,6 +563,7 @@ Game *game_new(uint32_t seed)
     Game *g = calloc(1, sizeof *g);
     if (!g) return NULL;
     g->seed = seed;
+    g_cause[0] = 0;
     g->rng.s = seed * 0x9e3779b97f4a7c15ull + 1;
     g->depth = 1;
     ensure_level(g, 1);
@@ -718,6 +738,8 @@ static bool attack(Game *g, Mob *a, Mob *d)
         game_stop(g);
         if (d->hp <= 0) {
             game_msg(g, C_BAD, "the %s kills you...", ai->name);
+            if (a->kind == MK_HOLLOW) set_cause("Unmade by the Hollow");
+            else set_cause("Killed by %s %s", strchr("aeiou", ai->name[0]) ? "an" : "a", ai->name);
             g->state = GS_DEAD;
             g->end_t = g->time;
             sfx_ex(g, SND_DIE, d->x, d->y, true, 0.25f, 1);
@@ -1004,6 +1026,7 @@ static void sling(Game *g, Mob *m)
     game_stop(g);
     if (p->hp <= 0) {
         game_msg(g, C_BAD, "a sling stone fells you...");
+        set_cause("Felled by a sling stone");
         g->state = GS_DEAD;
         g->end_t = g->time;
         sfx_ex(g, SND_DIE, p->x, p->y, true, 0.45f, 1);
@@ -1213,6 +1236,7 @@ static void fire_harm(Game *g)
     game_stop(g);
     if (p->hp <= 0) {
         game_msg(g, C_BAD, "you burn to death in the oil...");
+        set_cause("Burned to death in the oil");
         g->state = GS_DEAD;
         g->end_t = g->time;
         sfx_ex(g, SND_DIE, p->x, p->y, true, 0.25f, 1);
@@ -1473,6 +1497,7 @@ static void spring_trap(Game *g, int x, int y)
         game_msg(g, C_BAD, "a wire noose snaps tight around your ankle! You'll have to tear yourself free.");
         if (p->hp <= 0) {
             game_msg(g, C_BAD, "the wire bites to the bone, and you have nothing left to fight it with.");
+            set_cause("Caught in a wire snare");
             g->state = GS_DEAD;
             g->end_t = g->time;
             sfx_ex(g, SND_DIE, x, y, true, 0.25f, 1);
@@ -1777,6 +1802,7 @@ bool game_move(Game *g, int dx, int dy)
                 floater(g, nx, ny, 0xff5a4a, tx);
                 if (p->hp <= 0) {
                     game_msg(g, C_BAD, "your mail drags you down into the dark water, and you do not come up.");
+                    set_cause("Drowned, dragged down by mail");
                     g->state = GS_DEAD;
                     g->end_t = g->time;
                     sfx_ex(g, SND_DIE, nx, ny, true, 0.25f, 1);
@@ -1884,6 +1910,7 @@ static void fall_to(Game *g, int fx, int fy)
     floater(g, p->x, p->y, 0xff5a4a, t);
     if (p->hp <= 0) {
         game_msg(g, C_BAD, "you hit the ground at depth %d and do not get up.", g->depth);
+        set_cause("Killed by a fall");
         g->state = GS_DEAD;
         g->end_t = g->time;
     } else {
@@ -1904,22 +1931,51 @@ static bool path_ok(Game *g, int x, int y, int gx, int gy)
     return !(m && (lv->f[y][x] & F_VIS));
 }
 
-/* BFS over known ground from the player; returns the path to the goal (or to
- * the first frontier tile when gx < 0). */
+/* cost of stepping onto a tile: wading is slow and the water hides eels, so
+ * a dry way round is preferred unless it's much longer */
+#define STEP_COST    2
+#ifndef WADE_COST
+#define WADE_COST    13
+#endif
+
+/* cheapest-first search over known ground from the player; returns the path to
+ * the goal (or to the nearest frontier tile or item when gx < 0). */
 static int find_path(Game *g, int gx, int gy, int *out, int max)
 {
+    enum { CELLS = MAP_W * MAP_H };
     static int16_t par[MAP_H][MAP_W];
-    static int q[MAP_W * MAP_H];
+    static int32_t dist[CELLS];
+    static uint32_t heap[CELLS * 8 + 1];   /* (cost << 12) | cell, lazy deletion */
+    _Static_assert(CELLS <= 4096, "cell index must fit in 12 bits");
     Level *lv = game_level(g);
     Mob *p = &g->player;
     for (int y = 0; y < MAP_H; y++)
         for (int x = 0; x < MAP_W; x++) par[y][x] = -2;
-    int h = 0, t = 0, found = -1;
+    for (int i = 0; i < CELLS; i++) dist[i] = INT32_MAX;
+    int nh = 0, found = -1, start = p->y * MAP_W + p->x;
+#define HPUSH(key) do { uint32_t k_ = (key); int i_ = nh++; \
+        while (i_ > 0 && heap[(i_ - 1) / 2] > k_) { heap[i_] = heap[(i_ - 1) / 2]; i_ = (i_ - 1) / 2; } \
+        heap[i_] = k_; } while (0)
     par[p->y][p->x] = -1;
-    q[t++] = p->y * MAP_W + p->x;
-    while (h < t && found < 0) {
-        int c = q[h++], x = c % MAP_W, y = c / MAP_W;
-        if (gx < 0 && c != q[0]) {
+    dist[start] = 0;
+    HPUSH((uint32_t)start);
+    while (nh > 0 && found < 0) {
+        uint32_t top = heap[0], last = heap[--nh];
+        int i = 0;
+        for (;;) {   /* sift the last entry down from the root */
+            int l = 2 * i + 1, r = l + 1, m = i;
+            uint32_t mv = last;
+            if (l < nh && heap[l] < mv) { m = l; mv = heap[l]; }
+            if (r < nh && heap[r] < mv) { m = r; }
+            if (m == i) break;
+            heap[i] = heap[m];
+            i = m;
+        }
+        if (nh > 0) heap[i] = last;
+        int c = (int)(top & 0xfff), cost = (int)(top >> 12);
+        if (cost != dist[c]) continue;   /* stale entry */
+        int x = c % MAP_W, y = c / MAP_W;
+        if (gx < 0 && c != start) {
             /* explore: an item worth picking up, or a known tile next to the unknown */
             FloorItem *it = game_item_at(g, x, y);
             if (it && !it->dropped && (lv->f[y][x] & F_SEEN)) { found = c; break; }
@@ -1931,17 +1987,22 @@ static int find_path(Game *g, int gx, int gy, int *out, int max)
         }
         if (gx >= 0 && x == gx && y == gy) { found = c; break; }
         /* a tile that is not walkable (the goal itself, e.g. a monster or sconce) ends the path */
-        if (c != q[0] && !tile_walkable((Tile)lv->t[y][x])) continue;
+        if (c != start && !tile_walkable((Tile)lv->t[y][x])) continue;
         for (int d = 0; d < 8; d++) {
             int X = x + DX8[d], Y = y + DY8[d];
-            if (!in_map(X, Y) || par[Y][X] != -2) continue;
+            if (!in_map(X, Y)) continue;
             if (!path_ok(g, X, Y, gx, gy) || !diag_ok(lv, x, y, DX8[d], DY8[d])) continue;
             if ((lv->t[Y][X] == T_CHASM || lv->t[Y][X] == T_DEEP || lv->burn[Y][X] || (lv->trap[Y][X] && (lv->f[Y][X] & F_TRAP)))
                 && !(X == gx && Y == gy)) continue;
+            int nc = cost + (lv->t[Y][X] == T_SHALLOW ? WADE_COST : STEP_COST);
+            int n = Y * MAP_W + X;
+            if (nc >= dist[n]) continue;
+            dist[n] = nc;
             par[Y][X] = (int16_t)d;
-            q[t++] = Y * MAP_W + X;
+            HPUSH(((uint32_t)nc << 12) | (uint32_t)n);
         }
     }
+#undef HPUSH
     if (found < 0) return 0;
     int n = 0, c = found;
     static int rev[MAP_W * MAP_H];

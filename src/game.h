@@ -291,6 +291,8 @@ bool game_drop(Game *g, int slot);
 void game_torch_toggle(Game *g);        /* light (using a torch if needed) or snuff */
 
 void game_msg(Game *g, uint32_t color, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+/* what killed the player ("Killed by a goblin"), or "" */
+const char *game_death_cause(const Game *g);
 
 #define C_TEXT    0xd8cbb0
 #define C_GOOD    0x9ed36a

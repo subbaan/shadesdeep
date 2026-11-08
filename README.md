@@ -7,7 +7,7 @@ hover descriptions and clickable actions.
 
 ![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
 
-Version: 0.14.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.15.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -39,7 +39,8 @@ sound; if no audio device opens, the game runs silent.
   after a few seconds, and pressing a key hides the hover marker until the
   mouse moves again.
 - **Keys:** arrows / numpad / `h j k l y u b n` move and attack; `x` explore;
-  `z` or `.` rest a turn, `Z` rest until healed; `>` travel to the stairs
+  `z` or `.` rest a turn, `Z` rest until healed (explore and travel go round
+  shallow water when there's a dry way); `>` travel to the stairs
   down and descend, `<` climb; `i` items, `t` throw, `a` / `q` use,
   `d` drop, `T` light or snuff your torch; `m` map; `+` / `-` zoom;
   F2 sound on/off; `?` help; Esc twice saves and quits.
@@ -53,6 +54,13 @@ sound; if no audio device opens, the game runs silent.
   start carries on where you left off; it's also saved on every new level.
   Death (or winning) deletes the save. It lives in `~/.local/share/shadesdeep/save.gz`;
   `--new` starts afresh, `--save=FILE` and `--no-save` change or skip it.
+- **Title and hall of fame:** the game opens on a title screen (Continue, New
+  game, Hall of fame, Quit; `--no-title` skips it). Every run that ends goes
+  into the hall of fame, kept next to the save in `halloffame.txt`: how it
+  ended, how deep you got, turns, embers, kills and the date, best first.
+  The closing screen tells you where the run stands, and
+  `shadesdeep --hall-of-fame` prints the table in the terminal. Put a picture
+  at `assets/title.png` and the title screen uses it.
 - **Map:** `m` (or the Map button) shows the whole explored level, drawn
   with the game's own graphics: you, the stairs and any creatures you can make
   out are marked. Click a place on it to travel there.
@@ -161,7 +169,18 @@ goblin, shade, bat, slinger, ogre, eel; `eel+` is an eel above the water).
 `SHADESDEEP_DUMP_FORGE=N` stands by the forge with N embers and opens it (`N,0`
 leaves it shut), `SHADESDEEP_DUMP_FRAMES=N[,FPS]` writes N more frames after the
 first (`out-001.png` on, FPS a second, default 24: for checking animation), and `SHADESDEEP_DUMP_GEAR="spear,1;mail,0"` puts gear in the pack (`SHADESDEEP_DUMP_SLOT=N`
-picks the item `SHADESDEEP_DUMP_MENU=item` shows).
+picks the item `SHADESDEEP_DUMP_MENU=item` shows). `SHADESDEEP_DUMP_TITLE=0|1|2` draws the
+title screen (fresh, with a saved game, asking to give it up), with
+`SHADESDEEP_DUMP_TITLEART=file.png` as its picture; `SHADESDEEP_DUMP_FAME=FILE[,RANK]` draws
+the hall of fame in FILE with RANK picked out. `SHADESDEEP_DUMP_HP=N` sets your hit points
+and `SHADESDEEP_DUMP_FAMEADD=FILE` writes a finished run into FILE (with
+`SHADESDEEP_DUMP_MOBS="goblin,1,0"` and `SHADESDEEP_DUMP_REST=20`, a quick death to test with).
+`SHADESDEEP_DUMP_WADE=1` reports how many of the `--steps` tour's steps waded.
+
+The title picture is `assets/title.png`, any size (16:9 such as 1920x1080 is
+best). It's scaled to cover the window, cropped evenly if the shapes differ,
+with the bottom darkened for the menu. Without it the title is drawn: the
+name over a fire's glow and rising sparks.
 
 The sounds are synthesized by `tools/make_sounds.py` (Python 3 with numpy and
 scipy) into `assets/sounds` (files already there are kept, so sounds you swapped in survive; `--only

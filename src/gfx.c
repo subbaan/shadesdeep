@@ -231,6 +231,49 @@ void cv_downscale(Canvas *dst, const Canvas *src, int sx, int sy, int sw, int sh
     }
 }
 
+void cv_cover(Canvas *dst, const Image *im)
+{
+    if (dst->w <= 0 || dst->h <= 0 || !im->px || im->w <= 0 || im->h <= 0) return;
+    /* the source rectangle with dst's shape: as much of the picture as fits */
+    double sw = im->w, sh = (double)im->w * dst->h / dst->w;
+    if (sh > im->h) { sh = im->h; sw = (double)im->h * dst->w / dst->h; }
+    double sx = (im->w - sw) / 2, sy = (im->h - sh) / 2, k = sw / dst->w;
+    for (int y = 0; y < dst->h; y++) {
+        uint32_t *out = dst->px + (size_t)y * dst->w;
+        if (k > 1) {
+            int y0 = (int)(sy + y * k), y1 = (int)(sy + (y + 1) * k);
+            y0 = clampi(y0, 0, im->h - 1);
+            y1 = clampi(y1, y0 + 1, im->h);
+            for (int x = 0; x < dst->w; x++) {
+                int x0 = (int)(sx + x * k), x1 = (int)(sx + (x + 1) * k);
+                x0 = clampi(x0, 0, im->w - 1);
+                x1 = clampi(x1, x0 + 1, im->w);
+                unsigned r = 0, g = 0, b = 0, n = 0;
+                for (int yy = y0; yy < y1; yy++) {
+                    const uint32_t *row = im->px + (size_t)yy * im->w;
+                    for (int xx = x0; xx < x1; xx++) {
+                        uint32_t c = row[xx];
+                        r += CR(c); g += CG(c); b += CB(c);
+                        n++;
+                    }
+                }
+                out[x] = RGB(r / n, g / n, b / n);
+            }
+        } else {
+            double fy = sy + (y + 0.5) * k - 0.5;
+            int y0 = clampi((int)floor(fy), 0, im->h - 1), y1 = clampi(y0 + 1, 0, im->h - 1);
+            int ty = clampi((int)((fy - floor(fy)) * 256), 0, 256);
+            for (int x = 0; x < dst->w; x++) {
+                double fx = sx + (x + 0.5) * k - 0.5;
+                int x0 = clampi((int)floor(fx), 0, im->w - 1), x1 = clampi(x0 + 1, 0, im->w - 1);
+                int tx = clampi((int)((fx - floor(fx)) * 256), 0, 256);
+                const uint32_t *r0 = im->px + (size_t)y0 * im->w, *r1 = im->px + (size_t)y1 * im->w;
+                out[x] = mix(mix(r0[x0], r0[x1], tx), mix(r1[x0], r1[x1], tx), ty);
+            }
+        }
+    }
+}
+
 int image_alloc(Image *im, int w, int h)
 {
     im->w = w;

@@ -62,6 +62,9 @@ void cv_downscale(Canvas *dst, const Canvas *src, int sx, int sy, int sw, int sh
 /* Nearest-neighbour integer upscale of src into dst at (ox, oy). */
 void cv_upscale(Canvas *dst, const Canvas *src, int s, int ox, int oy);
 
+/* Fill all of dst with im, keeping its shape: scaled to cover, the overflow cropped
+ * evenly off the sides (area-averaged when shrinking, bilinear when enlarging). */
+void cv_cover(Canvas *dst, const Image *im);
 int  image_alloc(Image *im, int w, int h);
 int  image_load(Image *im, const char *path);
 void image_free(Image *im);

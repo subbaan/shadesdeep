@@ -12,6 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "fame.h"
 #include "game.h"
 #include "gfx.h"
 #include "kgfx.h"
@@ -87,7 +88,10 @@ static void usage(FILE *f)
         "                      replaced when you quit)\n"
         "      --save=FILE     where to keep the saved game\n"
         "                      (default ~/.local/share/shadesdeep/save.gz)\n"
-        "      --no-save       don't resume or save a game\n"
+        "      --no-save       don't resume or save a game, or record it in the hall\n"
+        "                      of fame\n"
+        "      --no-title      skip the title screen and go straight into the game\n"
+        "      --hall-of-fame  print the hall of fame and exit\n"
         "      --mute          start with the sound off (F2 toggles it in the game)\n"
         "      --no-sound      don't open the audio device at all\n"
         "      --classic-art   draw the creatures with the old built-in sprites\n"
@@ -176,6 +180,7 @@ typedef struct {
     bool quit_armed;
     bool map;               /* the map overview is open */
     bool map_stale;         /* redraw its picture */
+    int fame_rank, fame_total;  /* where the run that just ended stands in the hall of fame */
 } Ctl;
 
 /* ---------------------------------------------------------------- sound */
@@ -311,7 +316,8 @@ static void draw_frame(Renderer *r, UI *ui, Game *g, Frame *fr, Hover *hv, Ctl *
     bool map = ctl->map && g->state == GS_PLAY;
     if (map) map_update(r, ui, g, &fr->screen, ctl);
     UiFrame uf = { (float)lroundf(cx), (float)lroundf(cy), fr->zoom, mx, my, ux, uy, tip, ctl->help, ctl->quit_armed,
-                   fps, show_fps, ctl->menu, ctl->menu_slot, ctl->targeting, ctl->tslot, map, &g_mini, g_ml };
+                   fps, show_fps, ctl->menu, ctl->menu_slot, ctl->targeting, ctl->tslot, map, &g_mini, g_ml,
+                   ctl->fame_rank, ctl->fame_total };
     ui_draw(ui, g, &fr->screen, &uf);
 }
 
@@ -364,6 +370,7 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     Frame fr = { 0 };
     frame_resize(&fr, w, h, zoom ? zoom : auto_zoom(h));
     if (steps > 0) {
+        int moved = 0, waded = 0;
         game_explore(g);
         for (int i = 0; i < steps * 40 && g->state != GS_DEAD; i++) {
             if (g->state == GS_JUMP_PROMPT) game_jump_answer(g, false);
@@ -371,9 +378,16 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
             if (g->autom == AUTO_NONE) {
                 if (i % 40 == 0) game_explore(g);
             }
+            int ox = g->player.x, oy = g->player.y, od = g->depth;
             game_update(g, 0.01f);
+            if (g->depth == od && (g->player.x != ox || g->player.y != oy)) {
+                moved++;
+                if (tile_at(game_level(g), g->player.x, g->player.y) == T_SHALLOW) waded++;
+            }
         }
         game_stop(g);
+        /* SHADESDEEP_DUMP_WADE: report how much of the tour was spent wading */
+        if (getenv("SHADESDEEP_DUMP_WADE")) fprintf(stderr, "steps %d, wading %d\n", moved, waded);
     }
     if (getenv("SHADESDEEP_DUMP_CHASM") && !game_debug_to_chasm(g)) fprintf(stderr, "%s: no chasm on this level\n", SHADESDEEP_NAME);
     /* SHADESDEEP_DUMP_WATER=0|1|2: stand by a pool, in its shallows, or swimming in it */
@@ -488,6 +502,8 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
             s++;
         }
     }
+    /* SHADESDEEP_DUMP_HP=N: the player's hit points (to test dying) */
+    if (getenv("SHADESDEEP_DUMP_HP")) g->player.hp = atoi(getenv("SHADESDEEP_DUMP_HP"));
     int adx, ady;
     float frac = 0.5f;
     if (getenv("SHADESDEEP_DUMP_AIM") && sscanf(getenv("SHADESDEEP_DUMP_AIM"), "%d,%d", &adx, &ady) == 2) {
@@ -510,6 +526,17 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         game_rest(g);
         for (int i = 0; i < 30 && game_busy(g); i++) game_update(g, 1.0f / 30);
     }
+    /* SHADESDEEP_DUMP_FAMEADD=FILE: if the run is over, write it into that hall of fame */
+    if (getenv("SHADESDEEP_DUMP_FAMEADD") && (g->state == GS_DEAD || g->state == GS_WON)) {
+        FameEntry e;
+        char ferr[PATH_MAX + 64];
+        fame_from_game(g, g->state == GS_WON ? FAME_WON : FAME_DIED, &e);
+        ctl.fame_rank = fame_add(getenv("SHADESDEEP_DUMP_FAMEADD"), &e, ferr, sizeof ferr);
+        if (!ctl.fame_rank) fprintf(stderr, "%s: %s\n", SHADESDEEP_NAME, ferr);
+        static FameEntry tmp[FAME_MAX];
+        fame_load(getenv("SHADESDEEP_DUMP_FAMEADD"), tmp, FAME_MAX, &ctl.fame_total);
+        fprintf(stderr, "recorded \"%s\": rank %d of %d\n", e.cause, ctl.fame_rank, ctl.fame_total);
+    }
     render_camera(r, g, fr.world.w, fr.world.h, 0, true);
     /* show the closing screen at once (SHADESDEEP_DUMP_NOEND=1: not yet) */
     if ((g->state == GS_DEAD || g->state == GS_WON) && !getenv("SHADESDEEP_DUMP_NOEND")) g->end_t = g->time - 30;
@@ -521,6 +548,35 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         draw_frame(r, ui, g, &fr, &hv, &ctl, mx, my, freeze ? 0 : 1.0f / 60, 60, false);
     }
     if (getenv("SHADESDEEP_DUMP_LOWER")) render_dump_lower(r, getenv("SHADESDEEP_DUMP_LOWER"));
+    /* SHADESDEEP_DUMP_TITLE=0|1|2: the title screen (fresh, with a saved game, asking to give it up);
+     * SHADESDEEP_DUMP_TITLEART=PNG: its picture (default: assets/title.png if there is one);
+     * SHADESDEEP_DUMP_FAME=FILE[,RANK]: the hall of fame in FILE, with RANK picked out */
+    Image art = { 0 };
+    const char *dt_ = getenv("SHADESDEEP_DUMP_TITLE"), *df = getenv("SHADESDEEP_DUMP_FAME");
+    if (dt_ || df) {
+        char tp[PATH_MAX + 16];
+        if (getenv("SHADESDEEP_DUMP_TITLEART")) snprintf(tp, sizeof tp, "%s", getenv("SHADESDEEP_DUMP_TITLEART"));
+        else snprintf(tp, sizeof tp, "%s/title.png", assets);
+        if (access(tp, R_OK) == 0 && image_load(&art, tp) == 0) ui_set_title_art(ui, &art);
+        int mode = dt_ ? atoi(dt_) : 0;
+        TitleFrame tf = { .can_continue = mode >= 1, .save_depth = 7, .save_turn = 1234, .confirm_new = mode == 2,
+                          .mx = mx, .my = my, .dt = 1.0f / 30 };
+        static FameEntry fl[FAME_MAX], mine;
+        char fpath[PATH_MAX];
+        int frank = 0, total = 0, n = 0;
+        if (df) {
+            snprintf(fpath, sizeof fpath, "%s", df);
+            char *comma = strrchr(fpath, ',');
+            if (comma) { frank = atoi(comma + 1); *comma = 0; }
+            n = fame_load(fpath, fl, FAME_MAX, &total);
+            if (frank > 0 && frank <= n) mine = fl[frank - 1];
+        }
+        FameFrame ff = { fl, n, total, frank, frank ? &mine : NULL, mx, my, 1.0f / 30 };
+        for (int i = 0; i < 240; i++) {      /* let the embers rise */
+            if (df) ui_draw_fame(ui, &fr.screen, &ff);
+            else ui_draw_title(ui, &fr.screen, &tf);
+        }
+    }
     int rc = canvas_write_png(&fr.screen, path);
     if (rc) fprintf(stderr, "%s: cannot write %s\n", SHADESDEEP_NAME, path);
     else printf("%s: wrote %s (%dx%d, zoom %d, seed %u, depth %d, turn %d)\n", SHADESDEEP_NAME, path, w, h, fr.zoom,
@@ -543,6 +599,7 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     render_free(r);
     game_free(g);
     ui_free(ui);
+    image_free(&art);
     return rc ? 1 : 0;
 }
 
@@ -561,11 +618,36 @@ static bool dir_key(const bool *rep, int *dx, int *dy)
     return false;
 }
 
+typedef enum { SCR_TITLE, SCR_PLAY, SCR_FAME } Screen;
+
+/* --hall-of-fame: the table, as text */
+static int print_hall(const char *save_opt)
+{
+    char save_path[PATH_MAX] = "", path[PATH_MAX + 32];
+    if (save_opt) snprintf(save_path, sizeof save_path, "%s", save_opt);
+    else if (!save_default_path(save_path, sizeof save_path)) save_path[0] = 0;
+    if (!fame_path_for(save_path, path, sizeof path)) { fprintf(stderr, "%s: nowhere to look for the hall of fame\n", SHADESDEEP_NAME); return 1; }
+    static FameEntry e[FAME_MAX];
+    int total, n = fame_load(path, e, FAME_MAX, &total);
+    if (n == 0) { printf("The hall of fame is empty (%s).\n", path); return 0; }
+    printf("%5s  %-34s %5s %6s %6s %5s  %s\n", "", "Fate", "Depth", "Turns", "Embers", "Kills", "Date");
+    for (int i = 0; i < n; i++) {
+        char date[16] = "?";
+        time_t when = (time_t)e[i].when;
+        struct tm tm;
+        if (localtime_r(&when, &tm)) strftime(date, sizeof date, "%Y-%m-%d", &tm);
+        printf("%4d.  %-34.34s %5d %6d %6d %5d  %s\n", i + 1, e[i].cause, e[i].deepest, e[i].turns, e[i].embers,
+               e[i].kills, date);
+    }
+    if (total > n) printf("(and %d more)\n", total - n);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     TxMode tx = TX_SHM;
     uint32_t seed = 0;
-    bool new_game = false, no_save = false;
+    bool new_game = false, no_save = false, no_title = false, print_fame = false;
     const char *save_opt = NULL;
     bool seed_given = false, probe_only = false, show_fps = false, start_muted = false, no_sound = false;
     int fps = 60, zoom_opt = 0, dump_w = 1300, dump_h = 700, dump_cell = 20, steps = 0, hover_x = -1, hover_y = -1;
@@ -592,6 +674,8 @@ int main(int argc, char **argv)
         { "save",     required_argument, 0, 'L' },
         { "no-save",  no_argument,       0, 'X' },
         { "classic-art", no_argument,    0, 'O' },
+        { "no-title", no_argument,       0, 'T' },
+        { "hall-of-fame", no_argument,   0, 'A' },
         { "help",     no_argument,       0, 'h' },
         { "version",  no_argument,       0, 'V' },
         { 0, 0, 0, 0 }
@@ -618,12 +702,16 @@ int main(int argc, char **argv)
         case 'L': save_opt = optarg; break;
         case 'X': no_save = true; break;
         case 'O': classic_art = true; break;
+        case 'T': no_title = true; break;
+        case 'A': print_fame = true; break;
         case 'h': usage(stdout); return 0;
         case 'V': printf("%s %s\n", SHADESDEEP_NAME, SHADESDEEP_VERSION); return 0;
         default:  usage(stderr); return 2;
         }
     }
     if (!seed_given) seed = (uint32_t)time(NULL) ^ (uint32_t)getpid() * 2654435761u;
+
+    if (print_fame) return print_hall(save_opt);
 
     char assets[PATH_MAX];
     bool have_assets = find_assets(assets, sizeof assets, assets_opt) == 0;
@@ -698,6 +786,19 @@ int main(int argc, char **argv)
         game_msg(g, C_DIM, "(a new game: your saved one will be replaced when you quit)");
     int saved_depth = g->depth;
     bool save_gone = false;
+    char fame_path[PATH_MAX + 32] = "";
+    if (save_path[0]) fame_path_for(save_path, fame_path, sizeof fame_path);
+    static FameEntry fame_list[FAME_MAX], fame_mine;
+    int fame_n = 0;
+    Image title_art = { 0 };
+    {
+        char tp[PATH_MAX + 16];
+        snprintf(tp, sizeof tp, "%s/title.png", assets);
+        if (access(tp, R_OK) == 0 && image_load(&title_art, tp) == 0) ui_set_title_art(ui, &title_art);
+    }
+    Screen scr = no_title ? SCR_PLAY : SCR_TITLE, fame_back = SCR_TITLE;
+    bool played = scr == SCR_PLAY;     /* this game has been played, so quitting saves it */
+    TitleFrame tf = { .can_continue = resumed, .save_depth = g->depth, .save_turn = g->turn };
     Renderer *r = render_new();
     if (!classic_art) render_load_sprites(r, assets);
     ui_set_icons(ui, render_item_icons(r), render_item_icons_hi(r));
@@ -758,8 +859,105 @@ int main(int argc, char **argv)
         for (int k = 0; k < K_MAX; k++)
             if (pr[k] && k != K_SHIFT && k != K_CTRL && k != K_ALT) any_key = true;
 
+        /* the title screen and the hall of fame */
+        if (scr != SCR_PLAY) {
+            UiAction click = g_input.mclick[0] ? ui_hit(ui, mx, my, NULL) : UA_NONE;
+            if (click != UA_NONE) snd_play(SND_CLICK, 1, 1, 0, 0);
+            if (pr[K_F2]) snd_toggle_mute();
+            if (snd_ready()) {      /* the hush of the deep, and a fire crackling somewhere close */
+                snd_loop(LOOP_AMBIENCE, 0.6f);
+                snd_loop(LOOP_FIRE, 0.55f);
+                snd_loop(LOOP_TORCH, 0);
+                snd_loop(LOOP_WATER, 0);
+            }
+            if (scr == SCR_TITLE) {
+                UiAction items[4];
+                int n = ui_title_menu(&tf, items, 4);
+                if (tf.sel >= n) tf.sel = n - 1;
+                if (tf.sel < 0) tf.sel = 0;
+                UiAction act = UA_NONE;
+                if (tf.confirm_new) {
+                    if (pr['y'] || click == UA_YES) {
+                        /* give up the saved game: into the hall of fame with it, then a fresh one */
+                        if (fame_path[0]) {
+                            FameEntry e;
+                            char ferr[PATH_MAX + 64];
+                            fame_from_game(g, FAME_ABANDONED, &e);
+                            if (!fame_add(fame_path, &e, ferr, sizeof ferr)) fprintf(stderr, "%s: %s\n", SHADESDEEP_NAME, ferr);
+                        }
+                        save_remove(save_path);
+                        game_free(g);
+                        g = game_new((uint32_t)time(NULL) ^ seed++);
+                        save_gone = false;
+                        saved_depth = g->depth;
+                        render_camera(r, g, fr.world.w, fr.world.h, 0, true);
+                        tf.confirm_new = false;
+                        tf.can_continue = false;
+                        scr = SCR_PLAY;
+                    } else if (pr['n'] || pr[K_ESC] || click == UA_NO || g_input.mclick[2]) {
+                        tf.confirm_new = false;
+                    }
+                } else {
+                    if (rep[K_UP] || rep[K_KP8] || rep['k']) tf.sel = (tf.sel + n - 1) % n;
+                    if (rep[K_DOWN] || rep[K_KP2] || rep['j'] || pr[K_TAB]) tf.sel = (tf.sel + 1) % n;
+                    if (g_input.moved) {
+                        UiAction h = ui_hit(ui, mx, my, NULL);
+                        for (int i = 0; i < n; i++) if (items[i] == h) tf.sel = i;
+                    }
+                    if (pr[K_ENTER] || pr[K_KPENTER] || pr[' ']) act = items[tf.sel];
+                    if (PLAIN('c') && tf.can_continue) act = UA_CONTINUE;
+                    if (PLAIN('n')) act = UA_NEW_GAME;
+                    if (PLAIN('h')) act = UA_FAME;
+                    if (PLAIN('q') || pr[K_ESC]) act = UA_QUIT;
+                    if (click != UA_NONE) act = click;
+                }
+                switch (act) {
+                case UA_CONTINUE: scr = SCR_PLAY; break;
+                case UA_NEW_GAME:
+                    if (tf.can_continue) tf.confirm_new = true;
+                    else scr = SCR_PLAY;          /* the game waiting behind the title is a fresh one */
+                    break;
+                case UA_FAME:
+                    fame_n = fame_load(fame_path[0] ? fame_path : NULL, fame_list, FAME_MAX, &ctl.fame_total);
+                    fame_back = SCR_TITLE;
+                    scr = SCR_FAME;
+                    break;
+                case UA_QUIT: quit = true; break;
+                default: break;
+                }
+                if (scr == SCR_PLAY) {
+                    played = true;
+                    quit_t = -10;
+                }
+            } else if (pr[K_ESC] || pr[K_ENTER] || pr[K_KPENTER] || PLAIN('h') || PLAIN('q') || click == UA_CLOSE
+                       || g_input.mclick[2]) {
+                scr = fame_back;
+            }
+            input_clear_edges();
+            if (scr != SCR_PLAY) {
+                if (scr == SCR_TITLE) {
+                    tf.mx = mx; tf.my = my; tf.dt = dt;
+                    ui_draw_title(ui, &fr.screen, &tf);
+                } else {
+                    bool from_end = fame_back == SCR_PLAY;
+                    FameFrame ff = { fame_list, fame_n, ctl.fame_total, from_end ? ctl.fame_rank : 0,
+                                     from_end && ctl.fame_rank ? &fame_mine : NULL, mx, my, dt };
+                    ui_draw_fame(ui, &fr.screen, &ff);
+                }
+                unsigned inflight = kg.sent - (g_input.gfx_ok + g_input.gfx_err);
+                if (inflight >= MAX_INFLIGHT && t - fps_t < 0.25) continue;
+                kgfx_present(&kg, &fr.screen, &ts);
+                fps_frames++;
+                if (t - fps_t >= 0.5) { fps_now = (float)(fps_frames / (t - fps_t)); fps_frames = 0; fps_t = t; }
+                continue;
+            }
+        }
+
+        bool end_screen = (g->state == GS_DEAD || g->state == GS_WON) && game_end_shown(g);
         /* Esc twice quits; once closes whatever is open */
-        if (pr[K_ESC]) {
+        if (pr[K_ESC] && end_screen) {
+            /* the closing screen's own: back to the title */
+        } else if (pr[K_ESC]) {
             if (ctl.map) ctl.map = false;
             else if (ctl.help) ctl.help = false;
             else if (g->state == GS_JUMP_PROMPT) game_jump_answer(g, false);
@@ -810,6 +1008,13 @@ int main(int argc, char **argv)
         if (over && !save_gone) {
             save_remove(save_path);             /* death is final, and so is the end */
             save_gone = true;
+            if (fame_path[0]) {
+                char ferr[PATH_MAX + 64];
+                fame_from_game(g, g->state == GS_WON ? FAME_WON : FAME_DIED, &fame_mine);
+                ctl.fame_rank = fame_add(fame_path, &fame_mine, ferr, sizeof ferr);
+                if (!ctl.fame_rank) game_msg(g, C_WARN, "%s.", ferr);
+                fame_n = fame_load(fame_path, fame_list, FAME_MAX, &ctl.fame_total);
+            }
         } else if (!over && g->depth != saved_depth && !busy) {
             save_now(g, save_path, save_err, sizeof save_err);   /* a new level: keep the run safe */
             saved_depth = g->depth;
@@ -820,12 +1025,24 @@ int main(int argc, char **argv)
             ctl.targeting = false;
             if (!game_end_shown(g)) {
                 /* a moment to watch it happen before the closing screen */
-            } else if (pr[K_ENTER] || pr[K_KPENTER] || click == UA_NEW_GAME) {
+            } else if (pr[K_ENTER] || pr[K_KPENTER] || click == UA_NEW_GAME || pr[K_ESC] || click == UA_TITLE) {
+                bool to_title = pr[K_ESC] || click == UA_TITLE;
                 game_free(g);
                 g = game_new((uint32_t)time(NULL) ^ seed++);
                 save_gone = false;
                 saved_depth = g->depth;
+                ctl.fame_rank = 0;
                 render_camera(r, g, fr.world.w, fr.world.h, 0, true);
+                if (to_title) {
+                    scr = SCR_TITLE;
+                    played = false;
+                    tf.can_continue = false;
+                    tf.sel = 0;
+                }
+            } else if (PLAIN('h') || click == UA_FAME) {
+                fame_n = fame_load(fame_path[0] ? fame_path : NULL, fame_list, FAME_MAX, &ctl.fame_total);
+                fame_back = SCR_PLAY;
+                scr = SCR_FAME;
             } else if (PLAIN('q') || click == UA_QUIT) {
                 quit = true;
             }
@@ -981,7 +1198,7 @@ int main(int argc, char **argv)
     }
 
     save_err[0] = 0;
-    bool saved = save_now(g, save_path, save_err, sizeof save_err);
+    bool saved = played && save_now(g, save_path, save_err, sizeof save_err);
     snd_shutdown();
     kgfx_cleanup(&kg);
     term_restore();
@@ -992,5 +1209,6 @@ int main(int argc, char **argv)
     render_free(r);
     game_free(g);
     ui_free(ui);
+    image_free(&title_art);
     return 0;
 }

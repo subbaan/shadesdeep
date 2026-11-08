@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "font.h"
 #include "version.h"
@@ -15,7 +16,7 @@ typedef struct { int x, y, w, h; UiAction a; int arg; } Btn;
 typedef struct { int x, y, w, h; } Box;
 
 struct UI {
-    Font *head, *body, *small, *big;
+    Font *head, *body, *small, *big, *title;
     Image icons[IT_COUNT];  /* not owned: set by ui_set_icons */
     Image icons_hi[IT_COUNT];   /* full resolution ones, px NULL when none */
     int cell_h;
@@ -28,6 +29,11 @@ struct UI {
     int banner_depth;
     float banner_t;
     float last_time;
+    /* the title screen */
+    const Image *title_art; /* not owned */
+    Canvas title_cv;        /* title_art scaled to the screen */
+    float title_t;
+    struct { float x, y, vx, vy, life, max, r; } ember[90];
 };
 
 static const uint32_t GOLD = 0xc9a45c, GOLD_DIM = 0x6e5a34, INK = 0x0b0907;
@@ -39,10 +45,11 @@ UI *ui_new(const char *dir, char *err, size_t errn)
     snprintf(p, sizeof p, "%s/Cinzel.ttf", dir);
     ui->head = font_open(p, 700);
     ui->big = font_open(p, 700);
+    ui->title = font_open(p, 900);
     snprintf(p, sizeof p, "%s/Alegreya.ttf", dir);
     ui->body = font_open(p, 500);
     ui->small = font_open(p, 500);
-    if (!ui->head || !ui->body || !ui->small || !ui->big) {
+    if (!ui->head || !ui->body || !ui->small || !ui->big || !ui->title) {
         snprintf(err, errn, "cannot load fonts from %s", dir);
         ui_free(ui);
         return NULL;
@@ -59,6 +66,8 @@ void ui_free(UI *ui)
     font_close(ui->body);
     font_close(ui->small);
     font_close(ui->big);
+    font_close(ui->title);
+    free(ui->title_cv.px);
     free(ui);
 }
 
@@ -74,6 +83,7 @@ void ui_set_scale(UI *ui, int cell_h, float scale)
     font_size(ui->small, px * 82 / 100);
     font_size(ui->head, px * 92 / 100);
     font_size(ui->big, px * 17 / 10);
+    font_size(ui->title, px * 9 / 2);
 }
 
 /* ------------------------------------------------------------- widgets */
@@ -210,7 +220,7 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
         tw_compact += button_width(ui, NULL, B[i].l) + gap;
     }
     /* the readouts on the left: health, depth, torch, embers */
-    snprintf(buf, sizeof buf, "HP %d/%d", p->hp, game_max_hp(g));
+    snprintf(buf, sizeof buf, "HP %d/%d", p->hp > 0 ? p->hp : 0, game_max_hp(g));
     int need = pad + font_width(hf, buf) + pad / 2 + ui->px * 5 + pad;
     snprintf(buf, sizeof buf, "DEPTH %d", g->depth);
     need += 2 * pad + font_width(hf, buf);
@@ -245,7 +255,7 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     int x = pad;
     int mhp = game_max_hp(g);
     uint32_t hc = p->hp * 3 <= p->maxhp ? 0xff6a50 : g->chill ? 0xb8e0ff : g->warm_left > 0 ? 0xffc890 : 0xe2d4b4;
-    snprintf(buf, sizeof buf, "HP %d/%d", p->hp, mhp);
+    snprintf(buf, sizeof buf, "HP %d/%d", p->hp > 0 ? p->hp : 0, mhp);
     x = font_draw(hf, cv, x, base, buf, hc, 255) + pad / 2;
     int bw = ui->px * 5, hbh = ui->px / 3 + 2, byy = base - font_ascent(hf) * 6 / 10;
     hp_bar(cv, x, byy, bw, hbh, p->hp, p->maxhp);
@@ -526,19 +536,20 @@ static void floaters(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
     }
 }
 
-static int dialog_at(UI *ui, Canvas *cv, const char *title, const char *text, int *bx, int *by, int *bh, bool high);
+static int dialog_at(UI *ui, Canvas *cv, const char *title, const char *text, int *bx, int *by, int *bh, bool high, int minw);
 
 static int dialog(UI *ui, Canvas *cv, const char *title, const char *text, int *bx, int *by, int *bh)
 {
-    return dialog_at(ui, cv, title, text, bx, by, bh, false);
+    return dialog_at(ui, cv, title, text, bx, by, bh, false, 0);
 }
 
 /* high: up out of the way of the middle of the view, where you are */
-static int dialog_at(UI *ui, Canvas *cv, const char *title, const char *text, int *bx, int *by, int *bh, bool high)
+static int dialog_at(UI *ui, Canvas *cv, const char *title, const char *text, int *bx, int *by, int *bh, bool high, int minw)
 {
     Font *bf = ui->body;
     int pad = ui->px;
     int w = ui->px * 22;
+    if (w < minw + pad * 2) w = minw + pad * 2;
     if (w > cv->w - 20) w = cv->w - 20;
     int th = font_wrap(bf, NULL, 0, 0, w - pad * 2, text, 0, 0);
     int h = pad * 3 + font_line(ui->big) + th + font_line(ui->head) * 2;
@@ -953,16 +964,30 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
         if (!won && g->deepest > g->depth && n < (int)sizeof text)
             n += snprintf(text + n, sizeof text - n, " You had been as deep as %d.", g->deepest);
         if (n < (int)sizeof text)
-            snprintf(text + n, sizeof text - n, " You slew %d foe%s, gathered %d ember%s and lit %d sconce%s along the way.",
+            n += snprintf(text + n, sizeof text - n, " You slew %d foe%s, gathered %d ember%s and lit %d sconce%s along the way.",
                      g->kills, g->kills == 1 ? "" : "s", g->embers_got, g->embers_got == 1 ? "" : "s",
                      g->sconces_lit, g->sconces_lit == 1 ? "" : "s");
+        if (f->fame_rank > 0 && n < (int)sizeof text) {
+            if (f->fame_rank == 1 && f->fame_total > 1)
+                snprintf(text + n, sizeof text - n, " It is the finest run in the hall of fame.");
+            else if (f->fame_total > 1)
+                snprintf(text + n, sizeof text - n, " It stands #%d of %d in the hall of fame.", f->fame_rank, f->fame_total);
+            else
+                snprintf(text + n, sizeof text - n, " It is the first run in the hall of fame.");
+        }
+        static const struct { const char *k, *l; UiAction a; } B[] = {
+            { "Enter", "New game", UA_NEW_GAME }, { "h", "Hall of fame", UA_FAME },
+            { "Esc", "Title", UA_TITLE }, { "q", "Quit", UA_QUIT },
+        };
+        int gap = ui->px, bw[4], tot = -gap;
+        for (int i = 0; i < 4; i++) tot += (bw[i] = button_width(ui, B[i].k, B[i].l)) + gap;
         int bx, by, bh;
-        int w = dialog_at(ui, cv, won ? "The Heartflame burns again" : "You have perished", text, &bx, &by, &bh, won);
-        int w1 = button_width(ui, "Enter", "New game"), w2 = button_width(ui, "q", "Quit");
-        int gap = ui->px;
-        int x0 = bx + (w - w1 - w2 - gap) / 2;
-        button(ui, cv, x0, by, bh, "Enter", "New game", UA_NEW_GAME, f->mx, f->my, true);
-        button(ui, cv, x0 + w1 + gap, by, bh, "q", "Quit", UA_QUIT, f->mx, f->my, true);
+        int w = dialog_at(ui, cv, won ? "The Heartflame burns again" : "You have perished", text, &bx, &by, &bh, won, tot);
+        int x0 = bx + (w - tot) / 2;
+        for (int i = 0; i < 4; i++) {
+            button(ui, cv, x0, by, bh, B[i].k, B[i].l, B[i].a, f->mx, f->my, true);
+            x0 += bw[i] + gap;
+        }
     } else if (f->help) {
         help(ui, cv, f);
     } else if (f->map) {
@@ -972,4 +997,317 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
         targeting_banner(ui, cv, g, f);
         if (f->menu == MENU_NONE) hover_card(ui, cv, g, f);
     }
+}
+
+/* ------------------------------------------------------- title screen */
+
+void ui_set_title_art(UI *ui, const Image *art)
+{
+    ui->title_art = art && art->px ? art : NULL;
+    ui->title_cv.w = ui->title_cv.h = 0;     /* rescale on the next frame */
+}
+
+/* a wide menu button with the label centred; hot = highlighted from the keyboard */
+static void menu_button(UI *ui, Canvas *cv, int x, int y, int w, int h, const char *key, const char *label,
+                        UiAction a, int mx, int my, bool hot)
+{
+    bool hov = hot || (mx >= x && my >= y && mx < x + w && my < y + h);
+    cv_blend_rect(cv, x, y, w, h, hov ? 0x3a2c18 : 0x110d09, hov ? 235 : 200);
+    cv_frame(cv, x, y, w, h, hov ? GOLD : GOLD_DIM, 255);
+    if (hov) cv_frame(cv, x + 2, y + 2, w - 4, h - 4, 0x5a4626, 200);
+    int base = y + (h + font_ascent(ui->head) * 7 / 10) / 2;
+    int lw = font_width(ui->head, label);
+    font_draw(ui->head, cv, x + (w - lw) / 2, base, label, hov ? 0xfff2d0 : 0xe2d4b4, 255);
+    if (key) font_draw(ui->small, cv, x + ui->px / 2, base, key, hov ? GOLD : GOLD_DIM, 255);
+    if (hov) {
+        diamond(cv, x + (w - lw) / 2 - ui->px * 3 / 4, y + h / 2, ui->px / 5 + 1, GOLD);
+        diamond(cv, x + (w + lw) / 2 + ui->px * 3 / 4, y + h / 2, ui->px / 5 + 1, GOLD);
+    }
+    add_btn(ui, x, y, w, h, a);
+}
+
+/* sparks rising from below, as off a fire */
+static void embers(UI *ui, Canvas *cv, float dt, float rate)
+{
+    int n = (int)(sizeof ui->ember / sizeof ui->ember[0]);
+    for (int i = 0; i < n; i++) {
+        __typeof__(&ui->ember[0]) e = &ui->ember[i];
+        if (e->life <= 0) {
+            if ((float)rand() / RAND_MAX > rate * dt * 60) continue;
+            e->x = cv->w * (0.15f + 0.7f * (float)rand() / RAND_MAX);
+            e->y = cv->h + 4;
+            e->vx = ((float)rand() / RAND_MAX - 0.5f) * cv->h * 0.04f;
+            e->vy = -cv->h * (0.06f + 0.10f * (float)rand() / RAND_MAX);
+            e->max = e->life = 3.5f + 4.5f * (float)rand() / RAND_MAX;
+            e->r = 1.0f + 2.2f * (float)rand() / RAND_MAX * (cv->h / 700.0f);
+            continue;
+        }
+        e->life -= dt;
+        float age = e->max - e->life;
+        e->x += (e->vx + sinf(age * 1.7f + i) * cv->h * 0.015f) * dt;
+        e->y += e->vy * dt;
+        if (e->y < -10) { e->life = 0; continue; }
+        float k = clampf(e->life / e->max, 0, 1);
+        float tw = 0.75f + 0.25f * sinf(age * 9 + i * 1.3f);
+        uint32_t c = k > 0.6f ? 0xffd27a : k > 0.3f ? 0xff9a3a : 0xc8501e;
+        cv_glow(cv, (int)e->x, (int)e->y, (int)(e->r * 6) + 2, c, 0.35f * k * tw);
+        cv_disc(cv, e->x, e->y, e->r, c, (int)(255 * k * tw));
+    }
+}
+
+/* the picture behind the title menu: the title art, or a fire in the dark. The
+ * still part is drawn once per window size; only the flicker and the sparks move. */
+static void title_backdrop(UI *ui, Canvas *cv, float dt)
+{
+    ui->title_t += dt;
+    float t = ui->title_t;
+    Canvas *bg = &ui->title_cv;
+    if (bg->w != cv->w || bg->h != cv->h || !bg->px) {
+        free(bg->px);
+        bg->px = malloc(sizeof(uint32_t) * (size_t)cv->w * cv->h);
+        bg->w = bg->px ? cv->w : 0;
+        bg->h = bg->px ? cv->h : 0;
+        if (bg->px && ui->title_art) {
+            cv_cover(bg, ui->title_art);
+            /* darken towards the bottom, where the menu sits */
+            for (int y = bg->h / 2; y < bg->h; y++)
+                cv_blend_rect(bg, 0, y, bg->w, 1, 0x000000, 170 * (y - bg->h / 2) / (bg->h / 2 + 1));
+        } else if (bg->px) {
+            for (int y = 0; y < bg->h; y++)
+                cv_fill(bg, 0, y, bg->w, 1, mix(0x040302, 0x140b06, 256 * y / (bg->h > 1 ? bg->h - 1 : 1)));
+            int cx = bg->w / 2, by = bg->h + bg->h / 6;
+            cv_glow(bg, cx, by, bg->h * 3 / 4, 0xa0461a, 0.47f);
+            cv_glow(bg, cx, by, bg->h / 2, 0xff8a30, 0.30f);
+            cv_glow(bg, cx, bg->h * 3 / 10, bg->h / 3, 0x3a2410, 0.25f);
+        }
+    }
+    if (bg->px) memcpy(cv->px, bg->px, sizeof(uint32_t) * (size_t)cv->w * cv->h);
+    else cv_fill(cv, 0, 0, cv->w, cv->h, 0x040302);
+    if (!ui->title_art) {
+        float fl = 0.5f + 0.25f * sinf(t * 7.3f) + 0.15f * sinf(t * 13.1f + 1) + 0.1f * sinf(t * 23.7f);
+        cv_glow(cv, cv->w / 2, cv->h + cv->h / 10, cv->h / 4, 0xff7a28, 0.16f * fl);
+    }
+    embers(ui, cv, dt, ui->title_art ? 0.25f : 0.45f);
+}
+
+int ui_title_menu(const TitleFrame *t, UiAction *out, int max)
+{
+    int n = 0;
+    if (t->can_continue && n < max) out[n++] = UA_CONTINUE;
+    if (n < max) out[n++] = UA_NEW_GAME;
+    if (n < max) out[n++] = UA_FAME;
+    if (n < max) out[n++] = UA_QUIT;
+    return n;
+}
+
+void ui_draw_title(UI *ui, Canvas *cv, const TitleFrame *t)
+{
+    ui->nbtn = 0;
+    ui->npanel = 0;
+    title_backdrop(ui, cv, t->dt);
+    int px = ui->px;
+
+    UiAction items[4];
+    int n = ui_title_menu(t, items, 4);
+    char cont[64];
+    snprintf(cont, sizeof cont, "Continue (depth %d)", t->save_depth);
+    const char *label[4], *key[4];
+    for (int i = 0; i < n; i++) {
+        switch (items[i]) {
+        case UA_CONTINUE: label[i] = cont; key[i] = "c"; break;
+        case UA_NEW_GAME: label[i] = "New game"; key[i] = "n"; break;
+        case UA_FAME:     label[i] = "Hall of fame"; key[i] = "h"; break;
+        default:          label[i] = "Quit"; key[i] = "q"; break;
+        }
+    }
+    int bw = px * 13, bh = font_line(ui->head) * 2, gap = px * 2 / 3;
+    for (int i = 0; i < n; i++) {
+        int w = font_width(ui->head, label[i]) + px * 5;
+        if (w > bw) bw = w;
+    }
+    if (bw > cv->w - 20) bw = cv->w - 20;
+    int total = n * bh + (n - 1) * gap;
+    if (total > cv->h - px * 2) {           /* a very short window: pack the menu tighter */
+        bh = font_line(ui->head) * 3 / 2;
+        gap = px / 4;
+        total = n * bh + (n - 1) * gap;
+    }
+
+    /* the name, unless the picture carries it, or there's no room for it above the menu */
+    int menu_top = -1;
+    const char *name = "Shadesdeep";
+    int nw = font_width(ui->title, name), ny = cv->h * 34 / 100;
+    if (!ui->title_art && nw < cv->w - px * 2 && ny + px * 5 + total <= cv->h - px * 2
+        && ny - font_ascent(ui->title) >= 0) {
+        cv_glow(cv, cv->w / 2, ny - font_ascent(ui->title) / 3, nw * 2 / 3, 0x5a3412, 0.3f);
+        font_draw_shadow(ui->title, cv, (cv->w - nw) / 2, ny, name, GOLD, 255);
+        int rw = nw * 11 / 10, ry = ny + px;
+        cv_blend_rect(cv, (cv->w - rw) / 2, ry, rw, 1, GOLD, 200);
+        diamond(cv, cv->w / 2, ry, px / 3 + 1, GOLD);
+        const char *sub = "Carry fire down into the dark, and rekindle the Heartflame";
+        int sw = font_width(ui->body, sub);
+        if (sw < cv->w - px * 2) font_draw_shadow(ui->body, cv, (cv->w - sw) / 2, ry + px * 2, sub, 0xcbb894, 230);
+        menu_top = ry + px * 4;
+    }
+    if (menu_top < 0 || menu_top + total > cv->h - px * 3) menu_top = cv->h - px * 3 - total;
+    if (menu_top < px) menu_top = (cv->h - total) / 2;
+    int bx = (cv->w - bw) / 2;
+    if (!t->confirm_new)
+        for (int i = 0; i < n; i++)
+            menu_button(ui, cv, bx, menu_top + i * (bh + gap), bw, bh, key[i], label[i], items[i], t->mx, t->my,
+                        i == t->sel);
+
+    char ver[48];
+    snprintf(ver, sizeof ver, "%s", SHADESDEEP_VERSION);
+    int vw = font_width(ui->small, ver);
+    font_draw_shadow(ui->small, cv, cv->w - vw - px / 2, cv->h - px / 2, ver, GOLD_DIM, 255);
+
+    if (t->confirm_new) {
+        char text[200];
+        snprintf(text, sizeof text, "You have a game saved on depth %d. Starting afresh gives it up for good: "
+                 "it goes into the hall of fame as it stands.", t->save_depth);
+        int x, y, h;
+        int w1 = button_width(ui, "y", "Give it up"), w2 = button_width(ui, "n", "Keep it");
+        int w = dialog(ui, cv, "Abandon your game?", text, &x, &y, &h);
+        int x0 = x + (w - w1 - w2 - px) / 2;
+        button(ui, cv, x0, y, h, "y", "Give it up", UA_YES, t->mx, t->my, true);
+        button(ui, cv, x0 + w1 + px, y, h, "n", "Keep it", UA_NO, t->mx, t->my, true);
+    }
+}
+
+/* ------------------------------------------------------- hall of fame */
+
+/* draw s in at most maxw pixels, shortening it with an ellipsis if need be */
+static void draw_fit(Font *f, Canvas *cv, int x, int y, int maxw, const char *s, uint32_t c, int a)
+{
+    if (font_width(f, s) <= maxw) { font_draw(f, cv, x, y, s, c, a); return; }
+    char buf[128];
+    int n = (int)strlen(s);
+    if (n > (int)sizeof buf - 4) n = (int)sizeof buf - 4;
+    while (n > 0) {
+        snprintf(buf, sizeof buf, "%.*s…", n, s);
+        if (font_width(f, buf) <= maxw) break;
+        do n--; while (n > 0 && (s[n] & 0xc0) == 0x80);    /* whole UTF-8 characters */
+    }
+    font_draw(f, cv, x, y, buf, c, a);
+}
+
+void ui_draw_fame(UI *ui, Canvas *cv, const FameFrame *f)
+{
+    ui->nbtn = 0;
+    ui->npanel = 0;
+    title_backdrop(ui, cv, f->dt);
+    /* (the backdrop shows through the panel, dimmed by it: no need for a full-screen pass) */
+    int px = ui->px, pad = px;
+    Font *bf = ui->body, *sf = ui->small;
+
+    /* the columns: rank, fate, then the numbers; the narrowest screens lose the date, then the kills */
+    enum { C_RANK, C_FATE, C_DEPTH, C_TURNS, C_EMBERS, C_KILLS, C_DATE, NCOL };
+    static const char *H[NCOL] = { "", "Fate", "Depth", "Turns", "Embers", "Kills", "Date" };
+    const char *sample[NCOL] = { "999", "", "26", "99999", "999", "999", "2026-11-08" };
+    int cw[NCOL];
+    for (int c = 0; c < NCOL; c++) {
+        int a = font_width(sf, H[c]), b = font_width(bf, sample[c]);
+        cw[c] = (a > b ? a : b) + px;
+    }
+    int fate_min = px * 12, fate_max = px * 20;
+    bool show[NCOL] = { true, true, true, true, true, true, true };
+    int w = 0;
+    for (int tries = 0; tries < 3; tries++) {
+        w = pad * 2 + fate_min;
+        for (int c = 0; c < NCOL; c++) if (show[c] && c != C_FATE) w += cw[c];
+        if (w <= cv->w - 20) break;
+        if (show[C_DATE]) show[C_DATE] = false;
+        else show[C_KILLS] = false;
+    }
+    int fixed = w - fate_min;
+    cw[C_FATE] = clampi(cv->w - 20 - fixed, fate_min, fate_max);
+    w = fixed + cw[C_FATE];
+    if (w > cv->w - 8) w = cv->w - 8;
+
+    int rowh = font_line(bf) * 6 / 5;
+    int head_h = pad + font_line(ui->big) + font_line(sf) + pad;
+    int foot_h = font_line(ui->head) * 2 + pad;
+    int avail = cv->h - px * 2 - head_h - foot_h - rowh;   /* rowh: the column titles */
+    int fit = avail / rowh;
+    if (fit < 1) fit = 1;
+    bool mine_below = f->mine > 0 && f->mine > (f->n < fit ? f->n : fit);
+    int shown = f->n < fit ? f->n : fit;
+    if (mine_below && shown >= fit) shown = fit - 2 > 0 ? fit - 2 : 0;
+    int rows = shown + (mine_below ? 2 : 0);
+    if (f->n == 0) rows = 2;
+    int h = head_h + rowh + rows * rowh + foot_h;
+    int x = (cv->w - w) / 2, y = (cv->h - h) / 2;
+    panel(ui, cv, x, y, w, h, 240, true);
+
+    const char *title = "Hall of Fame";
+    int tw = font_width(ui->big, title);
+    font_draw(ui->big, cv, x + (w - tw) / 2, y + pad + font_ascent(ui->big), title, GOLD, 255);
+    char sub[64];
+    if (f->total == 1) snprintf(sub, sizeof sub, "one run so far");
+    else snprintf(sub, sizeof sub, "%d runs, the best first", f->total);
+    int sw = font_width(sf, sub);
+    font_draw(sf, cv, x + (w - sw) / 2, y + pad + font_line(ui->big) + font_ascent(sf), sub, GOLD_DIM, 255);
+
+    int cx[NCOL], xx = x + pad;
+    for (int c = 0; c < NCOL; c++) { cx[c] = xx; if (show[c]) xx += cw[c]; }
+    int yy = y + head_h;
+    for (int c = 0; c < NCOL; c++)
+        if (show[c]) font_draw(sf, cv, cx[c], yy + font_ascent(sf), H[c], GOLD_DIM, 255);
+    cv_blend_rect(cv, x + pad, yy + rowh - px / 4, w - pad * 2, 1, GOLD_DIM, 200);
+    yy += rowh;
+
+    if (f->n == 0) {
+        font_wrap(bf, cv, x + pad, yy + font_ascent(bf), w - pad * 2,
+                  "No runs yet. Carry fire down into the deep, and the tale of it will be written here.", 0xd8cbb0, 255);
+    }
+    for (int i = 0; i < rows && f->n > 0; i++) {
+        const FameEntry *e;
+        int rank;
+        if (i < shown) { e = &f->e[i]; rank = i + 1; }
+        else if (i == shown) {      /* a gap in the ranks before the run just ended */
+            for (int d = -1; d <= 1; d++)
+                cv_disc(cv, cx[C_RANK] + px / 2, yy + rowh / 2 + d * (rowh / 4), px / 10 + 1.0f, GOLD_DIM, 255);
+            yy += rowh;
+            continue;
+        }
+        else { e = f->mine_e; rank = f->mine; }
+        if (!e) break;
+        bool mine = rank == f->mine;
+        bool won = e->end == FAME_WON;
+        if (mine) {
+            cv_blend_rect(cv, x + pad / 2, yy, w - pad, rowh, 0x5a4220, 150);
+            cv_frame(cv, x + pad / 2, yy, w - pad, rowh, GOLD, 200);
+        } else if (i % 2) {
+            cv_blend_rect(cv, x + pad / 2, yy, w - pad, rowh, 0x2a2014, 70);
+        }
+        int base = yy + (rowh + font_ascent(bf) * 7 / 10) / 2;
+        uint32_t ink = mine ? 0xfff2d0 : won ? 0xf0d890 : 0xd8cbb0;
+        char buf[32];
+        snprintf(buf, sizeof buf, "%d.", rank);
+        font_draw(bf, cv, cx[C_RANK], base, buf, rank <= 3 ? GOLD : GOLD_DIM, 255);
+        draw_fit(bf, cv, cx[C_FATE], base, cw[C_FATE] - px / 2, e->cause, won ? GOLD : ink, 255);
+        snprintf(buf, sizeof buf, "%d", e->deepest);
+        font_draw(bf, cv, cx[C_DEPTH], base, buf, ink, 255);
+        snprintf(buf, sizeof buf, "%d", e->turns);
+        font_draw(bf, cv, cx[C_TURNS], base, buf, ink, 255);
+        snprintf(buf, sizeof buf, "%d", e->embers);
+        font_draw(bf, cv, cx[C_EMBERS], base, buf, ink, 255);
+        if (show[C_KILLS]) {
+            snprintf(buf, sizeof buf, "%d", e->kills);
+            font_draw(bf, cv, cx[C_KILLS], base, buf, ink, 255);
+        }
+        if (show[C_DATE]) {
+            time_t when = (time_t)e->when;
+            struct tm tm;
+            if (localtime_r(&when, &tm)) strftime(buf, sizeof buf, "%Y-%m-%d", &tm);
+            else snprintf(buf, sizeof buf, "?");
+            font_draw(sf, cv, cx[C_DATE], base, buf, GOLD_DIM, 255);
+        }
+        yy += rowh;
+    }
+
+    int bh = font_line(ui->head) * 3 / 2;
+    int bw = button_width(ui, "Esc", "Back");
+    button(ui, cv, x + (w - bw) / 2, y + h - pad - bh, bh, "Esc", "Back", UA_CLOSE, f->mx, f->my, true);
 }

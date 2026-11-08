@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.14.0. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.15.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -31,7 +31,8 @@ down and [kindle it again](#the-heartflame).
 13. [Traps](#traps)
 14. [Special rooms](#special-rooms)
 15. [The Heartflame](#the-heartflame)
-16. [Tips](#tips)
+16. [The hall of fame](#the-hall-of-fame)
+17. [Tips](#tips)
 
 ---
 
@@ -58,6 +59,11 @@ Every action also has a button on screen.
 | Sound on/off | `F2` | |
 | Save and quit | `Esc` twice | |
 
+**Explore and travel** take the shortest safe way. They go round shallow water
+when there's a dry way (even a fair bit longer), so you don't splash about and
+draw attention. They only wade when there's no other way. They never swim deep
+water, step into a chasm or fire, or walk onto a trap you know about.
+
 **Aiming a throw:** move the reticle with the mouse or the direction keys.
 `Tab` cycles through the monsters you can see. Click or press `Enter` to
 throw, and `Esc` cancels.
@@ -80,6 +86,20 @@ creatures and items are drawn from the full-detail art rather than blown up, so
 they stay sharp at any zoom. Start with `--classic-art` to play with the
 game's original blocky sprites instead (it doesn't still the dust). Shades and
 the Hollow are always drawn live, as moving darkness.
+
+### The title screen
+
+Shadesdeep opens on a title screen:
+
+- **Continue** (`c`) picks up your saved game. It's only there when you have one.
+- **New game** (`n`) starts a fresh dungeon. If you have a saved game, it asks
+  first. Giving the saved game up ends it for good, and it goes into the
+  [hall of fame](#the-hall-of-fame) as it stands.
+- **Hall of fame** (`h`) shows your best runs.
+- **Quit** (`q` or `Esc`) leaves.
+
+Choose with the mouse, the letter keys, or the up and down arrows and `Enter`.
+`--no-title` skips the title screen and starts playing straight away.
 
 ### Saving
 
@@ -472,6 +492,39 @@ by the hearth.
 - **While you're kindling, every blow it lands smothers the flame** back a
   step. You can't kindle with the Hollow at your side: dazzle it, wall it off
   with fire, or kill it first.
+
+---
+
+## The hall of fame
+
+Every run that ends goes into the hall of fame: won, killed, or given up
+from the title screen. Each entry records:
+
+- how it ended ("Killed by a goblin", "Drowned, dragged down by mail",
+  "Rekindled the Heartflame")
+- the deepest level you reached
+- the turns it took
+- the embers you gathered
+- the monsters you killed
+- the date
+
+Runs are ranked like this:
+
+1. Wins come first.
+2. Then the deepest runs.
+3. Then the most embers.
+4. Then the most kills.
+5. A quicker win beats a slower one, and a death put off longer beats a quick one.
+
+The closing screen tells you where the run you've just finished stands, and its
+**Hall of fame** button (`h`) shows the table with your run picked out. From
+the closing screen, `Enter` starts a new game, `Esc` goes back to the title, and
+`q` quits.
+
+The hall is kept next to the save, in `~/.local/share/shadesdeep/halloffame.txt`.
+It's plain text, one run per line. Lines are only ever added, so nothing in it
+is lost. `shadesdeep --hall-of-fame` prints it in the terminal. Games played
+with `--no-save` aren't recorded.
 
 ---
 

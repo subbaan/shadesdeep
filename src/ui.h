@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "fame.h"
 #include "game.h"
 #include "gfx.h"
 
@@ -14,6 +15,7 @@ typedef enum {
     UA_JUMP_YES, UA_JUMP_NO, UA_NEW_GAME, UA_QUIT, UA_CLOSE,
     UA_INV, UA_THROW, UA_TORCH, UA_PICK, UA_ITEM_THROW, UA_ITEM_USE, UA_ITEM_DROP, UA_MENU_BACK,
     UA_MAP, UA_FORGE,
+    UA_CONTINUE, UA_FAME, UA_TITLE, UA_YES, UA_NO,
 } UiAction;
 
 /* where the map overview sits on screen, and which tiles it shows */
@@ -57,6 +59,8 @@ typedef struct {
     bool map;               /* the map overview is open */
     const Canvas *mini;     /* its picture */
     MapLayout ml;
+    int fame_rank;          /* where the run that just ended stands in the hall of fame (0 = unrecorded) */
+    int fame_total;         /* how many runs the hall holds */
 } UiFrame;
 
 void ui_map_layout(const UI *ui, Game *g, int sw, int sh, MapLayout *m);
@@ -65,5 +69,35 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f);
 void ui_set_icons(UI *ui, const Image *icons, const Image *icons_hi);   /* item pictures for menus (hi may be NULL) */
 UiAction ui_hit(const UI *ui, int mx, int my, int *arg);    /* button under the mouse */
 bool ui_over_panel(const UI *ui, int mx, int my);   /* mouse is over interface, not the map */
+
+/* ---- the title screen and the hall of fame */
+
+/* the title picture (not owned; NULL for the drawn one) */
+void ui_set_title_art(UI *ui, const Image *art);
+
+typedef struct {
+    bool can_continue;      /* there's a saved game to go back to */
+    int save_depth, save_turn;
+    bool confirm_new;       /* asking before a new game abandons the saved one */
+    int sel;                /* keyboard-highlighted entry, an index into ui_title_menu's list */
+    int mx, my;
+    float dt;
+} TitleFrame;
+
+/* the title menu's entries, top to bottom; returns how many */
+int  ui_title_menu(const TitleFrame *t, UiAction *out, int max);
+void ui_draw_title(UI *ui, Canvas *cv, const TitleFrame *t);
+
+typedef struct {
+    const FameEntry *e;     /* best first */
+    int n;                  /* entries in e */
+    int total;              /* runs in the hall (may be more than n) */
+    int mine;               /* rank of the run just ended, to pick it out (0 = none) */
+    const FameEntry *mine_e;    /* that run, for when it ranks below the ones shown */
+    int mx, my;
+    float dt;
+} FameFrame;
+
+void ui_draw_fame(UI *ui, Canvas *cv, const FameFrame *f);
 
 #endif
