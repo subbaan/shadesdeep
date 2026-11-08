@@ -22,7 +22,7 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import butter, lfilter, fftconvolve
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 SR = 44100
 RNG = np.random.default_rng(2611)
 
@@ -308,6 +308,50 @@ def goblin(v):
     return room(voice, 0.25, 0.8)
 
 
+def bat(v):
+    """Leathery wingbeats and a thin chitter."""
+    out = np.zeros(1)
+    for k in range(5 + v):
+        d = 0.05
+        flap = bp(noise(d), 300, 1400) * env(d, 0.004, 0.012, 0) * RNG.uniform(0.4, 0.8)
+        out = mix(out, at(flap, k * 0.075 + RNG.uniform(0, 0.01)))
+    for k in range(2 + v % 2):
+        d = RNG.uniform(0.025, 0.045)
+        f0 = RNG.uniform(5200, 7000)
+        ch = sine(slide(f0, f0 * 0.8, d), d) * env(d, 0.002, None, 1, 0.01) * 0.35
+        out = mix(out, at(ch, 0.05 + k * RNG.uniform(0.06, 0.1)))
+    return room(out, 0.2, 0.4)
+
+
+def ogre(v):
+    """A deep, wet growl from a big chest."""
+    d = 0.9 + v * 0.1
+    t = tt(d)
+    f = slide(78 + v * 6, 58, d) * (1 + 0.08 * np.sin(2 * np.pi * (6 + v) * t))
+    raw = saw(f, d) + 0.5 * brown(d)
+    voice = lp(raw, 520, 2) * 1.3 + bp(raw, 280, 520) * 0.7 + bp(raw, 900, 1300) * 0.15
+    voice *= env(d, 0.06, None, 1, 0.25) * (0.75 + 0.25 * np.abs(np.sin(2 * np.pi * 4.5 * t)))
+    return room(voice, 0.3, 1.0)
+
+
+def eel(v):
+    """Something lunges up out of the water and snaps."""
+    d = 0.6
+    surge = sweep_lp(noise(d), 600, 3500) * env(d, 0.01, 0.12, 0) * 0.8
+    snap = at(bp(noise(0.03), 1500, 6000) * env(0.03, 0.0005, 0.008, 0) * 1.2, 0.09 + v * 0.02)
+    plunk = at(sine(slide(160, 80, 0.15), 0.15) * env(0.15, 0.002, 0.04, 0) * 0.5, 0.16)
+    return room(mix(surge, snap, plunk), 0.3, 0.8)
+
+
+def sling(v):
+    """A sling whirled once, then loosed."""
+    d = 0.42
+    t = tt(d)
+    whirr = bp(noise(d), 500, 2400) * (0.5 + 0.5 * np.sin(2 * np.pi * (14 + v * 3) * t) ** 2) * np.sin(np.pi * t / d) ** 2 * 0.6
+    loose = at(bp(sweep_lp(noise(0.12), 4000, 900), 400, 5000) * env(0.12, 0.002, 0.04, 0), 0.3)
+    return room(mix(whirr, loose), 0.2, 0.5)
+
+
 def shade(v):
     """A breathy whisper that doesn't quite form words."""
     d = 1.3
@@ -569,6 +613,7 @@ SOUNDS = {
     "throw": (throw, 2, False), "clink": (clink, 3, False), "thud": (thud, 2, False), "shatter": (shatter, 1, False),
     "drink": (drink, 1, False), "pickup": (pickup, 2, False), "door": (door, 3, False), "stairs": (stairs, 1, False),
     "fall": (fall, 1, False), "land": (land, 1, False), "click": (click, 1, False),
+    "bat": (bat, 2, False), "ogre": (ogre, 2, False), "eel": (eel, 2, False), "sling": (sling, 2, False),
     "ambience": (ambience, 1, True), "torch_loop": (lambda v: fire_loop(v, 1.0), 1, True),
     "fire_loop": (lambda v: fire_loop(v, 0.8), 1, True), "water_loop": (water_loop, 1, True),
 }
@@ -579,6 +624,7 @@ VOLUME = {
     "kill": 0.5, "rat": 0.35, "goblin": 0.45, "shade": 0.5, "burn": 0.5, "dissolve": 0.55, "alert": 0.45,
     "ignite": 0.5, "sconce": 0.55, "snuff": 0.4, "hiss": 0.45, "throw": 0.35, "clink": 0.4, "thud": 0.45,
     "shatter": 0.5, "drink": 0.5, "pickup": 0.35, "door": 0.45, "stairs": 0.55, "fall": 0.55, "land": 0.65,
+    "bat": 0.35, "ogre": 0.6, "eel": 0.55, "sling": 0.4,
     "click": 0.25, "ambience": 0.5, "torch_loop": 0.35, "fire_loop": 0.3, "water_loop": 0.3,
 }
 

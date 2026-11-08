@@ -5,7 +5,7 @@ art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.7.0 (gear, embers and the forge) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.8.0 (bats, slingers, ogres and eels) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -66,6 +66,12 @@ sound; if no audio device opens, the game runs silent.
   chills: it takes max HP (up to half) until you warm up by a lit sconce or a
   torch on the floor; a torch in hand warms you only slowly. Resting by a fire
   also heals faster.
+- **More monsters:** *bats* (from depth 2) flit about twice a turn, come to
+  the light from afar and fly over chasms and water; *goblin slingers* (depth
+  3) sling stones from a distance, but only when they can see you in the
+  light; *ogres* (depth 4) hit very hard but act only every other turn and
+  can't be knocked back; *eels* lurk unseen in deep pools and bite anything in
+  the water or on the bank beside them.
 - **Gear** has no strength or skill requirements: anything you find, you can
   use, and each piece plays differently rather than simply being better.
   Open Items, pick a weapon or armour and press Wield / Wear (the old piece
@@ -92,7 +98,7 @@ sound; if no audio device opens, the game runs silent.
 - **Water:** wading through the shallows splashes, and the noise carries.
   Deep water must be swum: it puts out (and ruins) a lit torch, so you are
   asked twice before swimming with one, and anything dropped in it sinks.
-  Goblins won't follow you in. A torch thrown into water hisses out, and a
+  Goblins won't follow you in, but eels may be waiting there. A torch thrown into water hisses out, and a
   chasm over water makes for a softer landing.
 - **Chasms:** you can see the real level below through them. Stepping in asks
   whether to jump: it is a quick way down, but the fall hurts. Anything you
@@ -118,6 +124,8 @@ shallows, or swimming. `LUME_DUMP_SPOT=0..4` stands in an east-west corridor
 (with a rat and darts beside you), beside a door in a side wall, just north
 of a room's south wall, or in front of a cold sconce with a shade two steps
 away (4 also lights the sconce). It applies after `LUME_DUMP_JUMP`. `LUME_DUMP_MAP=1` opens the map and `LUME_DUMP_HELP=1` the help.
+`LUME_DUMP_MOBS="bat,2,0;ogre,0,2"` puts creatures near the player (rat,
+goblin, shade, bat, slinger, ogre, eel; `eel+` is an eel above the water).
 `LUME_DUMP_FORGE=N` stands by the forge with N embers and opens it (`N,0`
 leaves it shut), and `LUME_DUMP_GEAR="spear,1;mail,0"` puts gear in the pack (`LUME_DUMP_SLOT=N`
 picks the item `LUME_DUMP_MENU=item` shows).

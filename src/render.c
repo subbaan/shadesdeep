@@ -19,6 +19,7 @@ typedef struct {
 } Particle;
 
 #define MAX_RIPPLE 48
+#define STONE_T 0.24f       /* a sling stone's flight, seconds */
 typedef struct { float x, y, age, life, str; } Ripple;
 
 struct Renderer {
@@ -35,6 +36,7 @@ struct Renderer {
     int cam_depth;
     Particle part[MAX_PART];
     Ripple rip[MAX_RIPPLE];
+    struct { float x0, y0, x1, y1, t; } stone[4];      /* sling stones in flight (t: seconds, <0 idle) */
     float rip_acc[MAX_MOBS + 1];        /* idle ripples around anything standing in water */
     float ember_acc[MAX_LIGHTS];
     uint8_t noise[256 * 256];
@@ -118,6 +120,7 @@ Renderer *render_new(void)
     if (!r) return NULL;
     tiles_build(&r->t);
     r->rng.s = 1234;
+    for (int k = 0; k < 4; k++) r->stone[k].t = STONE_T;
     /* tileable value noise: a coarse random grid smoothly upsampled */
     uint8_t grid[32][32];
     for (int y = 0; y < 32; y++)
@@ -691,11 +694,12 @@ static void draw_ripples(Renderer *r, Canvas *cv, const View *v, float dt)
     /* anything standing in water sends out slow rings */
     for (int i = 0; i <= MAX_MOBS; i++) {
         const Mob *m = i < MAX_MOBS ? &v->mobs[i] : v->player;
-        if (!m || !m->alive || m->kind == MK_SHADE) continue;
+        if (!m || !m->alive || m->kind == MK_SHADE || m->kind == MK_BAT) continue;
         int tx = (int)lroundf(m->rx), ty = (int)lroundf(m->ry);
         if (!tile_water(tile_at(v->lv, tx, ty))) { r->rip_acc[i] = 0; continue; }
         if (v->fog && !(v->lv->f[ty][tx] & F_VIS)) continue;
-        r->rip_acc[i] += dt * (m->at < 1 ? 3.0f : 0.7f);
+        bool hid = game_mob_hidden(m);      /* an eel under the surface: now and then a ring gives it away */
+        r->rip_acc[i] += dt * (hid ? (m->at < 1 ? 1.5f : 0.15f) : m->at < 1 ? 3.0f : 0.7f);
         if (r->rip_acc[i] >= 1) {
             r->rip_acc[i] = 0;
             add_ripple(r, m->rx * TILE + 16, m->ry * TILE + 27, m->at < 1 ? 0.7f : 0.45f, 1.6f);
@@ -1002,6 +1006,7 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
         draw_shade(cv, v, m, ox, oy, v->fog && body ? fmaxf(v->visf[m->y][m->x], 0.3f) : 1.0f, body);
         return;
     }
+    if (game_mob_hidden(m)) return;        /* under the water: only its ripples show */
     if (v->fog && !is_player) {
         if (!(lv->f[m->y][m->x] & F_VIS)) return;
         alpha = v->visf[m->y][m->x];
@@ -1015,38 +1020,50 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
     }
     float breathe = (fmodf(v->time + m->idle, 1.6f) < 0.8f) ? 0 : 1;
     if (m->asleep) breathe = (fmodf(v->time * 0.5f + m->idle, 2.0f) < 1.0f) ? 0 : 1;
+    bool bat = m->kind == MK_BAT;
+    if (bat) breathe = m->asleep ? breathe : sinf(v->time * 9 + m->idle * 4) * 2.0f;
     int px = (int)lroundf(m->rx * TILE + ox) - v->camx;
     int py = (int)lroundf(m->ry * TILE + oy - 3 + breathe) - v->camy;
+    int lift = bat && !m->asleep ? 9 : 0;         /* a bat on the wing, its shadow on the ground below */
+    /* an ogre stands taller than a tile */
+    int W = m->kind == MK_OGRE ? 42 : TILE;
     CF c;
     light_at_px(r, m->rx * TILE + 16, m->ry * TILE + 20, &c);
     float floor_l = is_player ? 0.32f : 0.12f;
     float lr = c.r < floor_l ? floor_l : c.r, lg = c.g < floor_l ? floor_l : c.g, lb = c.b < floor_l * 1.3f ? floor_l * 1.3f : c.b;
     /* standing in water: the legs (or most of it) are under the surface */
     Tile wt = tile_at(lv, (int)lroundf(m->rx), (int)lroundf(m->ry));
-    int sub = wt == T_DEEP ? 14 : wt == T_SHALLOW ? 5 : 0;
+    int sub = bat ? 0 : wt == T_DEEP ? 14 : wt == T_SHALLOW ? 5 : 0;
+    if (m->kind == MK_EEL) sub = 4;               /* rearing up out of its pool */
     int wl = (int)lroundf(m->ry * TILE) + 29 - sub - v->camy;     /* waterline, canvas y */
-    if (sub) py += 2 + sub / 4;                                     /* sinks a little */
-    /* shadow */
-    for (int j = -3; j <= 3 && !sub; j++)
-        for (int i = -10; i <= 10; i++) {
-            float d = (i * i) / 100.0f + (j * j) / 9.0f;
+    if (sub && m->kind != MK_EEL) py += 2 + sub / 4;              /* sinks a little */
+    /* shadow (none for a bat over a chasm) */
+    int shw = W > TILE ? 14 : bat ? 7 : 10, sha = bat ? 70 : 120;
+    for (int j = -3; j <= 3 && !sub && !(bat && wt == T_CHASM); j++)
+        for (int i = -shw; i <= shw; i++) {
+            float d = (float)(i * i) / (float)(shw * shw) + (j * j) / 9.0f;
             if (d > 1) continue;
             int x = px + 16 + i, y = py + 3 - (int)breathe + 29 + j;
             if ((unsigned)x < (unsigned)cv->w && (unsigned)y < (unsigned)cv->h)
-                blend_px(&cv->px[(size_t)y * cv->w + x], 0, (int)(120 * (1 - d) * alpha));
+                blend_px(&cv->px[(size_t)y * cv->w + x], 0, (int)(sha * (1 - d) * alpha));
         }
+    py -= lift;
+    px -= (W - TILE) / 2;
+    py -= W - TILE;
     const Image *im = &r->t.mob[m->kind], *gl = &r->t.mob_glow[m->kind];
     int fl = m->flash > 0 ? (int)(m->flash * 230) : 0;
-    for (int j = 0; j < TILE; j++) {
+    for (int j = 0; j < W; j++) {
         int y = py + j;
         if ((unsigned)y >= (unsigned)cv->h || (sub && y > wl)) continue;
-        for (int i = 0; i < TILE; i++) {
+        int sj = j * TILE / W;
+        for (int i = 0; i < W; i++) {
             int x = px + i;
             if ((unsigned)x >= (unsigned)cv->w) continue;
-            int si = m->flip ? TILE - 1 - i : i;
-            uint32_t a = im->px[j * TILE + si];
+            int si = i * TILE / W;
+            if (m->flip) si = TILE - 1 - si;
+            uint32_t a = im->px[sj * TILE + si];
             if (!CA(a)) continue;
-            uint32_t g = gl->px[j * TILE + si];
+            uint32_t g = gl->px[sj * TILE + si];
             uint32_t col = CA(g) ? (g & 0xffffff) : lightc(a & 0xffffff, lr * 1.1f, lg * 1.1f, lb * 1.1f);
             if (m->asleep && !CA(g)) col = mix(col, 0x202838, 60);
             if (fl) col = mix(col, 0xffffff, fl);
@@ -1056,6 +1073,7 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
     if (sub) {
         /* a bright ring where the body meets the water */
         float lum = clampf((lr + lg + lb) / 3, 0.1f, 1.2f);
+        px += (W - TILE) / 2;
         for (int i = -10; i <= 10; i++) {
             int x = px + 16 + i, y = wl + (i * i) / 45;
             if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
@@ -1183,6 +1201,23 @@ static void draw_effects(Renderer *r, Canvas *cv, const View *v, float dt)
                 spawn(r, l->fx * TILE + 6.0f + rng_f(&r->rng) * 20, l->fy * TILE + TILE - 6.0f - rng_f(&r->rng) * 16,
                       0, -4, 1.4f, 0xa8e0ff, 0.8f);
         }
+    }
+    /* sling stones: a short arc from the slinger to you */
+    for (int k = 0; k < 4; k++) {
+        if (r->stone[k].t < 0 || r->stone[k].t >= STONE_T) continue;
+        r->stone[k].t += dt;
+        float u = r->stone[k].t / STONE_T;
+        if (u > 1) u = 1;
+        float dx = r->stone[k].x1 - r->stone[k].x0, dy = r->stone[k].y1 - r->stone[k].y0;
+        float hop = sqrtf(dx * dx + dy * dy) * 0.18f;
+        float x = r->stone[k].x0 + dx * u - v->camx, y = r->stone[k].y0 + dy * u - hop * 4 * u * (1 - u) - v->camy;
+        cv_disc(cv, x + 1, y + 2, 2.4f, 0x000000, 90);
+        cv_disc(cv, x, y, 2.4f, 0x5a5650, 255);
+        cv_disc(cv, x - 0.7f, y - 0.7f, 1.1f, 0xb0aca0, 220);
+        if (r->stone[k].t >= STONE_T)
+            for (int n = 0; n < 8; n++)
+                spawn_g(r, x + v->camx, y + v->camy, (rng_f(&r->rng) - 0.5f) * 80, -20 - rng_f(&r->rng) * 40,
+                        0.3f + rng_f(&r->rng) * 0.3f, 0x6a6458, 0.5f, 200);
     }
     /* particles */
     for (int i = 0; i < MAX_PART; i++) {
@@ -1502,6 +1537,18 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
     for (int i = 0; i < g->nfx; i++) {
         Fx *f = &g->fx[i];
         float x = f->x * TILE + TILE / 2.0f, y = f->y * TILE + TILE / 2.0f;
+        if (f->kind == FX_STONE) {
+            for (int k = 0; k < 4; k++)
+                if (r->stone[k].t >= STONE_T || r->stone[k].t < 0) {
+                    r->stone[k].x0 = f->sx * TILE + TILE / 2.0f;
+                    r->stone[k].y0 = f->sy * TILE + 6.0f;
+                    r->stone[k].x1 = x;
+                    r->stone[k].y1 = y;
+                    r->stone[k].t = 0;
+                    break;
+                }
+            continue;
+        }
         int n = f->kind == FX_SHATTER ? 26 : f->kind == FX_FALL ? 18 : f->kind == FX_DISSOLVE ? 40 : 16;
         for (int k = 0; k < n; k++) {
             float a = rng_f(&r->rng) * 6.283f, sp = 20 + rng_f(&r->rng) * 70;

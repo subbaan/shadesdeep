@@ -494,6 +494,97 @@ static const Pal GOBLIN_PAL[] = {
     { 'L', 0x6a4a2e, 0 }, { 'D', 0x4a3220, 0 }, { 'b', 0x3a2a1c, 0 }, { 'm', 0xa8a8b0, 0 },
 };
 
+static const char *const BAT[16] = {
+    "................",
+    "................",
+    "................",
+    "..k..........k..",
+    "..kk..k..k..kk..",
+    "..kwk.kkkk.kwk..",
+    ".kwwwkbbbbkwwwk.",
+    ".kwWwkebbekwWwk.",
+    "kwwWwwkbbkwwWwwk",
+    "kwWkWwkbbkwWkWwk",
+    "kWk.kWkbbkWk.kWk",
+    "kk...kkbbkk...kk",
+    "......kkkk......",
+    "................",
+    "................",
+    "................",
+};
+static const Pal BAT_PAL[] = {
+    { 'k', 0x120e10, 0 }, { 'w', 0x4e3e44, 0 }, { 'W', 0x30262a, 0 }, { 'b', 0x6a5040, 0 }, { 'e', 0xff5040, 1 },
+};
+
+static const char *const SLINGER[16] = {
+    "................",
+    "..kk........kk..",
+    "..kgk.kkkk.kgk..",
+    "...kgkrrrrkgk...",
+    "....kggggggk.ks.",
+    "....kgegeggk.kc.",
+    "....kggggggk..c.",
+    ".....kgnngk..c..",
+    "....kkLLLLkk.c..",
+    "...kgkLLLLkgkc..",
+    "...kgkLDDLk.kk..",
+    "....kkLLLLk.....",
+    ".....kLkkLk.....",
+    ".....kgk.kgk....",
+    ".....kbk.kbk....",
+    "....kkk...kkk...",
+};
+static const Pal SLINGER_PAL[] = {
+    { 'k', 0x121410, 0 }, { 'g', 0x7a9a50, 0 }, { 'e', 0xfff060, 1 }, { 'n', 0x4e6a34, 0 },
+    { 'L', 0x5a5e3a, 0 }, { 'D', 0x3e4228, 0 }, { 'b', 0x3a2a1c, 0 }, { 'r', 0xa83028, 0 },
+    { 'c', 0x9a8058, 0 }, { 's', 0xa8a49c, 0 },
+};
+
+static const char *const OGRE[16] = {
+    "....kkkkkkk.....",
+    "...kOOOOOOOk....",
+    "..kOOeOOOeOOk...",
+    "..kOOOOOOOOOk...",
+    "..kOwkkkkkwOk...",
+    "...kOOOOOOOk....",
+    ".kkkOOOOOOOkkk..",
+    "kOOOkBBBBBkOOOk.",
+    "kOOkBBBBBBBkOOk.",
+    "kOkkBBBBBBBkkOk.",
+    "kOk.kBBBBBk.kOk.",
+    "kkk.kbbbbbk.kkk.",
+    "....kBBkBBk.....",
+    "....kOOkOOk.....",
+    "...kOOk.kOOk....",
+    "...kkkk.kkkk....",
+};
+static const Pal OGRE_PAL[] = {
+    { 'k', 0x14110c, 0 }, { 'O', 0x8a7c5a, 0 }, { 'e', 0xffb040, 1 }, { 'w', 0xe8e0c8, 0 },
+    { 'B', 0x5e3e26, 0 }, { 'b', 0x3a2616, 0 },
+};
+
+static const char *const EEL[16] = {
+    "................",
+    "................",
+    "................",
+    "................",
+    "......kkkk......",
+    ".....kEEEEk.....",
+    "....kEeEEEEk....",
+    "....kEEEEEEEk...",
+    "....kEEkkwwwk...",
+    "....kEEk.ww.....",
+    "....kEEkkk......",
+    ".....kEPEk......",
+    "......kEPk......",
+    ".....kEPEk......",
+    ".....kEPk.......",
+    ".....kEPk.......",
+};
+static const Pal EEL_PAL[] = {
+    { 'k', 0x0c1412, 0 }, { 'E', 0x3e5e54, 0 }, { 'P', 0x7a8a6a, 0 }, { 'e', 0xd8ff70, 1 }, { 'w', 0xe8e8d8, 0 },
+};
+
 static const char *const I_TORCH[16] = {
     "................",
     "................",
@@ -762,6 +853,10 @@ void tiles_build(Tiles *t)
     build_sprite(&t->mob[MK_GOBLIN], &t->mob_glow[MK_GOBLIN], GOBLIN, GOBLIN_PAL, sizeof GOBLIN_PAL / sizeof *GOBLIN_PAL);
     image_alloc(&t->mob[MK_SHADE], TILE, TILE);        /* drawn procedurally by the renderer */
     image_alloc(&t->mob_glow[MK_SHADE], TILE, TILE);
+    build_sprite(&t->mob[MK_BAT], &t->mob_glow[MK_BAT], BAT, BAT_PAL, sizeof BAT_PAL / sizeof *BAT_PAL);
+    build_sprite(&t->mob[MK_SLINGER], &t->mob_glow[MK_SLINGER], SLINGER, SLINGER_PAL, sizeof SLINGER_PAL / sizeof *SLINGER_PAL);
+    build_sprite(&t->mob[MK_OGRE], &t->mob_glow[MK_OGRE], OGRE, OGRE_PAL, sizeof OGRE_PAL / sizeof *OGRE_PAL);
+    build_sprite(&t->mob[MK_EEL], &t->mob_glow[MK_EEL], EEL, EEL_PAL, sizeof EEL_PAL / sizeof *EEL_PAL);
     build_sprite(&t->item[IT_TORCH], &t->item_glow[IT_TORCH], I_TORCH, I_TORCH_PAL, sizeof I_TORCH_PAL / sizeof *I_TORCH_PAL);
     build_sprite(&t->item[IT_DART], &t->item_glow[IT_DART], I_DART, I_DART_PAL, sizeof I_DART_PAL / sizeof *I_DART_PAL);
     build_sprite(&t->item[IT_POTION], &t->item_glow[IT_POTION], I_POTION, I_POTION_PAL, sizeof I_POTION_PAL / sizeof *I_POTION_PAL);

@@ -14,7 +14,7 @@
 #define MAX_FLOAT 32
 #define MAX_PATH  (MAP_W * MAP_H)
 
-typedef enum { MK_PLAYER, MK_RAT, MK_GOBLIN, MK_SHADE, MK_COUNT } MobKind;
+typedef enum { MK_PLAYER, MK_RAT, MK_GOBLIN, MK_SHADE, MK_BAT, MK_SLINGER, MK_OGRE, MK_EEL, MK_COUNT } MobKind;
 
 #define SHADE_FEAR 0.30f   /* firelight a shade cannot bear: it won't enter it, and a fixed fire
                               * (sconce, torch on the floor) burns it; a carried torch only drives it off */
@@ -48,6 +48,8 @@ typedef struct {
     bool known;         /* the player has seen it before */
     int stun;           /* turns a shade is held by a sudden blaze */
     int lvl;            /* depth it was born on: deeper monsters hit harder */
+    int surfaced;       /* an eel: turns it stays above the water after a lunge (0: hidden) */
+    bool rest;          /* an ogre: sits out this turn (it acts every other turn) */
 } Mob;
 
 /* ---------------------------------------------------------------- items */
@@ -103,8 +105,8 @@ typedef struct {
 } Projectile;
 
 /* one-shot visual events for the renderer (sparks, splashes) */
-typedef enum { FX_SPARKS, FX_SHATTER, FX_THUD, FX_FALL, FX_BURN, FX_DISSOLVE, FX_SPLASH, FX_STEAM } FxKind;
-typedef struct { FxKind kind; int x, y; } Fx;
+typedef enum { FX_SPARKS, FX_SHATTER, FX_THUD, FX_FALL, FX_BURN, FX_DISSOLVE, FX_SPLASH, FX_STEAM, FX_STONE } FxKind;
+typedef struct { FxKind kind; int x, y; int sx, sy; } Fx;    /* sx, sy: where a sling stone came from */
 #define MAX_FX 16
 
 /* sounds the game asks for; the front end plays them (game.c stays silent) */
@@ -113,6 +115,7 @@ typedef enum {
     SND_RAT, SND_GOBLIN, SND_SHADE, SND_BURN, SND_DISSOLVE, SND_ALERT,
     SND_IGNITE, SND_SCONCE, SND_SNUFF, SND_HISS, SND_THROW, SND_CLINK, SND_THUD, SND_SHATTER,
     SND_DRINK, SND_PICKUP, SND_DOOR, SND_STAIRS, SND_FALL, SND_LAND, SND_CLICK,
+    SND_BAT, SND_OGRE, SND_EEL, SND_SLING,
     SND_COUNT
 } SoundKind;
 
@@ -214,6 +217,7 @@ float game_firelight(Game *g, int x, int y);
 int   game_max_hp(const Game *g);                 /* max HP less the chill */
 bool  game_by_fire(Game *g);                      /* standing in a fixed fire's warmth */
 bool  game_mob_noticed(Game *g, const Mob *m);    /* in view, or a shade's eyes in the dark */
+bool  game_mob_hidden(const Mob *m);              /* an eel under the water: not there, as far as you know */
 
 /* Player commands. Each returns true if a turn passed. */
 bool game_move(Game *g, int dx, int dy);

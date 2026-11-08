@@ -16,6 +16,14 @@ const MobInfo MOB_INFO[MK_COUNT] = {
                     "sconce lit around it, or a torch thrown at it. Its touch leaves a chill that only a fire drives "
                     "out, and darts pass straight through it.",
                     10, 80, 1, 3, 20, 9 },
+    [MK_BAT]    = { "bat", "A cave bat as wide as a cloak. It flits about erratically, quick as thought, and light draws it "
+                    "from far away. It flies over chasms and water alike.", 6, 75, 1, 3, 20, 12 },
+    [MK_SLINGER] = { "goblin slinger", "A goblin with a sling and a pouch of stones. When it can see you clearly, in the "
+                     "light, it pelts you from a distance; in the dark it has to come close.", 8, 70, 1, 4, 5, 8 },
+    [MK_OGRE]   = { "ogre", "A hulking brute, slow but terribly strong. It moves and swings only every other turn, and it "
+                    "is far too heavy to knock back.", 18, 70, 3, 8, 5, 6 },
+    [MK_EEL]    = { "eel", "A long, pale-eyed eel that lurks unseen in deep water and lunges at anything in it or beside "
+                    "it. It never leaves the water.", 12, 80, 2, 5, 10, 7 },
 };
 
 const ItemInfo ITEM_INFO[IT_COUNT] = {
@@ -127,8 +135,11 @@ static void push_fx(Game *g, FxKind k, int x, int y);
 /* a creature's voice */
 static void vocal(Game *g, const Mob *m)
 {
-    SoundKind k = m->kind == MK_RAT ? SND_RAT : m->kind == MK_GOBLIN ? SND_GOBLIN : m->kind == MK_SHADE ? SND_SHADE : SND_COUNT;
-    if (k != SND_COUNT) sfx(g, k, m->x, m->y);
+    static const SoundKind V[MK_COUNT] = {
+        [MK_PLAYER] = SND_COUNT, [MK_RAT] = SND_RAT, [MK_GOBLIN] = SND_GOBLIN, [MK_SHADE] = SND_SHADE,
+        [MK_BAT] = SND_BAT, [MK_SLINGER] = SND_GOBLIN, [MK_OGRE] = SND_OGRE, [MK_EEL] = SND_EEL,
+    };
+    if (V[m->kind] != SND_COUNT) sfx(g, V[m->kind], m->x, m->y);
 }
 
 /* ---------------------------------------------------------------- levels */
@@ -186,6 +197,25 @@ bool game_by_fire(Game *g)
 
 #define TORCHES_PER_LEVEL 0.75f    /* the paced supply of torches on the floor */
 
+/* who lives at depth d: rats thin out, goblins, bats, slingers and ogres come in */
+static MobKind pick_kind(Rng *r, int d)
+{
+    int w[MK_COUNT] = { 0 };
+    w[MK_RAT] = 60 - d * 6 > 10 ? 60 - d * 6 : 10;
+    w[MK_GOBLIN] = 30 + d * 5;
+    if (d >= 2) w[MK_BAT] = 15 + d * 2;
+    if (d >= 3) w[MK_SLINGER] = 10 + d * 3;
+    if (d >= 4) w[MK_OGRE] = 4 + d * 2;
+    int sum = 0;
+    for (int k = 0; k < MK_COUNT; k++) sum += w[k];
+    int roll = rng_range(r, 0, sum - 1);
+    for (int k = 0; k < MK_COUNT; k++) {
+        if (roll < w[k]) return (MobKind)k;
+        roll -= w[k];
+    }
+    return MK_RAT;
+}
+
 static void spawn_mobs(Game *g, int d)
 {
     Level *lv = g->lv[d];
@@ -199,7 +229,7 @@ static void spawn_mobs(Game *g, int d)
         for (int i = 0; i < placed; i++)
             if (g->mobs[d][i].x == x && g->mobs[d][i].y == y) taken = true;
         if (taken) continue;
-        MobKind k = rng_chance(&r, d == 1 ? 30 : 30 + d * 12) ? MK_GOBLIN : MK_RAT;
+        MobKind k = pick_kind(&r, d);
         /* shades gather in the dark rooms from depth 2 */
         int rm = lv->room[y][x];
         if (d >= 2 && level_fire(lv, x, y) < SHADE_FEAR * 0.5f
@@ -211,6 +241,24 @@ static void spawn_mobs(Game *g, int d)
         m->hp = m->maxhp = MOB_INFO[k].hp + MOB_INFO[k].hp * (d - 1) / 8;
         m->asleep = k != MK_SHADE && rng_chance(&r, 65);
         m->flip = rng_chance(&r, 50);
+    }
+    /* eels in the deeper pools */
+    int deep = 0;
+    for (int y = 0; y < MAP_H; y++)
+        for (int x = 0; x < MAP_W; x++) deep += lv->t[y][x] == T_DEEP;
+    int eels = d < 2 || deep < 8 || !rng_chance(&r, 75) ? 0 : deep >= 30 && d >= 5 ? 2 : 1;
+    for (int tries = 0; tries < 2000 && eels > 0 && placed < MAX_MOBS; tries++) {
+        int x = rng_range(&r, 1, MAP_W - 2), y = rng_range(&r, 1, MAP_H - 2);
+        if (lv->t[y][x] != T_DEEP || abs(x - lv->upx) + abs(y - lv->upy) < 6) continue;
+        bool taken = false;
+        for (int i = 0; i < placed; i++)
+            if (g->mobs[d][i].x == x && g->mobs[d][i].y == y) taken = true;
+        if (taken) continue;
+        Mob *m = &g->mobs[d][placed++];
+        mob_init(m, MK_EEL, x, y);
+        m->lvl = d;
+        m->hp = m->maxhp = MOB_INFO[MK_EEL].hp + MOB_INFO[MK_EEL].hp * (d - 1) / 8;
+        eels--;
     }
 }
 
@@ -304,11 +352,13 @@ static void view_mark(void *vc, int x, int y, float d)
     if (see) lv->f[y][x] |= F_VIS | F_SEEN;
 }
 
+bool game_mob_hidden(const Mob *m) { return m->kind == MK_EEL && m->surfaced <= 0; }
+
 /* a monster you can make out: in view, or a shade's eyes in the dark */
 bool game_mob_noticed(Game *g, const Mob *m)
 {
     Level *lv = game_level(g);
-    if (!m->alive) return false;
+    if (!m->alive || game_mob_hidden(m)) return false;
     uint8_t f = lv->f[m->y][m->x];
     return (f & F_VIS) || (m->kind == MK_SHADE && (f & F_LOS));
 }
@@ -458,8 +508,10 @@ static bool attack(Game *g, Mob *a, Mob *d)
     a->bump = 1.0f;
     a->bdx = d->x - a->x;
     a->bdy = d->y - a->y;
-    if (a->kind != MK_SHADE) sfx_ex(g, SND_SWING, a->x, a->y, false, 0, pl_att ? 1.0f : 0.7f);
-    if (!pl_att && rng_chance(&g->rng, 30)) vocal(g, a);
+    if (a->kind != MK_SHADE && a->kind != MK_EEL && a->kind != MK_BAT)
+        sfx_ex(g, SND_SWING, a->x, a->y, false, 0, pl_att ? 1.0f : a->kind == MK_OGRE ? 1.0f : 0.7f);
+    if (!pl_att && a->kind != MK_EEL && rng_chance(&g->rng, 30)) vocal(g, a);
+    if (d->kind == MK_EEL && d->surfaced < 2) d->surfaced = 2;      /* struck: it shows itself */
     if (a->bdx) a->flip = a->bdx < 0;
     int chance = acc - def;
     if (d->asleep) chance = 100;
@@ -491,7 +543,8 @@ static bool attack(Game *g, Mob *a, Mob *d)
     snprintf(t, sizeof t, "%d", dmg);
     floater(g, d->x, d->y, pl_def ? 0xff5a4a : 0xffd27a, t);
     if (pl_def) {
-        g->shake = 0.35f;
+        g->shake = a->kind == MK_OGRE ? 0.7f : 0.35f;
+        if (a->kind == MK_OGRE) sfx_ex(g, SND_THUD, d->x, d->y, false, 0.08f, 0.9f);
         game_stop(g);
         if (d->hp <= 0) {
             game_msg(g, C_BAD, "the %s kills you...", ai->name);
@@ -549,16 +602,42 @@ static bool mob_free(Game *g, int x, int y)
 
 static void mob_go(Game *g, Mob *m, int nx, int ny);
 
+/* can this monster step from where it is to (nx, ny)? Each kind has its own ground. */
+static bool mob_can_enter(Game *g, const Mob *m, int nx, int ny)
+{
+    Level *lv = game_level(g);
+    if (!in_map(nx, ny) || !diag_ok(lv, m->x, m->y, nx - m->x, ny - m->y)) return false;
+    if ((g->player.x == nx && g->player.y == ny) || game_mob_at(g, nx, ny)) return false;
+    Tile t = lv->t[ny][nx];
+    switch (m->kind) {
+    case MK_BAT:    return t == T_CHASM || (tile_walkable(t) && t != T_DOOR);  /* flies, but can't open doors */
+    case MK_EEL:    return t == T_DEEP;                                         /* never leaves the water */
+    case MK_SHADE:  return tile_walkable(t) && game_firelight(g, nx, ny) <= SHADE_FEAR;
+    case MK_GOBLIN: case MK_SLINGER: case MK_OGRE:
+                    return tile_walkable(t) && t != T_DEEP;                     /* they won't swim */
+    default:        return tile_walkable(t);
+    }
+}
+
+/* a step in a random direction (wandering, or a bat's flitting) */
+static void mob_wander(Game *g, Mob *m)
+{
+    Level *lv = game_level(g);
+    for (int tries = 0; tries < 3; tries++) {
+        int d = rng_range(&g->rng, 0, 7);
+        int nx = m->x + DX8[d], ny = m->y + DY8[d];
+        if (mob_can_enter(g, m, nx, ny) && lv->t[ny][nx] != T_DOOR) { mob_go(g, m, nx, ny); return; }
+        if (m->kind != MK_BAT) return;
+    }
+}
+
 static void mob_step_toward(Game *g, Mob *m, int tx, int ty)
 {
     Level *lv = game_level(g);
-    bool shade = m->kind == MK_SHADE;
     int best = -1, bd = cheb(m->x, m->y, tx, ty) * 10 + 5;
     for (int d = 0; d < 8; d++) {
         int nx = m->x + DX8[d], ny = m->y + DY8[d];
-        if (!mob_free(g, nx, ny) || !diag_ok(lv, m->x, m->y, DX8[d], DY8[d])) continue;
-        if (shade && game_firelight(g, nx, ny) > SHADE_FEAR) continue;
-        if (m->kind == MK_GOBLIN && lv->t[ny][nx] == T_DEEP) continue;     /* goblins won't swim */
+        if (!mob_can_enter(g, m, nx, ny)) continue;
         int dd = cheb(nx, ny, tx, ty) * 10 + abs(nx - tx) + abs(ny - ty);
         if (dd < bd) { bd = dd; best = d; }
     }
@@ -581,9 +660,10 @@ static void mob_go(Game *g, Mob *m, int nx, int ny)
 {
     start_tween(m, nx, ny);
     Tile t = tile_at(game_level(g), nx, ny);
+    if (m->kind == MK_BAT || m->kind == MK_EEL) return;   /* on the wing, or under the surface: silent */
     if (tile_water(t)) push_fx(g, FX_SPLASH, nx, ny);
     if (m->kind == MK_SHADE) return;        /* it makes no sound as it moves */
-    float v = m->kind == MK_RAT ? 0.3f : 0.55f;
+    float v = m->kind == MK_RAT ? 0.3f : m->kind == MK_OGRE ? 1.0f : 0.55f;
     sfx_ex(g, t == T_DEEP ? SND_SWIM : t == T_SHALLOW ? SND_WADE : SND_STEP, nx, ny, false, 0, v);
 }
 
@@ -663,6 +743,148 @@ static void update_light(Game *g)
     fov_cast(lv, g->player.x, g->player.y, g->torch_lit ? 8 : 4 + g->lantern, plight_mark, &c);
 }
 
+/* a clear line for a sling stone: nothing solid and nobody else in the way */
+static bool clear_shot(Game *g, const Mob *m)
+{
+    Level *lv = game_level(g);
+    int x0 = m->x, y0 = m->y, x1 = g->player.x, y1 = g->player.y;
+    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    for (;;) {
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+        if (x0 == x1 && y0 == y1) return true;
+        Tile t = tile_at(lv, x0, y0);
+        if (tile_opaque(t) || tile_solid(t) || t == T_BRAZIER) return false;
+        Mob *o = game_mob_at(g, x0, y0);
+        if (o && !game_mob_hidden(o)) return false;
+    }
+}
+
+static void push_fx_from(Game *g, FxKind k, int sx, int sy, int x, int y);
+
+/* a goblin slinger looses a stone at you */
+static void sling(Game *g, Mob *m)
+{
+    Mob *p = &g->player;
+    int ddx = p->x - m->x, ddy = p->y - m->y;
+    if (ddx) m->flip = ddx < 0;
+    m->bump = 0.5f;
+    m->bdx = ddx > 0 ? 1 : ddx < 0 ? -1 : 0;
+    m->bdy = ddy > 0 ? 1 : ddy < 0 ? -1 : 0;
+    sfx(g, SND_SLING, m->x, m->y);
+    push_fx_from(g, FX_STONE, m->x, m->y, p->x, p->y);
+    int acc, dmin, dmax, def, x0, x1, x2;
+    mob_stats(g, m, &acc, &dmin, &dmax, &x0);
+    mob_stats(g, p, &x0, &x1, &x2, &def);
+    if ((int)(rng_u32(&g->rng) % 100) >= acc - 10 - def) {
+        game_msg(g, C_DIM, "a sling stone whizzes past you.");
+        floater(g, p->x, p->y, 0xb0b0b0, "miss");
+        sfx_ex(g, SND_CLINK, p->x, p->y, false, 0.25f, 0.6f);
+        return;
+    }
+    int dmg = rng_range(&g->rng, dmin, dmax);
+    p->hp -= dmg;
+    p->flash = 1.0f;
+    g->shake = 0.3f;
+    sfx_ex(g, SND_HURT, p->x, p->y, false, 0.25f, 1);
+    char t[16];
+    snprintf(t, sizeof t, "%d", dmg);
+    floater(g, p->x, p->y, 0xff5a4a, t);
+    game_stop(g);
+    if (p->hp <= 0) {
+        game_msg(g, C_BAD, "a sling stone fells you...");
+        g->state = GS_DEAD;
+        sfx_ex(g, SND_DIE, p->x, p->y, true, 0.45f, 1);
+    } else {
+        game_msg(g, C_BAD, "a sling stone hits you.");
+    }
+}
+
+/* An eel feels anything moving in the water and lunges at whatever is beside its pool. */
+static void eel_turn(Game *g, Mob *m)
+{
+    Level *lv = game_level(g);
+    Mob *p = &g->player;
+    int dist = cheb(m->x, m->y, p->x, p->y);
+    if (m->surfaced > 0) m->surfaced--;
+    bool senses = dist == 1 || (tile_water(tile_at(lv, p->x, p->y)) && dist <= 6 && los(lv, m->x, m->y, p->x, p->y));
+    if (senses) { m->hunting = true; m->tx = p->x; m->ty = p->y; }
+    if (dist == 1 && diag_ok(lv, m->x, m->y, p->x - m->x, p->y - m->y)) {
+        if (m->surfaced <= 0 && (lv->f[m->y][m->x] & F_VIS)) game_msg(g, C_WARN, "an eel lunges out of the water!");
+        m->surfaced = 2;
+        sfx(g, SND_EEL, m->x, m->y);
+        push_fx(g, FX_SPLASH, m->x, m->y);
+        attack(g, m, p);
+        return;
+    }
+    if (m->hunting) {
+        mob_step_toward(g, m, m->tx, m->ty);
+        if (m->x == m->tx && m->y == m->ty && !senses) m->hunting = false;
+    } else if (rng_chance(&g->rng, 25)) {
+        mob_wander(g, m);
+    }
+}
+
+/* one monster's turn; pb is how brightly the player stands out */
+static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
+{
+    Level *lv = game_level(g);
+    Mob *p = &g->player;
+    const MobInfo *mi = &MOB_INFO[m->kind];
+    if (m->kind == MK_EEL) { eel_turn(g, m); return; }
+    int dist = cheb(m->x, m->y, p->x, p->y);
+    bool cloak = g->armour.kind == IT_CLOAK;
+    bool lit = pb > 0.30f;
+    float range = lit ? (float)mi->perception : cloak ? 1.5f : 2.5f;
+    bool shade = m->kind == MK_SHADE, bat = m->kind == MK_BAT;
+    if (shade) {
+        /* a shade within your torch's glow gnaws at the flame */
+        if (g->torch_lit && g->plight[m->y][m->x] > 0 && dist <= 8) (*gnaw)++;
+        if (shade_burns(g, m)) return;
+        range = (float)mi->perception * (cloak ? 0.5f : 1.0f);   /* it feels your warmth, lit or not */
+    }
+    bool sees = dist <= range && los(lv, m->x, m->y, p->x, p->y);
+    if (m->asleep) {
+        int pct = !sees ? 0 : dist <= 2 ? 45 : 20;
+        if (pct && (int)(rng_u32(&g->rng) % 100) < pct) {
+            m->asleep = false;
+            m->hunting = true;
+            m->tx = p->x; m->ty = p->y;
+            if (lv->f[m->y][m->x] & F_VIS) game_msg(g, C_WARN, "the %s wakes up!", mi->name);
+            vocal(g, m);
+        }
+        return;
+    }
+    if (sees) {
+        if (!m->hunting) vocal(g, m);           /* it has spotted you */
+        m->hunting = true;
+        m->tx = p->x; m->ty = p->y;
+    } else if (shade && m->hunting && dist <= 7 && rng_chance(&g->rng, 6)) {
+        vocal(g, m);                            /* whispering in the dark */
+    }
+    /* a slinger with a clear view of you in the light keeps its distance and shoots */
+    if (m->kind == MK_SLINGER && sees && lit && dist >= 2 && dist <= 7 && clear_shot(g, m)) {
+        if (rng_chance(&g->rng, 65)) sling(g, m);
+        return;                                 /* or fits another stone */
+    }
+    if (dist == 1 && diag_ok(lv, m->x, m->y, p->x - m->x, p->y - m->y) && (sees || m->hunting)
+        && !(shade && game_firelight(g, p->x, p->y) > SHADE_FEAR)) {
+        if (bat && rng_chance(&g->rng, 35)) mob_wander(g, m);     /* flits off instead */
+        else attack(g, m, p);
+        return;
+    }
+    if (m->hunting) {
+        if (bat && rng_chance(&g->rng, 40)) mob_wander(g, m);
+        else mob_step_toward(g, m, m->tx, m->ty);
+        if (m->x == m->tx && m->y == m->ty && !sees) m->hunting = false;
+    } else if (rng_chance(&g->rng, bat ? 70 : 35)) {
+        mob_wander(g, m);
+    }
+}
+
 static void monsters_act(Game *g)
 {
     update_light(g);
@@ -675,51 +897,10 @@ static void monsters_act(Game *g)
     for (int i = 0; i < MAX_MOBS && g->state != GS_DEAD; i++) {
         Mob *m = &ms[i];
         if (!m->alive) continue;
-        const MobInfo *mi = &MOB_INFO[m->kind];
-        int dist = cheb(m->x, m->y, p->x, p->y);
-        bool cloak = g->armour.kind == IT_CLOAK;
-        float range = pb > 0.30f ? (float)mi->perception : cloak ? 1.5f : 2.5f;
-        bool shade = m->kind == MK_SHADE;
-        if (shade) {
-            /* a shade within your torch's glow gnaws at the flame */
-            if (g->torch_lit && g->plight[m->y][m->x] > 0 && dist <= 8) gnaw++;
-            if (shade_burns(g, m)) continue;
-            range = (float)mi->perception * (cloak ? 0.5f : 1.0f);   /* it feels your warmth, lit or not */
-        }
-        bool sees = dist <= range && los(lv, m->x, m->y, p->x, p->y);
-        if (m->asleep) {
-            int pct = !sees ? 0 : dist <= 2 ? 45 : 20;
-            if (pct && (int)(rng_u32(&g->rng) % 100) < pct) {
-                m->asleep = false;
-                m->hunting = true;
-                m->tx = p->x; m->ty = p->y;
-                if (lv->f[m->y][m->x] & F_VIS) game_msg(g, C_WARN, "the %s wakes up!", mi->name);
-                vocal(g, m);
-            }
-            continue;
-        }
-        if (sees) {
-            if (!m->hunting) vocal(g, m);           /* it has spotted you */
-            m->hunting = true;
-            m->tx = p->x; m->ty = p->y;
-        } else if (shade && m->hunting && dist <= 7 && rng_chance(&g->rng, 6)) {
-            vocal(g, m);                            /* whispering in the dark */
-        }
-        if (dist == 1 && diag_ok(lv, m->x, m->y, p->x - m->x, p->y - m->y) && (sees || m->hunting)
-            && !(shade && game_firelight(g, p->x, p->y) > SHADE_FEAR)) {
-            attack(g, m, p);
-            continue;
-        }
-        if (m->hunting) {
-            mob_step_toward(g, m, m->tx, m->ty);
-            if (m->x == m->tx && m->y == m->ty && !sees) m->hunting = false;
-        } else if (rng_chance(&g->rng, 35)) {
-            int d = rng_range(&g->rng, 0, 7);
-            int nx = m->x + DX8[d], ny = m->y + DY8[d];
-            if (mob_free(g, nx, ny) && lv->t[ny][nx] != T_DOOR && diag_ok(lv, m->x, m->y, DX8[d], DY8[d])
-                && !(shade && game_firelight(g, nx, ny) > SHADE_FEAR) && !(m->kind == MK_GOBLIN && lv->t[ny][nx] == T_DEEP))
-                mob_go(g, m, nx, ny);
-        }
+        if (m->kind == MK_OGRE && (m->rest = !m->rest)) continue;          /* slow: every other turn */
+        mob_turn(g, m, pb, &gnaw);
+        if (m->kind == MK_BAT && m->alive && !m->asleep && g->state != GS_DEAD)
+            mob_turn(g, m, pb, &gnaw);                                    /* quick: twice a turn */
     }
     if (gnaw && g->torch_lit && g->state != GS_DEAD) {
         if (gnaw > 3) gnaw = 3;
@@ -824,6 +1005,18 @@ static void knock_back(Game *g, Mob *m, int dx, int dy)
     Tile t = tile_at(lv, nx, ny);
     const char *nm = MOB_INFO[m->kind].name;
     bool seen = lv->f[m->y][m->x] & F_VIS;
+    if (m->kind == MK_EEL) {
+        /* it only ever goes deeper into its pool */
+        if (t == T_DEEP && mob_free(g, nx, ny)) mob_go(g, m, nx, ny);
+        return;
+    }
+    if (t == T_CHASM && m->kind == MK_BAT) {
+        if (!game_mob_at(g, nx, ny)) {
+            mob_go(g, m, nx, ny);
+            if (seen) game_msg(g, C_TEXT, "the bat tumbles out over the chasm, and rights itself.");
+        }
+        return;
+    }
     if (t == T_CHASM) {
         /* over the edge: it lands, hurt, on the level below */
         int d = g->depth + 1, bx = nx, by = ny;
@@ -904,7 +1097,13 @@ static void player_strike(Game *g, Mob *m)
         break;
     }
     case IT_MACE:
-        if (attack(g, p, m) && m->alive) knock_back(g, m, dx, dy);
+        if (attack(g, p, m) && m->alive) {
+            if (m->kind == MK_OGRE) {
+                if (lv->f[m->y][m->x] & F_VIS) game_msg(g, C_DIM, "the ogre barely rocks back.");
+            } else {
+                knock_back(g, m, dx, dy);
+            }
+        }
         break;
     default:
         attack(g, p, m);
@@ -1297,6 +1496,7 @@ static void auto_step(Game *g)
 bool game_debug_spawn(Game *g, MobKind k, int x, int y)
 {
     if (!in_map(x, y) || !mob_free(g, x, y)) return false;
+    if (k == MK_EEL && game_level(g)->t[y][x] != T_DEEP) return false;
     Mob *ms = g->mobs[g->depth];
     for (int i = 0; i < MAX_MOBS; i++)
         if (!ms[i].alive) {
@@ -1488,7 +1688,12 @@ const char *game_item_name(ItemKind k, int count, int plus, char *buf, size_t n)
 
 static void push_fx(Game *g, FxKind k, int x, int y)
 {
-    if (g->nfx < MAX_FX) g->fx[g->nfx++] = (Fx){ k, x, y };
+    if (g->nfx < MAX_FX) g->fx[g->nfx++] = (Fx){ k, x, y, x, y };
+}
+
+static void push_fx_from(Game *g, FxKind k, int sx, int sy, int x, int y)
+{
+    if (g->nfx < MAX_FX) g->fx[g->nfx++] = (Fx){ k, x, y, sx, sy };
 }
 
 static bool add_item(Game *g, ItemKind k, int count, int plus)
@@ -1616,7 +1821,8 @@ int game_throw_path(Game *g, ItemKind k, int tx, int ty, int *out, int max, bool
         Tile t = tile_at(lv, x, y);
         if (tile_opaque(t) || tile_solid(t)) break;     /* bounces off: lands in front */
         out[n++] = y * MAP_W + x;
-        if (game_mob_at(g, x, y)) { *hits = true; break; }
+        Mob *hm = game_mob_at(g, x, y);
+        if (hm && !game_mob_hidden(hm)) { *hits = true; break; }
     }
     return n;
 }

@@ -428,6 +428,25 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
             s++;
         }
     }
+    /* LUME_DUMP_MOBS="kind,dx,dy[;...]": any creatures near the player (eel+ is an eel above the water) */
+    if (getenv("LUME_DUMP_MOBS")) {
+        const char *s = getenv("LUME_DUMP_MOBS");
+        char nm[24];
+        int sx, sy, used;
+        while (sscanf(s, "%23[^,],%d,%d%n", nm, &sx, &sy, &used) == 3) {
+            bool up = nm[strlen(nm) - 1] == '+';
+            if (up) nm[strlen(nm) - 1] = 0;
+            int k = MK_COUNT;
+            for (int i = 1; i < MK_COUNT; i++)
+                if (!strcmp(nm, MOB_INFO[i].name) || (i == MK_SLINGER && !strcmp(nm, "slinger"))) k = i;
+            if (k == MK_COUNT || !game_debug_spawn(g, (MobKind)k, g->player.x + sx, g->player.y + sy))
+                fprintf(stderr, "%s: can't put a %s at %+d,%+d\n", LUME_NAME, nm, sx, sy);
+            else if (up) game_mob_at(g, g->player.x + sx, g->player.y + sy)->surfaced = 3;
+            s += used;
+            if (*s != ';') break;
+            s++;
+        }
+    }
     /* LUME_DUMP_REST=N: wait N turns (lets thrown torches burn out) */
     for (int n = getenv("LUME_DUMP_REST") ? atoi(getenv("LUME_DUMP_REST")) : 0; n > 0 && g->state == GS_PLAY; n--) {
         game_rest(g);

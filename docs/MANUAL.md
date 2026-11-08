@@ -1,6 +1,6 @@
 # Lume — Player's Manual
 
-*Covers Lume 0.7.0. This manual grows with the game: each new feature gets
+*Covers Lume 0.8.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches and
@@ -171,7 +171,11 @@ you warm up:
 |---|---|
 | **Rat** | Weak and quick to die. Often asleep. |
 | **Goblin** | A real fight early on. Sees well in the dark and better in the light. Won't swim, so deep water is a refuge from goblins. |
-| **Shade** | See [above](#shades-and-the-chill). |
+| **Shade** | From depth 2. See [above](#shades-and-the-chill). |
+| **Bat** | From depth 2. Quick (it moves twice a turn) and erratic: it flits in, bites, and flits off again, so it's hard to pin down. Light draws it from a long way off; in the dark it only finds you up close. It flies, so chasms and deep water don't stop it, but it can't open doors. Silent on the wing. |
+| **Goblin slinger** | From depth 3. If it can see you clearly **in the light**, it stays back and slings stones at you from up to 7 tiles away (a little less accurate than a blow). In the dark, or with something in the way, it has to come close and fight with a knife. Snuff your torch, or step out of the lamplight, and it loses its aim. Won't swim. |
+| **Ogre** | From depth 4. Big, tough and hits very hard, but **slow**: it moves and swings only every other turn, so you can always outrun it, and you get two blows for each of its. Far too heavy for a mace to knock back. Won't swim. |
+| **Eel** | From depth 2, in pools of deep water. It lurks **unseen** under the surface (now and then a ripple gives it away) and lunges at anything swimming near it or standing **on the bank beside it**. Once it has bitten it stays up for a turn or two, long enough to hit back, then slips under again. It never leaves the water. |
 
 Monsters may be asleep. Noise (splashing, a thrown torch or dart landing, mail
 jingling) wakes them and draws them to look. Deeper monsters are a little
@@ -282,8 +286,9 @@ less likely.
   not a free one.
 - **Water:** wading through the shallows splashes, and splashing carries to
   monsters nearby. Deep water must be swum. It puts out a lit torch, swallows
-  anything you drop in it, and drags you under if you wear mail. Goblins won't
-  follow you in.
+  anything you drop in it, and drags you under if you wear mail. Goblins,
+  slingers and ogres won't follow you in, but bats fly over it and eels may be
+  waiting in it.
 - **Doors** block sight and light until opened.
 - **Crystals and glowmoss** in the caverns give off a cold light. It lets you
   see, but it doesn't count as fire, so shades don't mind it.
@@ -312,5 +317,14 @@ less likely.
 - **Daggers love the dark.** In a shadow cloak, sleeping and wandering monsters
   rarely notice you before the dagger lands.
 - **A mace by a chasm** sends monsters to the level below.
+- **Fight slingers in the dark.** Snuff your torch and close in through the
+  shadows; they can't aim at what they can't see. Or duck round a corner and
+  make them come to you.
+- **Never stand and trade blows with an ogre** in the open if you're hurt.
+  It's slow: step back, throw darts, and step back again.
+- **Give still, dark pools a wide berth.** If you must walk the bank, keep a
+  tile between you and the deep water, and watch for rings on the surface.
+- **Bats come to the light.** A lit torch draws every bat on the level.
+  Fight them in a corridor, where they have less room to flit about.
 - **Mail and deep water don't mix.** Swap to leather before a long swim, or go
   around.

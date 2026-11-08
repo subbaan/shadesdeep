@@ -35,3 +35,7 @@ ambience    ambience.wav                                 0.50
 torch_loop  torch_loop.wav                               0.35
 fire_loop   fire_loop.wav                                0.30
 water_loop  water_loop.wav                               0.30
+bat         bat_a.wav,bat_b.wav                          0.35
+ogre        ogre_a.wav,ogre_b.wav                        0.60
+eel         eel_a.wav,eel_b.wav                          0.55
+sling       sling_a.wav,sling_b.wav                      0.40

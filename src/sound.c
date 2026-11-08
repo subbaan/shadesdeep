@@ -35,6 +35,7 @@ static const char *EVENT[SND_COUNT] = {
     "rat", "goblin", "shade", "burn", "dissolve", "alert",
     "ignite", "sconce", "snuff", "hiss", "throw", "clink", "thud", "shatter",
     "drink", "pickup", "door", "stairs", "fall", "land", "click",
+    "bat", "ogre", "eel", "sling",
 };
 static const char *LOOP_EVENT[LOOP_COUNT] = { "ambience", "torch_loop", "fire_loop", "water_loop" };
 

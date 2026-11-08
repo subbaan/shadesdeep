@@ -317,6 +317,7 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
     if (!(lv->f[y][x] & F_SEEN) && !(game_mob_at(g, x, y) && game_mob_noticed(g, game_mob_at(g, x, y)))) return;
     char title[64], desc[480], hint[96] = "";
     Mob *m = game_mob_at(g, x, y);
+    if (m && game_mob_hidden(m)) m = NULL;
     Light *l = level_light_on(lv, x, y);
     Tile t = (Tile)lv->t[y][x];
     bool vis = lv->f[y][x] & F_VIS;
@@ -756,7 +757,7 @@ static void map_view(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
             Mob *mm = game_mob_at(g, tx, ty);
             const char *nm = tile_name((Tile)lv->t[ty][tx]);
             if (g->player.x == tx && g->player.y == ty) nm = "you";
-            else if (mm && (lv->f[ty][tx] & F_VIS)) nm = MOB_INFO[mm->kind].name;
+            else if (mm && !game_mob_hidden(mm) && (lv->f[ty][tx] & F_VIS)) nm = MOB_INFO[mm->kind].name;
             else if (mm && game_mob_noticed(g, mm)) nm = "eyes in the dark";
             else if (tx == lv->downx && ty == lv->downy) nm = "stairs down";
             snprintf(buf, sizeof buf, "%c%s  \xc2\xb7  click to travel there", nm[0] >= 'a' && nm[0] <= 'z' ? nm[0] - 32 : nm[0], nm + 1);
