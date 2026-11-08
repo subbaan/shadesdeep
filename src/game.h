@@ -62,6 +62,7 @@ typedef enum {
     IT_SWORD, IT_DAGGER, IT_SPEAR, IT_AXE, IT_MACE,         /* weapons */
     IT_LEATHER, IT_CLOAK, IT_MAIL,                          /* armour */
     IT_OIL, IT_FLASH, IT_SALT, IT_WARMTH,                   /* light and dark */
+    IT_EMBERS,                                              /* a pile of embers: picked up, they join yours */
     IT_COUNT
 } ItemKind;
 
@@ -207,6 +208,8 @@ typedef struct {
     int deepest;                        /* the deepest level reached */
     int embers_got;                     /* embers gathered over the whole run */
     int sconces_lit;                    /* sconces lit by hand */
+    int snare;                          /* turns of struggling left to get out of a snare */
+    int trap_x, trap_y;                 /* known trap the player was warned about (move again to step on it) */
     FloorItem items[MAX_DEPTH + 2][MAX_ITEMS];
     Projectile proj;
     Fx fx[MAX_FX];
@@ -259,6 +262,7 @@ bool game_debug_spawn(Game *g, MobKind k, int x, int y);
 bool game_debug_to_forge(Game *g);     /* developer: stand by the forge */
 bool game_debug_depth(Game *g, int depth);     /* developer: go straight to that depth */
 bool game_debug_kindle(Game *g, int times);    /* developer: at the hearth with a lit torch, kindle it */
+bool game_debug_to_room(Game *g, int kind);    /* developer: stand in a room of that RoomKind, traps shown */
 bool game_debug_to_spot(Game *g, int kind);   /* developer: 0 corridor, 1 side door, 2 south wall,
                                                  * 3 by a cold sconce with a shade near, 4 and light it,
                                                  * 5 in the Heartflame's hall, near the hearth */

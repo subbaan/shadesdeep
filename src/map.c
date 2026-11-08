@@ -43,6 +43,27 @@ const char *tile_desc(Tile t)
     }
 }
 
+const char *trap_name(int k)
+{
+    static const char *n[TR_COUNT] = { "", "alarm plate", "draught vent", "trapdoor", "snare" };
+    return k > 0 && k < TR_COUNT ? n[k] : "trap";
+}
+
+const char *trap_desc(int k)
+{
+    switch (k) {
+    case TR_ALARM: return "A loose flagstone over a pressure plate. Step on it and a bell clangs somewhere in the walls, "
+                          "waking everything near and bringing it to look.";
+    case TR_GUST:  return "An iron grating over a shaft that breathes cold air. Step on it and an icy gust roars up: it "
+                          "blows out a torch and leaves a chill in you.";
+    case TR_PIT:   return "A trapdoor, its edges barely showing between the flagstones. It drops whatever steps on it to "
+                          "the level below.";
+    case TR_SNARE: return "A noose of wire laid in the dust and pegged to the floor. It catches an ankle and holds it "
+                          "until you tear free; you can still fight while it holds you.";
+    default:       return "";
+    }
+}
+
 /* ------------------------------------------------------------------ FOV */
 
 /* Recursive shadowcasting over the eight octants. */
@@ -295,7 +316,7 @@ static void make_cave(Level *lv, Rng *rng, const uint8_t (*mask)[MAP_W])
             if (x > x1) x1 = x;
             if (y > y1) y1 = y;
         }
-    *rm = (Room){ x0, y0, x1 - x0 + 1, y1 - y0 + 1, false, true };
+    *rm = (Room){ x0, y0, x1 - x0 + 1, y1 - y0 + 1, false, true, RK_PLAIN, false };
 }
 
 static bool is_door_spot(const Level *lv, int x, int y)
@@ -360,7 +381,7 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
         int x = rng_range(&rng, 2, MAP_W - w - 3), y = rng_range(&rng, 2, MAP_H - h - 3);
         if (!rect_clear(lv, x, y, w, h, 3)) continue;
         int r = lv->nrooms++;
-        lv->rooms[r] = (Room){ x, y, w, h, true, false };
+        lv->rooms[r] = (Room){ x, y, w, h, true, false, RK_PLAIN, false };
         for (int j = y; j < y + h; j++)
             for (int i = x; i < x + w; i++) carve(lv, i, j, r);
         lv->hall = r;
@@ -373,7 +394,7 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
         int x = rng_range(&rng, 2, MAP_W - w - 3), y = rng_range(&rng, 2, MAP_H - h - 3);
         if (!rect_clear(lv, x, y, w, h, 3)) continue;
         int r = lv->nrooms++;
-        lv->rooms[r] = (Room){ x, y, w, h, false, false };
+        lv->rooms[r] = (Room){ x, y, w, h, false, false, RK_PLAIN, false };
         for (int j = y; j < y + h; j++)
             for (int i = x; i < x + w; i++) carve(lv, i, j, r);
     }
@@ -648,6 +669,86 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
                 if (lv->lights[i].room == r) lv->lights[i].lit = true;
         }
         break;
+    }
+
+    /* rooms with a purpose, from depth 2: a storeroom, an armoury, a shade's nest (own generator) */
+    Rng srng = { seed * 6151u + 29 };
+    int nspecial = 0;
+    for (int kind = RK_NEST; depth >= 2 && kind >= RK_STORE; kind--) {
+        int chance = kind == RK_STORE ? 40 : kind == RK_ARMOURY ? 25 : 35;
+        if (kind == RK_NEST && (depth < 3 || final)) continue;
+        if (nspecial >= 2 || !rng_chance(&srng, chance)) continue;
+        int pick = -1, best = -1;
+        for (int r = 0; r < lv->nrooms; r++) {
+            Room *rm = &lv->rooms[r];
+            if (rm->cave || r == start || r == lv->hall || rm->kind != RK_PLAIN) continue;
+            int area = rm->w * rm->h;
+            if (area < 20 || (kind == RK_STORE && area > 50) || (kind == RK_NEST && area < 30)) continue;
+            bool busy = false;
+            for (int y = rm->y; y < rm->y + rm->h && !busy; y++)
+                for (int x = rm->x; x < rm->x + rm->w; x++) {
+                    if (lv->room[y][x] != r) continue;
+                    Tile t = (Tile)lv->t[y][x];
+                    if (t == T_STAIRS_DOWN || t == T_STAIRS_UP || t == T_BRAZIER || t == T_CHASM || tile_water(t)) { busy = true; break; }
+                }
+            if (busy) continue;
+            int score = (int)(rng_u32(&srng) % 100) + (kind == RK_STORE ? 60 - area : area);
+            if (score > best) { best = score; pick = r; }
+        }
+        if (pick < 0) continue;
+        Room *rm = &lv->rooms[pick];
+        rm->kind = (uint8_t)kind;
+        nspecial++;
+        if (kind == RK_NEST) {
+            /* the shades put out its lights long ago */
+            rm->dark = true;
+            for (int i = 0; i < lv->nlights; i++)
+                if (lv->lights[i].room == pick && lv->lights[i].kind == L_SCONCE) lv->lights[i].lit = false;
+        }
+    }
+
+    /* traps, from depth 2: a few in the corridors and rooms, and at the way into a storeroom */
+    Rng trng = { seed * 3779u + 41 };
+    if (depth >= 2) {
+        int want = 1 + depth / 5 + rng_range(&trng, 0, 2), placed = 0;
+        if (want > 8) want = 8;
+        for (int tries = 0; tries < 3000 && placed < want; tries++) {
+            int x = rng_range(&trng, 1, MAP_W - 2), y = rng_range(&trng, 1, MAP_H - 2);
+            if (lv->t[y][x] != T_FLOOR || lv->trap[y][x]) continue;
+            if (abs(x - lv->upx) + abs(y - lv->upy) < 7 || (lv->room[y][x] >= 0 && lv->room[y][x] == lv->hall)) continue;
+            bool near = false;
+            for (int j = -1; j <= 1 && !near; j++)
+                for (int i = -1; i <= 1; i++) {
+                    Tile n = tile_at(lv, x + i, y + j);
+                    if (n == T_STAIRS_DOWN || n == T_STAIRS_UP || n == T_CHASM || n == T_BRAZIER || n == T_HEARTH
+                        || lv->trap[y + j][x + i]) { near = true; break; }
+                }
+            if (near) continue;
+            int roll = rng_range(&trng, 0, 99);
+            int k = roll < 30 ? TR_ALARM : roll < 55 ? TR_GUST : roll < 80 ? TR_SNARE : TR_PIT;
+            if (k == TR_PIT && final) k = TR_SNARE;         /* no below to fall to */
+            lv->trap[y][x] = (uint8_t)k;
+            placed++;
+        }
+        /* storerooms were guarded: a trap just inside a way in */
+        for (int r = 0; r < lv->nrooms; r++) {
+            if (lv->rooms[r].kind != RK_STORE) continue;
+            Room *rm = &lv->rooms[r];
+            int n = 0;
+            for (int y = rm->y; y < rm->y + rm->h && n < 2; y++)
+                for (int x = rm->x; x < rm->x + rm->w && n < 2; x++) {
+                    if (lv->room[y][x] != r || lv->t[y][x] != T_FLOOR || lv->trap[y][x]) continue;
+                    bool entry = false;
+                    for (int d = 0; d < 4; d++) {
+                        int X = x + (d == 0) - (d == 1), Y = y + (d == 2) - (d == 3);
+                        Tile t = tile_at(lv, X, Y);
+                        if (t == T_DOOR || t == T_DOOR_OPEN || (lv->f[Y][X] & F_CORR)) entry = true;
+                    }
+                    if (!entry || !rng_chance(&trng, 70)) continue;
+                    lv->trap[y][x] = (uint8_t)(rng_chance(&trng, 50) ? TR_ALARM : rng_chance(&trng, 50) || final ? TR_SNARE : TR_PIT);
+                    n++;
+                }
+        }
     }
 
     /* scattered rubble */

@@ -12,6 +12,7 @@
 #define N_FLOOR 8
 #define N_WALL  4
 
+/* nothing but Images: tiles_free walks it as an array of them */
 typedef struct {
     Image floor[N_FLOOR];
     Image wtop[N_WALL];
@@ -30,11 +31,19 @@ typedef struct {
     Image rubble[3];
     Image mob[MK_COUNT];    /* TILE x TILE, feet at the bottom */
     Image mob_glow[MK_COUNT];   /* emissive parts (lantern, eyes) */
+    Image mob_hi[MK_COUNT];     /* the same at full resolution (square, laid out like mob[]),
+                                 * drawn instead when zoomed in; px NULL when there is none */
+    Image mob_hi_glow[MK_COUNT];
     Image item[IT_COUNT];
     Image item_glow[IT_COUNT];
 } Tiles;
 
 void tiles_build(Tiles *t);
+/* Swap in drawn creature sprites from DIR/sprites (player.png, rat.png, ...,
+ * each TILE x TILE, with an optional NAME_glow.png of the parts that glow, and
+ * optionally NAME_hi.png / NAME_hi_glow.png at full resolution); creatures
+ * without a file keep their procedural sprite. Returns how many loaded. */
+int tiles_load_sprites(Tiles *t, const char *dir);
 void tiles_free(Tiles *t);
 
 #endif

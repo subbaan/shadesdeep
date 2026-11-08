@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.11.0. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.13.2. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -28,8 +28,10 @@ down and [kindle it again](#the-heartflame).
 10. [Embers and the forge](#embers-and-the-forge)
 11. [Health and resting](#health-and-resting)
 12. [The dungeon](#the-dungeon)
-13. [The Heartflame](#the-heartflame)
-14. [Tips](#tips)
+13. [Traps](#traps)
+14. [Special rooms](#special-rooms)
+15. [The Heartflame](#the-heartflame)
+16. [Tips](#tips)
 
 ---
 
@@ -67,6 +69,13 @@ pop up cards.
 
 **Text size** follows kitty's own font zoom (`ctrl+shift+=` / `-`).
 
+**The creatures' look:** you, the rats, goblins, slingers, bats, ogres and eels
+are drawn pixel-art sprites (their eyes, and your lantern, glow in the dark).
+Zoomed in (`+`, or the mouse wheel) they're drawn from the full-detail art
+rather than blown up, so they stay sharp at any zoom.
+Start with `--classic-art` to play with the game's original blocky sprites
+instead. Shades and the Hollow are always drawn live, as moving darkness.
+
 ### Saving
 
 There's one game at a time, and it's always kept. Quitting (`Esc` twice, or
@@ -87,7 +96,7 @@ rather than deleted.
 
 - **Bottom bar:** HP and its bar, the current depth, your torch's fuel (when
   you have one going), your embers (once you've earned any), the turn count,
-  and the action buttons. On the last level, **FLAME n/3** shows how far
+  and the action buttons. **SNARED** shows while a snare holds you. On the last level, **FLAME n/3** shows how far
   you've kindled the Heartflame, and the Descend button becomes **Hearth**.
 - **Top left:** the monsters you can see, with their health and whether they
   are asleep, hunting you, or only *watching* (eyes in the dark).
@@ -215,6 +224,7 @@ tougher: more health and a bit more accuracy and damage per depth.
 | **Flash powder** | Throw it for a [blinding flash](#flash-powder). Lands in water and it fizzles, spoilt. |
 | **Salt** | **Pour** it to lay a [ring of salt](#salt) around you that shades can't cross. From depth 2. |
 | **Warming draught** | Drink it to clear the chill at once, and for **80 turns** no shade's touch can chill you (a shade can still hurt you). The bottom bar shows **WARM** and the turns left. From depth 2. |
+| **Cold embers** | A pile of them lies in every [shade's nest](#special-rooms). Walk onto it and they join your [embers](#embers-and-the-forge); they don't take up room in your pack. |
 | **Weapons and armour** | See [Gear](#gear-weapons-and-armour). |
 
 **The pack:** press `i` or the **Items** button. It shows what you wield and
@@ -372,6 +382,51 @@ less likely.
 
 ---
 
+## Traps
+
+From depth 2, a few traps lie hidden in the floors, more the deeper you go,
+and storerooms are often trapped at the way in.
+
+**Spotting them.** Each turn you may notice a hidden trap within two tiles of
+you. A lit **torch** makes that far more likely, as does a well-lit room or
+standing right beside it. Walking in the dark with only your lantern, you'll
+step on about half the traps you meet; with a torch, about one in four.
+**Flash powder** shows every trap in its glare.
+
+**Known traps** are marked on the floor and on the map. Travel and explore
+step around them, and walking onto one yourself asks first ("Move again to
+step on it anyway"). Hover one to see what it is.
+
+| Trap | What it does |
+|---|---|
+| **Alarm plate** | A bell clangs in the walls: anything within 16 tiles may wake, and all of it comes to look. |
+| **Draught vent** | An icy gust blows out your torch (it keeps its fuel; light it again) and chills you by 1, unless a warming draught is in you. |
+| **Trapdoor** | Drops you to the level below, like jumping into a chasm: it hurts, and it can dent tempered gear. There are none on the last level. |
+| **Snare** | A wire noose holds your ankle. Each step you try is a turn spent tearing at it (3–4 tries). You can still fight, throw and use things while it holds you. |
+
+**Monsters** know where the traps are and step lightly over them. But knock
+one onto a trap with a mace and it sets it off: a snared monster is held
+(dazed) for 3 turns (shades and bats slip free), a trapdoor drops it to the level below, and an alarm
+brings everything else running.
+
+---
+
+## Special rooms
+
+From depth 2, most levels have a room with a purpose, and some have two. The message log tells you what it is the first time you see into it.
+
+- **Storeroom** (a small room, straw on the floor): 3–5 supplies, such as oil,
+  darts, potions, flash powder, salt, a warming draught, now and then a torch.
+  Its keeper often left a trap just inside the way in.
+- **Armoury** (rusted blades on the floor): two pieces of gear, often
+  tempered, guarded by goblins (or slingers) or an ogre, likely asleep.
+- **Shade's nest** (from depth 3, bones on the floor): a dark room, its
+  sconces cold, with 3 or more shades in it and a pile of **cold embers**.
+  Light its sconces with the shades inside and the blaze burns them, each one
+  leaving an ember of its own.
+
+---
+
 ## The Heartflame
 
 Depth 26 is the bottom of the world. Somewhere on it is a great pillared hall,
@@ -455,6 +510,9 @@ by the hearth.
   have to choose.
 - **Salt is a safe night's sleep** against shades, but not against anything
   else. Pour it in a dead end where goblins won't wander.
+- **Carry a lit torch where traps are likely**, in corridors and at the
+  doors of storerooms, and you'll usually see them first.
+- **A mace and a known trapdoor** make a fine pair: knock the ogre in.
 - **Save something for the bottom.** Two twists of flash powder, or a flask
   of oil between you and the Hollow, buy the three turns the Heartflame needs.
   Keep a spare torch, too.

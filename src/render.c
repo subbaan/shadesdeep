@@ -22,8 +22,35 @@ typedef struct {
 #define STONE_T 0.24f       /* a sling stone's flight, seconds */
 typedef struct { float x, y, age, life, str; } Ripple;
 
+/* A creature drawn this frame that has a full-resolution sprite: after the
+ * world canvas is zoomed up, render_hires draws it again from that sprite,
+ * on the screen pixels where the small sprite is still what shows. */
+typedef struct {
+    int kind;
+    int x, y, W;            /* canvas pixels: top-left and size of the drawn square */
+    bool flip, asleep, sub;
+    int wl;                 /* waterline (canvas y) when sub */
+    float lr, lg, lb, alpha;
+    int fl;                 /* white flash, 0..230 */
+    bool stick;             /* the player's torch haft, hand (sx0, sy0) to head (sx1, sy1) */
+    int sx0, sy0, sx1, sy1;
+} HiCmd;
+#define MAX_HICMD (MAX_MOBS + 1)
+
 struct Renderer {
     Tiles t;
+    /* full-resolution creature pass: per canvas pixel, which HiCmd (1-based) drew
+     * it last, what was there before (bg) and what it wrote (wr) */
+    HiCmd hic[MAX_HICMD];
+    int nhic;
+    const Canvas *rec_cv;       /* the world canvas being recorded, NULL when not recording */
+    uint16_t *own;
+    uint32_t *hbg, *hwr, *hsnap;
+    size_t hcap;
+    bool any_hi;
+    int zoom;                   /* the screen's zoom: full-resolution sprites from 2 */
+    int hand_x, hand_y;         /* the player's lantern hand on its sprite (facing right): a torch is held there */
+    int hcv_w, hcv_h;           /* size of the canvas last recorded */
     CF corner[CH][CW];
     float chasmc[CH][CW];
     float tl[MAP_H][MAP_W][3];
@@ -120,6 +147,8 @@ Renderer *render_new(void)
     Renderer *r = calloc(1, sizeof *r);
     if (!r) return NULL;
     tiles_build(&r->t);
+    r->hand_x = 7;
+    r->hand_y = 21;
     r->rng.s = 1234;
     for (int k = 0; k < 4; k++) r->stone[k].t = STONE_T;
     /* tileable value noise: a coarse random grid smoothly upsampled */
@@ -148,6 +177,10 @@ void render_free(Renderer *r)
 {
     if (!r) return;
     tiles_free(&r->t);
+    free(r->own);
+    free(r->hbg);
+    free(r->hwr);
+    free(r->hsnap);
     free(r->lower.px);
     free(r->full.px);
     free(r);
@@ -487,6 +520,126 @@ static void draw_salt(Renderer *r, Canvas *cv, const View *v, int tx, int ty, in
     }
 }
 
+/* put one lit pixel of colour col on the floor at canvas (x, y) */
+static inline void floor_px(Canvas *cv, const View *v, const CF *c, int x, int y, uint32_t col, float lift)
+{
+    if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) return;
+    uint32_t lit = lightc(col, c->r + lift, c->g + lift, c->b + lift);
+    uint32_t *px = &cv->px[(size_t)y * cv->w + x];
+    *px = v->fog ? fogmix(lit, memtone(col), c->v, c->s) : lit;
+}
+
+/* a trap you know about, marked on its tile */
+static void draw_trap(Renderer *r, Canvas *cv, const View *v, int tx, int ty, int sx, int sy)
+{
+    CF c;
+    light_at_px(r, tx * TILE + 16.0f, ty * TILE + 16.0f, &c);
+    if (!v->fog) c.v = c.s = 1;
+    int k = v->lv->trap[ty][tx];
+    int cx = sx + 16, cy = sy + 17;
+    if (k == TR_ALARM) {
+        /* a square plate sunk in the floor, with a bell graven on it */
+        for (int j = -7; j <= 7; j++)
+            for (int i = -8; i <= 8; i++) {
+                bool rim = abs(i) == 8 || abs(j) == 7;
+                uint32_t col = rim ? 0x1c1a18 : (abs(i) == 7 || j == -6) ? 0x8a8070 : 0x5e5850;
+                floor_px(cv, v, &c, cx + i, cy + j, col, 0.12f);
+            }
+        static const char *BELL[7] = { "..##..", ".####.", ".####.", ".####.", "######", "......", "..##.." };
+        for (int j = 0; j < 7; j++)
+            for (int i = 0; i < 6; i++)
+                if (BELL[j][i] == '#') floor_px(cv, v, &c, cx - 3 + i, cy - 4 + j, 0xb89850, 0.2f);
+    } else if (k == TR_GUST) {
+        /* a round iron grating over a dark shaft */
+        for (int j = -8; j <= 8; j++)
+            for (int i = -9; i <= 9; i++) {
+                float d = (i * i) / 81.0f + (j * j) / 64.0f;
+                if (d > 1) continue;
+                uint32_t col = d > 0.78f ? 0x3a3836 : (i + 9) % 3 == 0 ? 0x4e4c4a : 0x060708;
+                floor_px(cv, v, &c, cx + i, cy + j, col, 0.1f);
+            }
+        /* frost about the rim */
+        for (int n = 0; n < 10; n++) {
+            uint32_t h = hash2(tx * 7 + n, ty * 5 + n, 0x6a57);
+            float a = (h % 628) / 100.0f;
+            floor_px(cv, v, &c, cx + (int)(cosf(a) * 11), cy + (int)(sinf(a) * 9), 0xb8d0e8, 0.15f);
+        }
+    } else if (k == TR_PIT) {
+        /* the outline of a trapdoor, its planks and an iron hinge */
+        for (int j = -10; j <= 10; j++)
+            for (int i = -11; i <= 11; i++) {
+                bool edge = abs(i) == 11 || abs(j) == 10;
+                bool seam = !edge && (i + 11) % 6 == 0;
+                if (!edge && !seam) continue;
+                floor_px(cv, v, &c, cx + i, cy + j, edge ? 0x0c0a08 : 0x2a1e14, 0);
+            }
+        for (int i = -9; i <= -5; i++) floor_px(cv, v, &c, cx + i, cy - 9, 0x7a7060, 0.15f);
+        for (int i = 5; i <= 9; i++) floor_px(cv, v, &c, cx + i, cy - 9, 0x7a7060, 0.15f);
+    } else if (k == TR_SNARE) {
+        /* a loop of wire and its peg */
+        for (int a = 0; a < 48; a++) {
+            float t = a * 6.28318f / 48;
+            floor_px(cv, v, &c, cx + (int)lroundf(cosf(t) * 8), cy + (int)lroundf(sinf(t) * 5), 0xa8a8a0, 0.2f);
+        }
+        for (int i = 0; i < 6; i++) floor_px(cv, v, &c, cx + 8 + i, cy - i / 2, 0xa8a8a0, 0.2f);
+        for (int j = -2; j <= 2; j++)
+            for (int i = 0; i <= 1; i++) floor_px(cv, v, &c, cx + 14 + i, cy - 3 + j, 0x6a4a2a, 0.1f);
+    }
+}
+
+/* what a special room leaves on its floor: bones in a nest, straw and splinters in a storeroom,
+ * rust and broken blades in an armoury */
+static void draw_room_floor(Renderer *r, Canvas *cv, const View *v, int tx, int ty, int sx, int sy, int kind)
+{
+    uint32_t h = hash2(tx, ty, 0x7007 + (uint32_t)kind);
+    if (h % 100 >= (kind == RK_NEST ? 45u : kind == RK_STORE ? 40u : 30u)) return;
+    CF c;
+    light_at_px(r, tx * TILE + 16.0f, ty * TILE + 16.0f, &c);
+    if (!v->fog) c.v = c.s = 1;
+    int ox = sx + 6 + (int)((h >> 8) % 18), oy = sy + 8 + (int)((h >> 14) % 16);
+    if (kind == RK_NEST) {
+        if ((h >> 20) % 5 == 0) {
+            /* a skull */
+            static const char *SK[6] = { ".###.", "#####", "#.#.#", "#####", ".#.#.", "....." };
+            for (int j = 0; j < 6; j++)
+                for (int i = 0; i < 5; i++)
+                    if (SK[j][i] == '#') floor_px(cv, v, &c, ox + i, oy + j, 0xc8c0a8, 0.1f);
+            return;
+        }
+        /* a long bone, knobbed at both ends, lying at some angle */
+        float a = ((h >> 22) % 314) / 100.0f, ca = cosf(a), sa = sinf(a);
+        int len = 4 + (int)((h >> 3) % 4);
+        for (int i = -len; i <= len; i++) floor_px(cv, v, &c, ox + (int)lroundf(ca * i), oy + (int)lroundf(sa * i * 0.6f), 0xbab09a, 0.08f);
+        for (int e = -1; e <= 1; e += 2) {
+            int ex = ox + (int)lroundf(ca * len * e), ey = oy + (int)lroundf(sa * len * e * 0.6f);
+            floor_px(cv, v, &c, ex + 1, ey, 0xd0c8b0, 0.08f);
+            floor_px(cv, v, &c, ex, ey + 1, 0xd0c8b0, 0.08f);
+            floor_px(cv, v, &c, ex - 1, ey, 0xd0c8b0, 0.08f);
+        }
+    } else if (kind == RK_STORE) {
+        /* straw, and now and then a splintered plank */
+        for (int n = 0; n < 9; n++) {
+            uint32_t q = hash2(tx * 13 + n, ty * 11 + n, 0x57a3);
+            int x = ox + (int)(q % 12) - 6, y = oy + (int)((q >> 8) % 10) - 5, dx = (q >> 16) & 1 ? 1 : -1;
+            for (int i = 0; i < 4; i++) floor_px(cv, v, &c, x + i * dx, y + i / 2, (q >> 20) & 1 ? 0xa89048 : 0x8a7438, 0.08f);
+        }
+        if ((h >> 21) % 3 == 0)
+            for (int j = 0; j < 3; j++)
+                for (int i = 0; i < 12; i++)
+                    if (!(j == 0 && i > 9)) floor_px(cv, v, &c, ox - 6 + i, oy + 4 + j, j == 2 ? 0x3a2814 : 0x6a4a28, 0.05f);
+    } else {
+        /* rust flakes and a broken blade */
+        for (int n = 0; n < 7; n++) {
+            uint32_t q = hash2(tx * 17 + n, ty * 19 + n, 0x2057);
+            floor_px(cv, v, &c, ox + (int)(q % 14) - 7, oy + (int)((q >> 8) % 10) - 5, 0x7a3a1a, 0.05f);
+        }
+        if ((h >> 21) % 2 == 0) {
+            for (int i = 0; i < 8; i++) floor_px(cv, v, &c, ox - 4 + i, oy - i / 3, 0x9098a0, 0.12f);
+            for (int j = -2; j <= 2; j++) floor_px(cv, v, &c, ox - 5, oy + j, 0x5a4a30, 0.05f);
+        }
+    }
+}
+
 /* ---------------------------------------------------------------- water */
 
 static inline float tile_depth(const Level *lv, int x, int y)
@@ -646,7 +799,17 @@ static void reflect_one(Canvas *cv, const View *v, float fx, float fy, float gy,
     }
 }
 
-static void torch_tip(const Mob *m, float *x, float *y);
+static void torch_tip(const Renderer *r, const Mob *m, float *x, float *y);
+
+/* x on the player's sprite (canvas offset from its left) of a point dx past the
+ * lantern hand, mirrored when it faces left */
+static int hand_x(const Renderer *r, const Mob *m, int dx)
+{
+    int x = r->hand_x + dx;
+    return m->flip ? TILE - 1 - x : x;
+}
+/* outward from the body, on the lantern's side */
+static int hand_out(const Renderer *r) { return r->hand_x < TILE / 2 ? -1 : 1; }
 
 static void draw_reflections(Renderer *r, Canvas *cv, const View *v)
 {
@@ -668,7 +831,7 @@ static void draw_reflections(Renderer *r, Canvas *cv, const View *v)
     }
     if (v->player && v->torch) {
         float x, y;
-        torch_tip(v->player, &x, &y);
+        torch_tip(r, v->player, &x, &y);
         reflect_one(cv, v, x, y, v->player->ry * TILE + 30, 0xffa850, 0.9f, 2.2f);
     }
     if (v->projlight) reflect_one(cv, v, v->projx, v->projy, v->projy + 18, 0xffa850, 0.7f, 2.0f);
@@ -764,7 +927,10 @@ static void draw_ground(Renderer *r, Canvas *cv, const View *v)
             draw_lit(cv, sx, sy, im, TILE, TILE, &r->corner[ty][tx], &r->corner[ty][tx + 1],
                      &r->corner[ty + 1][tx], &r->corner[ty + 1][tx + 1], 1, 1, ao, v->fog, over, edge);
             if (lv->scorch[ty][tx]) draw_scorch(r, cv, v, tx, ty, sx, sy);
+            int rk = lv->room[ty][tx] >= 0 ? lv->rooms[lv->room[ty][tx]].kind : RK_PLAIN;
+            if (rk != RK_PLAIN && t != T_DOOR_OPEN) draw_room_floor(r, cv, v, tx, ty, sx, sy, rk);
             if (lv->salt[ty][tx]) draw_salt(r, cv, v, tx, ty, sx, sy);
+            if (lv->trap[ty][tx] && (lv->f[ty][tx] & F_TRAP)) draw_trap(r, cv, v, tx, ty, sx, sy);
         }
 }
 
@@ -1151,6 +1317,13 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
     py -= W - TILE;
     const Image *im = &r->t.mob[m->kind], *gl = &r->t.mob_glow[m->kind];
     int fl = m->flash > 0 ? (int)(m->flash * 230) : 0;
+    /* a full-resolution sprite to draw over this one once zoomed: note what it covers */
+    int hid = 0;
+    if (cv == r->rec_cv && r->t.mob_hi[m->kind].px && r->nhic < MAX_HICMD) {
+        hid = ++r->nhic;
+        r->hic[hid - 1] = (HiCmd){ m->kind, px, py, W, m->flip, m->asleep, sub != 0, wl,
+                                   lr * 1.1f, lg * 1.1f, lb * 1.1f, alpha, fl, false, 0, 0, 0, 0 };
+    }
     for (int j = 0; j < W; j++) {
         int y = py + j;
         if ((unsigned)y >= (unsigned)cv->h || (sub && y > wl)) continue;
@@ -1158,15 +1331,22 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
         for (int i = 0; i < W; i++) {
             int x = px + i;
             if ((unsigned)x >= (unsigned)cv->w) continue;
+            size_t o = (size_t)y * cv->w + x;
             int si = i * TILE / W;
             if (m->flip) si = TILE - 1 - si;
             uint32_t a = im->px[sj * TILE + si];
-            if (!CA(a)) continue;
+            if (!CA(a)) {
+                /* the big sprite may reach a little past the small one's outline */
+                if (hid && !r->own[o]) { r->own[o] = (uint16_t)hid; r->hbg[o] = r->hwr[o] = cv->px[o]; }
+                continue;
+            }
             uint32_t g = gl->px[sj * TILE + si];
             uint32_t col = CA(g) ? (g & 0xffffff) : lightc(a & 0xffffff, lr * 1.1f, lg * 1.1f, lb * 1.1f);
             if (m->asleep && !CA(g)) col = mix(col, 0x202838, 60);
             if (fl) col = mix(col, 0xffffff, fl);
-            blend_px(&cv->px[(size_t)y * cv->w + x], col, (int)(255 * alpha));
+            if (hid) r->hbg[o] = cv->px[o];
+            blend_px(&cv->px[o], col, (int)(255 * alpha));
+            if (hid) { r->own[o] = (uint16_t)hid; r->hwr[o] = cv->px[o]; }
         }
     }
     if (sub) {
@@ -1190,20 +1370,27 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
     }
     if (is_player && v->torch) {
         /* a torch raised in the off hand */
-        int hx = px + (m->flip ? TILE - 8 : 7), hy = py + 21;
-        int tx = px + (m->flip ? TILE - 5 : 4), ty = py + 11;
-        cv_line(cv, hx, hy, tx, ty, 0x5a3a20, 255);
-        cv_line(cv, hx + 1, hy, tx + 1, ty, 0x7a5030, 255);
-        cv_disc(cv, tx + 0.5f, ty - 0.5f, 2.2f, 0x3a2a1c, 255);
+        int hx = px + hand_x(r, m, 0), hy = py + r->hand_y;
+        int tx = px + hand_x(r, m, 3 * hand_out(r)), ty = hy - 10;
+        if (hid) {
+            /* drawn sharp by render_hires instead */
+            HiCmd *hc = &r->hic[hid - 1];
+            hc->stick = true;
+            hc->sx0 = hx; hc->sy0 = hy; hc->sx1 = tx; hc->sy1 = ty;
+        } else {
+            cv_line(cv, hx, hy, tx, ty, 0x5a3a20, 255);
+            cv_line(cv, hx + 1, hy, tx + 1, ty, 0x7a5030, 255);
+            cv_disc(cv, tx + 0.5f, ty - 0.5f, 2.2f, 0x3a2a1c, 255);
+        }
     } else if (is_player) {
         /* the lantern's halo */
-        int lx = px + (m->flip ? TILE - 7 : 7), ly = py + 21;
+        int lx = px + hand_x(r, m, 0), ly = py + r->hand_y;
         cv_glow(cv, lx, ly, 18, 0xffb050, 0.30f);
     }
 }
 
 /* the tip of the player's torch, world pixels */
-static void torch_tip(const Mob *m, float *x, float *y)
+static void torch_tip(const Renderer *r, const Mob *m, float *x, float *y)
 {
     float ox = 0, oy = 0;
     if (m->bump > 0) {
@@ -1211,8 +1398,8 @@ static void torch_tip(const Mob *m, float *x, float *y)
         float len = sqrtf((float)(m->bdx * m->bdx + m->bdy * m->bdy));
         if (len > 0) { ox = m->bdx / len * k; oy = m->bdy / len * k; }
     }
-    *x = m->rx * TILE + ox + (m->flip ? TILE - 5 : 4) + 0.5f;
-    *y = m->ry * TILE + oy - 3 + 11 - 2.0f;
+    *x = m->rx * TILE + ox + hand_x(r, m, 3 * hand_out(r)) + 0.5f;
+    *y = m->ry * TILE + oy - 3 + (r->hand_y - 10) - 2.0f;
 }
 
 static void flame(Canvas *cv, float x, float y, float size, float t, float phase, float vis)
@@ -1429,7 +1616,7 @@ static void draw_effects(Renderer *r, Canvas *cv, const View *v, float dt)
     }
     if (v->player && v->torch) {
         float tx, ty;
-        torch_tip(v->player, &tx, &ty);
+        torch_tip(r, v->player, &tx, &ty);
         flame(cv, tx - v->camx, ty - v->camy, 0.8f, v->time, 1.7f, 1.0f);
         if (dt > 0) {
             r->ember_acc[MAX_LIGHTS - 1] += dt * 3.0f;
@@ -1489,6 +1676,27 @@ static void draw_items(Renderer *r, Canvas *cv, const View *v)
 }
 
 /* walls, doors, fixtures and creatures, row by row so nearer things cover farther ones */
+/* Walls, doors and fixtures in a nearer row are drawn over canvas rows y0..y1:
+ * a creature they cover must stay covered. hires_occlude(.., false) notes the
+ * creatures' pixels there first, (.., true) gives up the ones that changed. */
+static void hires_occlude(Renderer *r, const Canvas *cv, int y0, int y1, bool after)
+{
+    for (int k = 0; k < r->nhic; k++) {
+        const HiCmd *c = &r->hic[k];
+        int ya = c->y > y0 ? c->y : y0, yb = c->y + c->W < y1 ? c->y + c->W : y1;
+        if (ya < 0) ya = 0;
+        if (yb > cv->h) yb = cv->h;
+        int xa = c->x < 0 ? 0 : c->x, xb = c->x + c->W > cv->w ? cv->w : c->x + c->W;
+        for (int y = ya; y < yb; y++)
+            for (int x = xa; x < xb; x++) {
+                size_t o = (size_t)y * cv->w + x;
+                if (r->own[o] != k + 1) continue;
+                if (!after) r->hsnap[o] = cv->px[o];
+                else if (cv->px[o] != r->hsnap[o]) r->own[o] = 0;
+            }
+    }
+}
+
 static void draw_rows(Renderer *r, Canvas *cv, const View *v)
 {
     const Level *lv = v->lv;
@@ -1496,6 +1704,8 @@ static void draw_rows(Renderer *r, Canvas *cv, const View *v)
     int tx1 = (v->camx + cv->w) / TILE + 1, ty1 = (v->camy + cv->h + WALL_R) / TILE + 1;
     for (int ty = ty0; ty <= ty1; ty++) {
         if (ty < 0 || ty >= MAP_H) continue;
+        int oy0 = ty * TILE - v->camy - 3 * TILE, oy1 = ty * TILE - v->camy + TILE;
+        if (cv == r->rec_cv) hires_occlude(r, cv, oy0, oy1, false);
         for (int tx = tx0; tx <= tx1; tx++) {
             if (!in_map(tx, ty)) continue;
             Tile t = (Tile)lv->t[ty][tx];
@@ -1506,6 +1716,7 @@ static void draw_rows(Renderer *r, Canvas *cv, const View *v)
         }
         for (int i = 0; i < lv->nlights; i++)
             if (lv->lights[i].fy == ty && lv->lights[i].kind != L_PLAYER) draw_fixture(r, cv, v, &lv->lights[i]);
+        if (cv == r->rec_cv) hires_occlude(r, cv, oy0, oy1, true);
         for (int i = 0; i < MAX_MOBS; i++) {
             const Mob *m = &v->mobs[i];
             if (m->alive && (int)floorf(m->ry + 0.5f) == ty) draw_mob(r, cv, v, m, false);
@@ -1820,6 +2031,24 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
     }
     g->nfx = 0;
     compute_light(r, &v);
+    /* record the creatures that have full-resolution sprites */
+    r->nhic = 0;
+    r->rec_cv = NULL;
+    size_t npx = (size_t)cv->w * cv->h;
+    if (r->any_hi && r->zoom >= 2 && npx) {
+        if (npx > r->hcap) {
+            free(r->own); free(r->hbg); free(r->hwr); free(r->hsnap);
+            r->own = malloc(npx * sizeof *r->own);
+            r->hbg = malloc(npx * 4);
+            r->hwr = malloc(npx * 4);
+            r->hsnap = malloc(npx * 4);
+            r->hcap = r->own && r->hbg && r->hwr && r->hsnap ? npx : 0;
+        }
+        if (r->hcap) {
+            memset(r->own, 0, npx * sizeof *r->own);
+            r->rec_cv = cv;
+        }
+    }
     memset(cv->px, 0, (size_t)cv->w * cv->h * 4);
     draw_ground(r, cv, &v);
     draw_reflections(r, cv, &v);
@@ -1839,6 +2068,164 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
         cv_glow(cv, fx, fy, 6 * TILE, 0xfff4e0, 1.1f * k);
         cv_glow(cv, fx, fy, 2 * TILE, 0xffffff, 1.4f * k);
         r->flash_t -= dt;
+    }
+    r->hcv_w = r->rec_cv ? cv->w : 0;
+    r->hcv_h = r->rec_cv ? cv->h : 0;
+    r->rec_cv = NULL;
+}
+
+/* How what was drawn over a creature (glows, shadows, flames) changed the pixel
+ * it wrote: 0 added light (delta in d), 1 darkened it (by *k), 2 covered it. */
+static int overlay_mode(uint32_t fin, uint32_t wr, int d[3], float *k)
+{
+    int f[3] = { CR(fin), CG(fin), CB(fin) }, w[3] = { CR(wr), CG(wr), CB(wr) };
+    int lo = 255, hi = -255;
+    for (int c = 0; c < 3; c++) {
+        d[c] = f[c] - w[c];
+        if (d[c] < lo) lo = d[c];
+        if (d[c] > hi) hi = d[c];
+    }
+    if (lo >= -3 || (hi <= 8 && lo >= -8)) return 0;
+    if (hi <= 3) {
+        float kmin = 9, kmax = -1, ks = 0;
+        int n = 0;
+        for (int c = 0; c < 3; c++) {
+            if (w[c] < 24) continue;
+            float q = (float)f[c] / (float)w[c];
+            if (q < kmin) kmin = q;
+            if (q > kmax) kmax = q;
+            ks += q;
+            n++;
+        }
+        if (n && kmax - kmin < 0.15f) { *k = ks / n; return 1; }
+    }
+    return 2;
+}
+
+/* one texel of a full-resolution sprite, lit like the small one; alpha in *a */
+static inline uint32_t hi_texel(const Image *im, const Image *gl, const HiCmd *c, int x, int y, int *a)
+{
+    if ((unsigned)x >= (unsigned)im->w || (unsigned)y >= (unsigned)im->h) { *a = 0; return 0; }
+    uint32_t p = im->px[(size_t)y * im->w + x];
+    *a = (int)CA(p);
+    if (!*a) return 0;
+    uint32_t g = gl->px[(size_t)y * gl->w + x];
+    uint32_t col = CA(g) ? (g & 0xffffff) : lightc(p & 0xffffff, c->lr, c->lg, c->lb);
+    if (c->asleep && !CA(g)) col = mix(col, 0x202838, 60);
+    if (c->fl) col = mix(col, 0xffffff, c->fl);
+    return col;
+}
+
+static float seg_dist(float px, float py, float ax, float ay, float bx, float by)
+{
+    float dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    float t = l2 > 0 ? clampf(((px - ax) * dx + (py - ay) * dy) / l2, 0, 1) : 0;
+    float ex = ax + dx * t - px, ey = ay + dy * t - py;
+    return sqrtf(ex * ex + ey * ey);
+}
+
+/* the torch haft at screen resolution (two strands and its head), under
+ * whatever was drawn over it in the world (the flame) */
+static void hires_stick(Renderer *r, Canvas *scr, const Canvas *world, int z, int id, const HiCmd *c)
+{
+    float ax = (c->sx0 + 0.5f) * z, ay = (c->sy0 + 0.5f) * z, bx = (c->sx1 + 0.5f) * z, by = (c->sy1 + 0.5f) * z;
+    float hx = (c->sx1 + 0.5f) * z, hy = (c->sy1 - 0.5f) * z, hr = 2.2f * z;
+    int X0 = (int)fminf(ax, bx) - 3 * z, X1 = (int)fmaxf(ax, bx) + 4 * z;
+    int Y0 = (int)fminf(ay, by) - 3 * z, Y1 = (int)fmaxf(ay, by) + 3 * z;
+    for (int Y = Y0 < 0 ? 0 : Y0; Y < Y1 && Y < scr->h; Y++)
+        for (int X = X0 < 0 ? 0 : X0; X < X1 && X < scr->w; X++) {
+            int wx = X / z, wy = Y / z;
+            if (wx >= world->w || wy >= world->h) continue;
+            size_t o = (size_t)wy * world->w + wx;
+            if (r->own[o] != id) continue;
+            int d[3];
+            float mk = 1;
+            int mode = overlay_mode(world->px[o], r->hwr[o], d, &mk);
+            if (mode == 2) continue;
+            float p[2] = { X + 0.5f, Y + 0.5f };
+            float cov[3] = {
+                clampf(z * 0.5f + 0.5f - seg_dist(p[0], p[1], ax, ay, bx, by), 0, 1),
+                clampf(z * 0.5f + 0.5f - seg_dist(p[0], p[1], ax + z, ay, bx + z, by), 0, 1),
+                clampf(hr + 0.5f - sqrtf((p[0] - hx) * (p[0] - hx) + (p[1] - hy) * (p[1] - hy)), 0, 1),
+            };
+            if (cov[0] <= 0 && cov[1] <= 0 && cov[2] <= 0) continue;
+            uint32_t *q = &scr->px[(size_t)Y * scr->w + X];
+            /* take the overlay off, draw the haft, put the overlay back */
+            float rr = CR(*q), gg = CG(*q), bb = CB(*q);
+            if (mode == 0) { rr -= d[0]; gg -= d[1]; bb -= d[2]; }
+            else if (mk > 0.01f) { rr /= mk; gg /= mk; bb /= mk; }
+            static const uint32_t col[3] = { 0x5a3a20, 0x7a5030, 0x3a2a1c };
+            for (int s = 0; s < 3; s++) {
+                rr += (CR(col[s]) - rr) * cov[s];
+                gg += (CG(col[s]) - gg) * cov[s];
+                bb += (CB(col[s]) - bb) * cov[s];
+            }
+            if (mode == 0) { rr += d[0]; gg += d[1]; bb += d[2]; }
+            else { rr *= mk; gg *= mk; bb *= mk; }
+            *q = RGB(clampi((int)lroundf(rr), 0, 255), clampi((int)lroundf(gg), 0, 255), clampi((int)lroundf(bb), 0, 255));
+        }
+}
+
+void render_set_zoom(Renderer *r, int zoom) { r->zoom = zoom; }
+
+void render_hires(Renderer *r, Canvas *scr, const Canvas *world, int zoom)
+{
+    if (zoom < 2 || !r->nhic || world->w != r->hcv_w || world->h != r->hcv_h) return;
+    for (int k = 0; k < r->nhic; k++) {
+        const HiCmd *c = &r->hic[k];
+        const Image *im = &r->t.mob_hi[c->kind], *gl = &r->t.mob_hi_glow[c->kind];
+        int D = c->W * zoom;
+        float s = (float)im->w / (float)D;          /* sprite texels per screen pixel */
+        float sharp = fmaxf(1.0f / s, 1.5f);        /* "sharp bilinear": blend only near texel edges */
+        for (int v = 0; v < D; v++) {
+            int Y = c->y * zoom + v;
+            if (Y < 0 || Y >= scr->h) continue;
+            int wy = Y / zoom;
+            if (wy >= world->h || (c->sub && wy > c->wl)) continue;
+            float fy = (v + 0.5f) * s - 0.5f;
+            int y0 = (int)floorf(fy);
+            float ty = clampf((fy - y0 - 0.5f) * sharp + 0.5f, 0, 1);
+            for (int u = 0; u < D; u++) {
+                int X = c->x * zoom + u;
+                if (X < 0 || X >= scr->w) continue;
+                int wx = X / zoom;
+                if (wx >= world->w) continue;
+                size_t o = (size_t)wy * world->w + wx;
+                if (r->own[o] != k + 1) continue;
+                int d[3];
+                float mk = 1;
+                int mode = overlay_mode(world->px[o], r->hwr[o], d, &mk);
+                if (mode == 2) continue;
+                float fx = (u + 0.5f) * s - 0.5f;
+                if (c->flip) fx = (float)im->w - 1 - fx;
+                int x0 = (int)floorf(fx);
+                float tx = clampf((fx - x0 - 0.5f) * sharp + 0.5f, 0, 1);
+                /* premultiplied bilinear over the four texels */
+                float wgt[4] = { (1 - tx) * (1 - ty), tx * (1 - ty), (1 - tx) * ty, tx * ty };
+                int qx[4] = { x0, x0 + 1, x0, x0 + 1 }, qy[4] = { y0, y0, y0 + 1, y0 + 1 };
+                float ar = 0, ag = 0, ab = 0, aa = 0;
+                for (int q = 0; q < 4; q++) {
+                    if (wgt[q] <= 0) continue;
+                    int ta;
+                    uint32_t col = hi_texel(im, gl, c, qx[q], qy[q], &ta);
+                    float w = wgt[q] * ta;
+                    ar += CR(col) * w; ag += CG(col) * w; ab += CB(col) * w; aa += w;
+                }
+                uint32_t bg = r->hbg[o];
+                float al = aa / 255.0f * c->alpha;
+                float rr = CR(bg), gg = CG(bg), bb = CB(bg);
+                if (aa > 0) {
+                    rr += (ar / aa - rr) * al;
+                    gg += (ag / aa - gg) * al;
+                    bb += (ab / aa - bb) * al;
+                }
+                if (mode == 0) { rr += d[0]; gg += d[1]; bb += d[2]; }
+                else { rr *= mk; gg *= mk; bb *= mk; }
+                scr->px[(size_t)Y * scr->w + X] = RGB(clampi((int)lroundf(rr), 0, 255), clampi((int)lroundf(gg), 0, 255),
+                                                      clampi((int)lroundf(bb), 0, 255));
+            }
+        }
+        if (c->stick) hires_stick(r, scr, world, zoom, k + 1, c);
     }
 }
 
@@ -1879,3 +2266,18 @@ void render_map(Renderer *r, Game *g, Canvas *dst, int tx, int ty, int tw, int t
 }
 
 const Image *render_item_icons(const Renderer *r) { return r->t.item; }
+
+int render_load_sprites(Renderer *r, const char *assets)
+{
+    int n = tiles_load_sprites(&r->t, assets);
+    /* the lantern is what glows on the player: hold a torch in that hand */
+    const Image *gl = &r->t.mob_glow[MK_PLAYER];
+    long sx = 0, sy = 0, cnt = 0;
+    for (int y = 0; y < gl->h; y++)
+        for (int x = 0; x < gl->w; x++)
+            if (CA(gl->px[y * gl->w + x])) { sx += x; sy += y; cnt++; }
+    if (cnt) { r->hand_x = (int)(sx / cnt); r->hand_y = (int)(sy / cnt); }
+    r->any_hi = false;
+    for (int k = 0; k < MK_COUNT; k++) r->any_hi |= r->t.mob_hi[k].px != NULL;
+    return n;
+}

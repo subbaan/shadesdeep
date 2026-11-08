@@ -90,6 +90,7 @@ static void usage(FILE *f)
         "      --no-save       don't resume or save a game\n"
         "      --mute          start with the sound off (F2 toggles it in the game)\n"
         "      --no-sound      don't open the audio device at all\n"
+        "      --classic-art   draw the creatures with the old built-in sprites\n"
         "      --show-fps      show the frame rate under the version\n"
         "      --probe         report terminal capabilities and exit\n"
         "      --dump=FILE     render one frame to a PNG and exit (no terminal needed)\n"
@@ -301,8 +302,10 @@ static void draw_frame(Renderer *r, UI *ui, Game *g, Frame *fr, Hover *hv, Ctl *
         ov.hx = ux = ctl->tx;
         ov.hy = uy = ctl->ty;
     }
+    render_set_zoom(r, fr->zoom);
     render_world(r, g, &fr->world, dt, &ov);
     cv_upscale(&fr->screen, &fr->world, fr->zoom, 0, 0);
+    render_hires(r, &fr->screen, &fr->world, fr->zoom);
     float cx, cy;
     render_cam_pos(r, &cx, &cy);
     bool map = ctl->map && g->state == GS_PLAY;
@@ -345,6 +348,8 @@ static void start_aim(Game *g, Ctl *ctl, int slot, const Hover *hv)
     ctl->ty = clampi(ctl->ty, 0, MAP_H - 1);
 }
 
+static bool classic_art;     /* --classic-art: keep the procedural creature sprites */
+
 static int dump_frame(const char *assets, uint32_t seed, const char *path, int w, int h, int cellh,
                       int steps, int zoom, float tscale, int mx, int my)
 {
@@ -355,6 +360,7 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     ui_set_scale(ui, cellh, tscale);
     Game *g = game_new(seed);
     Renderer *r = render_new();
+    if (!classic_art) render_load_sprites(r, assets);
     Frame fr = { 0 };
     frame_resize(&fr, w, h, zoom ? zoom : auto_zoom(h));
     if (steps > 0) {
@@ -385,6 +391,12 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         if (g->state == GS_DEAD) break;
         g->player.hp = g->player.maxhp;
         for (int i = 0; i < 200; i++) game_update(g, 0.02f);
+    }
+    /* SHADESDEEP_DUMP_ROOM=store|armoury|nest: stand in such a room, with the level and its traps shown */
+    if (getenv("SHADESDEEP_DUMP_ROOM")) {
+        const char *k = getenv("SHADESDEEP_DUMP_ROOM");
+        int rk = !strcmp(k, "store") ? RK_STORE : !strcmp(k, "armoury") ? RK_ARMOURY : !strcmp(k, "nest") ? RK_NEST : -1;
+        if (rk < 0 || !game_debug_to_room(g, rk)) fprintf(stderr, "%s: no %s room on this level\n", SHADESDEEP_NAME, k);
     }
     /* SHADESDEEP_DUMP_SPOT=0..5: an east-west corridor, a side-wall door, a room's south wall,
      * a cold sconce with a shade near (4: and light it), the Heartflame's hall (5). After SHADESDEEP_DUMP_JUMP */
@@ -566,6 +578,7 @@ int main(int argc, char **argv)
         { "new",      no_argument,       0, 'W' },
         { "save",     required_argument, 0, 'L' },
         { "no-save",  no_argument,       0, 'X' },
+        { "classic-art", no_argument,    0, 'O' },
         { "help",     no_argument,       0, 'h' },
         { "version",  no_argument,       0, 'V' },
         { 0, 0, 0, 0 }
@@ -591,6 +604,7 @@ int main(int argc, char **argv)
         case 'W': new_game = true; break;
         case 'L': save_opt = optarg; break;
         case 'X': no_save = true; break;
+        case 'O': classic_art = true; break;
         case 'h': usage(stdout); return 0;
         case 'V': printf("%s %s\n", SHADESDEEP_NAME, SHADESDEEP_VERSION); return 0;
         default:  usage(stderr); return 2;
@@ -672,6 +686,7 @@ int main(int argc, char **argv)
     int saved_depth = g->depth;
     bool save_gone = false;
     Renderer *r = render_new();
+    if (!classic_art) render_load_sprites(r, assets);
     ui_set_icons(ui, render_item_icons(r));
     if (!no_sound) {
         if (snd_init(assets) != 0) game_msg(g, C_DIM, "(no sound: %s)", snd_status());

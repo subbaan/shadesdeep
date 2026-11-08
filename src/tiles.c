@@ -1,8 +1,11 @@
 #include "tiles.h"
 
+#include "version.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static uint32_t A(uint32_t rgb) { return 0xff000000u | rgb; }
 
@@ -918,6 +921,28 @@ static const Pal I_WARMTH_PAL[] = {
     { 'A', 0xffd070, 1 }, { 'd', 0xa04a10, 1 },
 };
 
+static const char *const I_EMBERS[16] = {
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    ".......e........",
+    "....a..E..e.....",
+    "...aEa.aa.Ea....",
+    "..aaeaaEeaaea...",
+    ".aeaaEaaaeEaaa..",
+    ".aaEaaeaEaaeaa..",
+    "..kaaakaaakaak..",
+    "...kkkkkkkkkk...",
+    "................",
+};
+static const Pal I_EMBERS_PAL[] = {
+    { 'k', 0x1a1210, 0 }, { 'a', 0x3a3230, 0 }, { 'e', 0xc04a14, 1 }, { 'E', 0xff9a3a, 1 },
+};
+
 void tiles_build(Tiles *t)
 {
     memset(t, 0, sizeof *t);
@@ -965,7 +990,61 @@ void tiles_build(Tiles *t)
     GEAR_SPRITE(IT_FLASH, I_FLASH);
     GEAR_SPRITE(IT_SALT, I_SALT);
     GEAR_SPRITE(IT_WARMTH, I_WARMTH);
+    GEAR_SPRITE(IT_EMBERS, I_EMBERS);
 #undef GEAR_SPRITE
+}
+
+/* file names for the creature sprites, by MobKind (NULL: always procedural) */
+static const char *const MOB_FILE[MK_COUNT] = {
+    [MK_PLAYER] = "player", [MK_RAT] = "rat", [MK_GOBLIN] = "goblin", [MK_BAT] = "bat",
+    [MK_SLINGER] = "slinger", [MK_OGRE] = "ogre", [MK_EEL] = "eel",
+};
+
+static bool load_tile_png(Image *im, const char *path)
+{
+    if (image_load(im, path) != 0) return false;
+    if (im->w == TILE && im->h == TILE) return true;
+    fprintf(stderr, "%s: %s is %dx%d, not %dx%d; ignored\n", SHADESDEEP_NAME, path, im->w, im->h, TILE, TILE);
+    image_free(im);
+    return false;
+}
+
+int tiles_load_sprites(Tiles *t, const char *dir)
+{
+    int n = 0;
+    for (int k = 0; k < MK_COUNT; k++) {
+        if (!MOB_FILE[k]) continue;
+        char p[4096];
+        Image im, gl;
+        snprintf(p, sizeof p, "%s/sprites/%s.png", dir, MOB_FILE[k]);
+        if (access(p, R_OK) != 0 || !load_tile_png(&im, p)) continue;
+        snprintf(p, sizeof p, "%s/sprites/%s_glow.png", dir, MOB_FILE[k]);
+        if (access(p, R_OK) != 0 || !load_tile_png(&gl, p)) image_alloc(&gl, TILE, TILE);
+        image_free(&t->mob[k]);
+        image_free(&t->mob_glow[k]);
+        t->mob[k] = im;
+        t->mob_glow[k] = gl;
+        n++;
+        /* full resolution: any square size from TILE up, its glow the same size */
+        Image hi = { 0 }, hg = { 0 };
+        snprintf(p, sizeof p, "%s/sprites/%s_hi.png", dir, MOB_FILE[k]);
+        if (access(p, R_OK) != 0 || image_load(&hi, p) != 0) continue;
+        if (hi.w != hi.h || hi.w < TILE || hi.w > 8 * TILE) {
+            fprintf(stderr, "%s: %s is %dx%d, not square (%d to %d); ignored\n", SHADESDEEP_NAME, p, hi.w, hi.h, TILE, 8 * TILE);
+            image_free(&hi);
+            continue;
+        }
+        snprintf(p, sizeof p, "%s/sprites/%s_hi_glow.png", dir, MOB_FILE[k]);
+        if (access(p, R_OK) != 0 || image_load(&hg, p) != 0 || hg.w != hi.w || hg.h != hi.h) {
+            if (hg.px) image_free(&hg);
+            image_alloc(&hg, hi.w, hi.h);
+        }
+        image_free(&t->mob_hi[k]);
+        image_free(&t->mob_hi_glow[k]);
+        t->mob_hi[k] = hi;
+        t->mob_hi_glow[k] = hg;
+    }
+    return n;
 }
 
 void tiles_free(Tiles *t)

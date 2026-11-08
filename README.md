@@ -5,7 +5,7 @@ art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.11.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.13.2 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -27,6 +27,10 @@ sound; if no audio device opens, the game runs silent.
   has gone cold. Carry fire down to it: walk into its hearth with a lit
   torch three times, while the Hollow (the great shade that put it
   out) tries to smother it. Win or lose, a closing screen sums up the run.
+- **Traps and special rooms:** from depth 2, hidden alarm plates, draught
+  vents, trapdoors and snares (a lit torch helps you spot them; known ones are
+  marked and travel goes around them), and now and then a trapped storeroom,
+  a guarded armoury or a shade's nest with a hoard of embers.
 - **Mouse:** hover anything for a description; click to travel (the path is
   previewed), click a monster to attack it, click a cold sconce to walk over
   and light it, click yourself to rest. The wheel zooms. Descriptions fade
@@ -37,6 +41,10 @@ sound; if no audio device opens, the game runs silent.
   down and descend, `<` climb; `i` items, `t` throw, `a` / `q` use,
   `d` drop, `T` light or snuff your torch; `m` map; `+` / `-` zoom;
   F2 sound on/off; `?` help; Esc twice saves and quits.
+- **Art:** the player and creatures are pixel-art sprites made with
+  [SpriteCook](https://spritecook.ai), drawn from the full-detail art when
+  zoomed in so they stay sharp; `--classic-art` brings back the original
+  built-in ones.
 - **Saving:** quitting (or closing the window) saves the game, and the next
   start carries on where you left off; it's also saved on every new level.
   Death (or winning) deletes the save. It lives in `~/.local/share/shadesdeep/save.gz`;
@@ -156,6 +164,18 @@ NAME...` re-renders just those, `--force` re-renders everything); `assets/sounds
 each event plays and how loud, and is only written when missing, so edit it
 freely. `python3 tools/make_sounds.py --only step door` re-renders just those.
 
-The tiles and sprites are procedural placeholders (`src/tiles.c`) until the
-real art arrives. Fonts: Cinzel and Alegreya (SIL Open Font License, see
+The creature sprites are `assets/sprites/NAME.png` (32x32, feet at the bottom,
+facing right), each with an optional `NAME_glow.png` of the pixels that glow in
+the dark; a creature without a file, or with one of the wrong size, falls back
+to its procedural sprite in `src/tiles.c`. `NAME_hi.png` (and `NAME_hi_glow.png`)
+is the same creature at full resolution on a square canvas laid out like the
+32x32 one: at zoom 2 and up, `render_hires` draws it straight onto the zoomed
+screen wherever the small sprite is still what shows, so walls in front keep
+covering it and glows and shadows drawn over it are put back on top. They are sliced from the SpriteCook
+sheet in `art/spritecook/` by `tools/slice_sprites.py` (Python 3 with Pillow:
+`python3 tools/slice_sprites.py art/spritecook/creatures-1.png assets/sprites`),
+which crops, mirrors and scales each creature, keeps its eyes, and adds a dark
+rim; `spritecook-assets.json` records the SpriteCook asset ids. The tiles,
+items, shades and the Hollow are still procedural (`src/tiles.c`,
+`src/render.c`). Fonts: Cinzel and Alegreya (SIL Open Font License, see
 `assets/fonts/`).

@@ -32,6 +32,9 @@ const MobInfo MOB_INFO[MK_COUNT] = {
 };
 
 const ItemInfo ITEM_INFO[IT_COUNT] = {
+    [IT_EMBERS] = { "cold ember", "cold embers",
+                    "Embers from a fire that died long ago, still holding a spark deep inside. The forge takes them "
+                    "as payment; pick them up and they join your own.", 0, false },
     [IT_TORCH]  = { "torch", "torches",
                     "A pitch-soaked torch. Light it and carry a wide circle of light for 200 turns, though everything "
                     "in the dark will see you coming. Thrown, it lands burning and lights the area for a while.", 7, true },
@@ -164,6 +167,7 @@ static void vocal(Game *g, const Mob *m)
 
 /* a shade, or the great one: things of the dark that hunt by warmth, chill with a touch and burn in fire */
 static bool shadeish(MobKind k) { return k == MK_SHADE || k == MK_HOLLOW; }
+static float clampf01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
 /* ---------------------------------------------------------------- levels */
 
@@ -251,6 +255,7 @@ static void spawn_mobs(Game *g, int d)
         if (lv->t[y][x] != T_FLOOR || lv->room[y][x] < 0) continue;
         if (abs(x - lv->upx) + abs(y - lv->upy) < 9) continue;
         if (lv->room[y][x] == lv->hall && lv->hall >= 0) continue;     /* the hall has its own (below) */
+        if (lv->rooms[lv->room[y][x]].kind == RK_NEST) continue;       /* and so has a nest */
         bool taken = false;
         for (int i = 0; i < placed; i++)
             if (g->mobs[d][i].x == x && g->mobs[d][i].y == y) taken = true;
@@ -285,6 +290,29 @@ static void spawn_mobs(Game *g, int d)
         m->lvl = d;
         m->hp = m->maxhp = MOB_INFO[MK_EEL].hp + MOB_INFO[MK_EEL].hp * (d - 1) / 8;
         eels--;
+    }
+    /* special rooms: a nest full of shades, an armoury with its guards asleep among the racks */
+    for (int rm_i = 0; rm_i < lv->nrooms; rm_i++) {
+        Room *rm = &lv->rooms[rm_i];
+        if (rm->kind != RK_NEST && rm->kind != RK_ARMOURY) continue;
+        MobKind guard = d >= 4 && rng_chance(&r, 50) ? MK_OGRE : MK_GOBLIN;
+        int want = rm->kind == RK_NEST ? 3 + d / 8 : guard == MK_OGRE ? 1 : 2;
+        for (int tries = 0; tries < 2000 && want > 0 && placed < MAX_MOBS; tries++) {
+            int x = rng_range(&r, rm->x, rm->x + rm->w - 1), y = rng_range(&r, rm->y, rm->y + rm->h - 1);
+            if (lv->t[y][x] != T_FLOOR || lv->room[y][x] != rm_i || lv->trap[y][x]) continue;
+            bool taken = false;
+            for (int i = 0; i < placed; i++)
+                if (g->mobs[d][i].alive && g->mobs[d][i].x == x && g->mobs[d][i].y == y) taken = true;
+            if (taken) continue;
+            MobKind k = rm->kind == RK_NEST ? MK_SHADE : guard == MK_GOBLIN && d >= 3 && rng_chance(&r, 40) ? MK_SLINGER : guard;
+            Mob *m = &g->mobs[d][placed++];
+            mob_init(m, k, x, y);
+            m->lvl = d;
+            m->hp = m->maxhp = MOB_INFO[k].hp + MOB_INFO[k].hp * (d - 1) / 8;
+            m->asleep = k != MK_SHADE && rng_chance(&r, 80);
+            m->flip = rng_chance(&r, 50);
+            want--;
+        }
     }
     /* the last level: the Hollow broods by the cold hearth, its brood about the hall */
     if (d == MAX_DEPTH && lv->hall >= 0) {
@@ -322,7 +350,7 @@ static void spawn_items(Game *g, int d)
     int n = 3 + rng_range(&r, 0, 3), placed = 0;
     for (int tries = 0; tries < 2000 && placed < n && placed < MAX_ITEMS; tries++) {
         int x = rng_range(&r, 1, MAP_W - 2), y = rng_range(&r, 1, MAP_H - 2);
-        if (lv->t[y][x] != T_FLOOR || lv->room[y][x] < 0) continue;
+        if (lv->t[y][x] != T_FLOOR || lv->room[y][x] < 0 || lv->trap[y][x]) continue;
         bool taken = false;
         for (int i = 0; i < placed; i++)
             if (g->items[d][i].x == x && g->items[d][i].y == y) taken = true;
@@ -343,7 +371,7 @@ static void spawn_items(Game *g, int d)
         static const ItemKind GEAR[] = { IT_DAGGER, IT_SPEAR, IT_AXE, IT_MACE, IT_SWORD, IT_CLOAK, IT_MAIL, IT_LEATHER };
         for (int tries = 0; tries < 2000 && placed < MAX_ITEMS; tries++) {
             int x = rng_range(&r, 1, MAP_W - 2), y = rng_range(&r, 1, MAP_H - 2);
-            if (lv->t[y][x] != T_FLOOR || lv->room[y][x] < 0) continue;
+            if (lv->t[y][x] != T_FLOOR || lv->room[y][x] < 0 || lv->trap[y][x]) continue;
             bool taken = false;
             for (int i = 0; i < placed; i++)
                 if (g->items[d][i].x == x && g->items[d][i].y == y) taken = true;
@@ -358,13 +386,44 @@ static void spawn_items(Game *g, int d)
     /* ...nor fall far behind it */
     for (int tries = 0; tries < 2000 && g->torches_made < (int)(d * TORCHES_PER_LEVEL) && placed < MAX_ITEMS; tries++) {
         int x = rng_range(&r, 1, MAP_W - 2), y = rng_range(&r, 1, MAP_H - 2);
-        if (lv->t[y][x] != T_FLOOR || lv->room[y][x] < 0) continue;
+        if (lv->t[y][x] != T_FLOOR || lv->room[y][x] < 0 || lv->trap[y][x]) continue;
         bool taken = false;
         for (int i = 0; i < placed; i++)
             if (g->items[d][i].x == x && g->items[d][i].y == y) taken = true;
         if (taken) continue;
         g->items[d][placed++] = (FloorItem){ true, IT_TORCH, 1, x, y, false, 0 };
         g->torches_made++;
+    }
+    /* what the special rooms hold: a storeroom's supplies, an armoury's gear, a nest's hoard of embers */
+    for (int rm_i = 0; rm_i < lv->nrooms; rm_i++) {
+        Room *rm = &lv->rooms[rm_i];
+        if (rm->kind == RK_PLAIN) continue;
+        int want = rm->kind == RK_STORE ? rng_range(&r, 3, 5) : rm->kind == RK_ARMOURY ? 2 : 1;
+        for (int tries = 0; tries < 2000 && want > 0 && placed < MAX_ITEMS; tries++) {
+            int x = rng_range(&r, rm->x, rm->x + rm->w - 1), y = rng_range(&r, rm->y, rm->y + rm->h - 1);
+            if (lv->t[y][x] != T_FLOOR || lv->room[y][x] != rm_i || lv->trap[y][x]) continue;
+            bool taken = false;
+            for (int i = 0; i < placed; i++)
+                if (g->items[d][i].alive && g->items[d][i].x == x && g->items[d][i].y == y) taken = true;
+            if (taken) continue;
+            FloorItem *it = &g->items[d][placed++];
+            if (rm->kind == RK_STORE) {
+                int roll = rng_range(&r, 0, 99);
+                ItemKind k = roll < 20 ? IT_OIL : roll < 38 ? IT_DART : roll < 56 ? IT_POTION : roll < 70 ? IT_FLASH
+                           : roll < 82 ? IT_SALT : roll < 90 ? IT_WARMTH : IT_TORCH;
+                if (k == IT_TORCH && g->torches_made + 1 > d * TORCHES_PER_LEVEL + 2.5f) k = IT_OIL;   /* a little ahead of the pace at most */
+                if (k == IT_TORCH) g->torches_made++;
+                *it = (FloorItem){ true, k, k == IT_DART ? rng_range(&r, 3, 5) : 1, x, y, false, 0 };
+            } else if (rm->kind == RK_ARMOURY) {
+                static const ItemKind GEAR[] = { IT_DAGGER, IT_SPEAR, IT_AXE, IT_MACE, IT_SWORD, IT_CLOAK, IT_MAIL, IT_LEATHER };
+                int plus = 0;
+                for (int i = 0; i < 1 + d / 3; i++) if (rng_chance(&r, 45)) plus++;
+                *it = (FloorItem){ true, GEAR[rng_range(&r, 0, 7)], 1, x, y, false, plus };
+            } else {
+                *it = (FloorItem){ true, IT_EMBERS, 3 + d / 5 + rng_range(&r, 0, 2), x, y, false, 0 };
+            }
+            want--;
+        }
     }
 }
 
@@ -431,6 +490,8 @@ static int count_visible_mobs(Game *g)
     return n;
 }
 
+static void notice_rooms(Game *g);
+
 static void compute_view(Game *g)
 {
     Level *lv = game_level(g);
@@ -464,6 +525,7 @@ static void compute_view(Game *g)
         game_stop(g);
     }
     g->seen_mobs = n;
+    notice_rooms(g);
 }
 
 /* ------------------------------------------------------------- creation */
@@ -1159,6 +1221,8 @@ static void fire_harm(Game *g)
     }
 }
 
+static void spot_traps(Game *g);
+
 static void end_turn(Game *g)
 {
     g->turn++;
@@ -1196,6 +1260,7 @@ static void end_turn(Game *g)
         if (p->hp < game_max_hp(g) && g->state != GS_DEAD) p->hp++;
     }
     compute_view(g);
+    if (g->state == GS_PLAY) spot_traps(g);
 }
 
 /* ------------------------------------------------------------ commands */
@@ -1332,6 +1397,163 @@ static void arrive(Game *g)
     }
 }
 
+/* ----------------------------------------------------------------- traps */
+
+static void fall_to(Game *g, int fx, int fy);
+
+/* a monster goes down to the level below from (x, y), and lands hurt */
+static void mob_fall(Game *g, Mob *m, int x, int y)
+{
+    int d = g->depth + 1, bx = x, by = y;
+    push_fx(g, FX_FALL, x, y);
+    sfx_ex(g, SND_FALL, x, y, false, 0.3f, 0.6f);
+    m->alive = false;
+    if (!g->lv[d]) return;
+    nearest_floor(g->lv[d], &bx, &by);
+    Mob *ms = g->mobs[d];
+    for (int i = 0; i < MAX_MOBS; i++)
+        if (!ms[i].alive) {
+            Mob keep = *m;
+            mob_init(&ms[i], keep.kind, bx, by);
+            ms[i].lvl = keep.lvl;
+            ms[i].maxhp = keep.maxhp;
+            ms[i].hp = keep.hp - rng_range(&g->rng, 3, 6);
+            ms[i].alive = ms[i].hp > 0;
+            break;
+        }
+    g->lower_dirty = true;
+}
+
+/* you step on a trap */
+static void spring_trap(Game *g, int x, int y)
+{
+    Level *lv = game_level(g);
+    Mob *p = &g->player;
+    int k = lv->trap[y][x];
+    lv->f[y][x] |= F_TRAP;
+    game_stop(g);
+    char t[16];
+    switch (k) {
+    case TR_ALARM:
+        game_msg(g, C_BAD, "click! Somewhere in the walls a bell clangs, loud enough to wake the dead.");
+        sfx(g, SND_CLICK, x, y);
+        sfx_ex(g, SND_ALERT, 0, 0, true, 0.1f, 1.0f);
+        g->shake = 0.15f;
+        make_noise(g, x, y, 16);
+        break;
+    case TR_GUST:
+        push_fx(g, FX_STEAM, x, y);
+        sfx(g, SND_HISS, x, y);
+        if (g->torch_lit) {
+            g->torch_lit = false;
+            sfx(g, SND_SNUFF, x, y);
+            game_msg(g, C_BAD, "an icy gust roars up out of a grating and blows out your torch!");
+        } else {
+            game_msg(g, C_WARN, "an icy gust roars up out of a grating.");
+        }
+        if (g->warm_left <= 0 && g->chill < p->maxhp / 2) {
+            g->chill++;
+            g->warm_t = 0;
+            if (p->hp > game_max_hp(g)) p->hp = game_max_hp(g);
+            floater(g, x, y, 0x9ad8ff, "chill");
+            game_msg(g, C_BAD, "the cold gets into your bones (max HP -1 until a fire warms you).");
+        }
+        break;
+    case TR_PIT:
+        game_msg(g, C_BAD, "the floor tips away under you: a trapdoor!");
+        fall_to(g, x, y);
+        break;
+    case TR_SNARE:
+        g->snare = rng_range(&g->rng, 3, 4);
+        p->hp -= 1;
+        p->flash = 1;
+        floater(g, x, y, 0xff5a4a, "1");
+        sfx(g, SND_HIT, x, y);
+        snprintf(t, sizeof t, "%d", g->snare);
+        game_msg(g, C_BAD, "a wire noose snaps tight around your ankle! You'll have to tear yourself free.");
+        if (p->hp <= 0) {
+            game_msg(g, C_BAD, "the wire bites to the bone, and you have nothing left to fight it with.");
+            g->state = GS_DEAD;
+            g->end_t = g->time;
+            sfx_ex(g, SND_DIE, x, y, true, 0.25f, 1);
+        }
+        break;
+    }
+}
+
+/* a monster knocked onto a trap sets it off */
+static void mob_trap(Game *g, Mob *m, int x, int y)
+{
+    Level *lv = game_level(g);
+    bool seen = lv->f[y][x] & F_VIS;
+    const char *nm = MOB_INFO[m->kind].name;
+    if (seen) lv->f[y][x] |= F_TRAP;
+    switch (lv->trap[y][x]) {
+    case TR_ALARM:
+        if (seen) game_msg(g, C_WARN, "the %s lands on an alarm plate, and a bell clangs in the walls!", nm);
+        sfx(g, SND_CLICK, x, y);
+        make_noise(g, x, y, 16);
+        break;
+    case TR_GUST:
+        push_fx(g, FX_STEAM, x, y);
+        sfx(g, SND_HISS, x, y);
+        if (seen) game_msg(g, C_TEXT, "an icy gust roars up around the %s.", nm);
+        break;
+    case TR_PIT:
+        if (seen) game_msg(g, C_GOOD, "the %s drops through a trapdoor!", nm);
+        mob_fall(g, m, x, y);
+        break;
+    case TR_SNARE:
+        if (!shadeish(m->kind) && m->kind != MK_BAT) {
+            m->daze = 3;
+            if (seen) game_msg(g, C_GOOD, "the %s is caught fast in a snare!", nm);
+        }
+        break;
+    }
+}
+
+/* traps you can make out near you: easier in good light, and right at your feet */
+static void spot_traps(Game *g)
+{
+    Level *lv = game_level(g);
+    Mob *p = &g->player;
+    for (int y = p->y - 2; y <= p->y + 2; y++)
+        for (int x = p->x - 2; x <= p->x + 2; x++) {
+            if (!in_map(x, y) || !lv->trap[y][x] || (lv->f[y][x] & F_TRAP) || !(lv->f[y][x] & F_VIS)) continue;
+            if (x == p->x && y == p->y) continue;
+            /* a torch held high shows the floor's seams; a lantern's glow barely does */
+            float b = level_brightness(lv, x, y);
+            int pct = 5 + (int)(clampf01(b) * 15) + (g->torch_lit ? 20 : 0) + (cheb(x, y, p->x, p->y) <= 1 ? 10 : 0);
+            if (!rng_chance(&g->rng, pct)) continue;
+            lv->f[y][x] |= F_TRAP;
+            game_msg(g, C_WARN, "you spot %s %s in the floor.", lv->trap[y][x] == TR_ALARM ? "an" : "a", trap_name(lv->trap[y][x]));
+            sfx(g, SND_CLICK, x, y);
+            game_stop(g);
+        }
+}
+
+/* special rooms say what they are the first time you see into them */
+static void notice_rooms(Game *g)
+{
+    Level *lv = game_level(g);
+    for (int r = 0; r < lv->nrooms; r++) {
+        Room *rm = &lv->rooms[r];
+        if (rm->kind == RK_PLAIN || rm->noticed) continue;
+        bool seen = false;
+        for (int y = rm->y; y < rm->y + rm->h && !seen; y++)
+            for (int x = rm->x; x < rm->x + rm->w; x++)
+                if (lv->room[y][x] == r && (lv->f[y][x] & F_VIS)) { seen = true; break; }
+        if (!seen) continue;
+        rm->noticed = true;
+        if (rm->kind == RK_STORE)
+            game_msg(g, C_INFO, "an old storeroom, its shelves fallen in. Whoever kept it may have left traps for thieves.");
+        else if (rm->kind == RK_ARMOURY)
+            game_msg(g, C_INFO, "rusted blades and broken hafts litter the floor: an old armoury. Something has made it a lair.");
+        else if (rm->kind == RK_NEST)
+            game_msg(g, C_WARN, "bones lie strewn across the floor, and the cold has a smell to it: a shade's nest.");
+    }
+}
+
 /* the mace's knockback: a step back, a wall, deep water or a fall */
 static void knock_back(Game *g, Mob *m, int dx, int dy)
 {
@@ -1353,27 +1575,8 @@ static void knock_back(Game *g, Mob *m, int dx, int dy)
         return;
     }
     if (t == T_CHASM) {
-        /* over the edge: it lands, hurt, on the level below */
-        int d = g->depth + 1, bx = nx, by = ny;
         if (seen) game_msg(g, C_GOOD, "the blow knocks the %s over the edge of the chasm!", nm);
-        push_fx(g, FX_FALL, nx, ny);
-        sfx_ex(g, SND_FALL, nx, ny, false, 0.3f, 0.6f);
-        m->alive = false;
-        if (g->lv[d]) {
-            nearest_floor(g->lv[d], &bx, &by);
-            Mob *ms = g->mobs[d];
-            for (int i = 0; i < MAX_MOBS; i++)
-                if (!ms[i].alive) {
-                    Mob keep = *m;
-                    mob_init(&ms[i], keep.kind, bx, by);
-                    ms[i].lvl = keep.lvl;
-                    ms[i].maxhp = keep.maxhp;
-                    ms[i].hp = keep.hp - rng_range(&g->rng, 3, 6);
-                    ms[i].alive = ms[i].hp > 0;
-                    break;
-                }
-            g->lower_dirty = true;
-        }
+        mob_fall(g, m, nx, ny);
         return;
     }
     bool salt_wall = m->kind == MK_SHADE && in_map(nx, ny) && lv->salt[ny][nx];   /* it can't cross, even flung */
@@ -1403,6 +1606,7 @@ static void knock_back(Game *g, Mob *m, int dx, int dy)
     }
     mob_go(g, m, nx, ny);
     if (seen) game_msg(g, C_TEXT, t == T_DEEP ? "the %s is knocked into the deep water." : "the %s staggers back.", nm);
+    if (lv->trap[ny][nx]) mob_trap(g, m, nx, ny);        /* the one way a monster ever sets one off */
 }
 
 /* you attack the monster at m with whatever you wield */
@@ -1460,6 +1664,15 @@ bool game_move(Game *g, int dx, int dy)
     Mob *m = game_mob_at(g, nx, ny);
     if (m && diag_ok(lv, p->x, p->y, dx, dy)) {
         player_strike(g, m);
+        end_turn(g);
+        return true;
+    }
+    if (g->snare > 0) {
+        /* held by the ankle: every try at a step is a turn spent tearing at the wire */
+        game_stop(g);
+        if (--g->snare > 0) game_msg(g, C_WARN, "you tear at the snare around your ankle.");
+        else game_msg(g, C_GOOD, "you work your foot free of the snare.");
+        sfx(g, SND_CLICK, p->x, p->y);
         end_turn(g);
         return true;
     }
@@ -1528,6 +1741,15 @@ bool game_move(Game *g, int dx, int dy)
         return false;
     }
     g->fire_x = g->fire_y = -1;
+    if (lv->trap[ny][nx] && (lv->f[ny][nx] & F_TRAP) && (g->trap_x != nx || g->trap_y != ny)) {
+        g->trap_x = nx;
+        g->trap_y = ny;
+        game_stop(g);
+        game_msg(g, C_WARN, "there's %s %s there. Move again to step on it anyway.", lv->trap[ny][nx] == TR_ALARM ? "an" : "a",
+                 trap_name(lv->trap[ny][nx]));
+        return false;
+    }
+    g->trap_x = g->trap_y = -1;
     start_tween(p, nx, ny);
     if (lv->salt[ny][nx]) {
         lv->salt[ny][nx] = 0;
@@ -1568,6 +1790,11 @@ bool game_move(Game *g, int dx, int dy)
         }
     } else if (mail && rng_chance(&g->rng, 60)) {
         make_noise(g, nx, ny, 3);       /* the rings jingle */
+    }
+    if (lv->trap[ny][nx]) {
+        int d0 = g->depth;
+        spring_trap(g, nx, ny);
+        if (g->depth != d0 || g->state != GS_PLAY) return true;     /* fell through, or worse */
     }
     pickup(g);
     if (t == T_STAIRS_DOWN && g->autom != AUTO_STAIRS)
@@ -1617,10 +1844,17 @@ void game_jump_answer(Game *g, bool yes)
     if (g->state != GS_JUMP_PROMPT) return;
     g->state = GS_PLAY;
     if (!yes) return;
-    int dmg = 3 + rng_range(&g->rng, 0, 3) + g->depth / 3;
     game_msg(g, C_WARN, "you leap into the chasm and plunge into the darkness below!");
+    fall_to(g, g->jx, g->jy);
+}
+
+/* down through a chasm or a trapdoor at (fx, fy), to land hurt on the level below */
+static void fall_to(Game *g, int fx, int fy)
+{
+    int dmg = 3 + rng_range(&g->rng, 0, 3) + g->depth / 3;
+    g->snare = 0;
     sfx_ex(g, SND_FALL, 0, 0, true, 0, 1);
-    change_level(g, g->depth + 1, g->jx, g->jy);
+    change_level(g, g->depth + 1, fx, fy);
     Mob *p = &g->player;
     bool wet = tile_water(tile_at(game_level(g), p->x, p->y));
     sfx_ex(g, wet ? SND_SPLASH : SND_LAND, 0, 0, true, 0.75f, 1);
@@ -1702,7 +1936,8 @@ static int find_path(Game *g, int gx, int gy, int *out, int max)
             int X = x + DX8[d], Y = y + DY8[d];
             if (!in_map(X, Y) || par[Y][X] != -2) continue;
             if (!path_ok(g, X, Y, gx, gy) || !diag_ok(lv, x, y, DX8[d], DY8[d])) continue;
-            if ((lv->t[Y][X] == T_CHASM || lv->t[Y][X] == T_DEEP || lv->burn[Y][X]) && !(X == gx && Y == gy)) continue;
+            if ((lv->t[Y][X] == T_CHASM || lv->t[Y][X] == T_DEEP || lv->burn[Y][X] || (lv->trap[Y][X] && (lv->f[Y][X] & F_TRAP)))
+                && !(X == gx && Y == gy)) continue;
             par[Y][X] = (int16_t)d;
             q[t++] = Y * MAP_W + X;
         }
@@ -2139,6 +2374,12 @@ static void pickup(Game *g)
     FloorItem *it = game_item_at(g, p->x, p->y);
     if (!it) return;
     char nm[64];
+    if (it->kind == IT_EMBERS) {
+        it->alive = false;
+        sfx(g, SND_PICKUP, p->x, p->y);
+        ember(g, it->count, "you gather up a handful of cold embers");
+        return;
+    }
     if (!add_item(g, it->kind, it->count, it->plus)) {
         game_msg(g, C_DIM, "your pack is full; you leave %s.", game_item_name(it->kind, it->count, it->plus, nm, sizeof nm));
         return;
@@ -2288,7 +2529,9 @@ static void ignite_oil(Game *g, int depth, int x, int y)
 static void flash_mark(void *ctx, int x, int y, float d)
 {
     (void)d;
-    ((Level *)ctx)->f[y][x] |= F_SEEN;
+    Level *lv = ctx;
+    lv->f[y][x] |= F_SEEN;
+    if (lv->trap[y][x]) lv->f[y][x] |= F_TRAP;      /* in that glare, nothing in the floor stays hidden */
 }
 
 /* flash powder goes off at (x, y): everything that sees it reels; shades scorch */
@@ -2765,6 +3008,25 @@ bool game_debug_depth(Game *g, int depth)
     compute_view(g);
     arrive(g);
     return true;
+}
+
+bool game_debug_to_room(Game *g, int kind)
+{
+    Level *lv = game_level(g);
+    for (int r = 0; r < lv->nrooms; r++) {
+        Room *rm = &lv->rooms[r];
+        if (rm->kind != kind) continue;
+        for (int y = rm->y + rm->h - 1; y >= rm->y; y--)
+            for (int x = rm->x; x < rm->x + rm->w; x++) {
+                if (lv->room[y][x] != r || !tile_walkable((Tile)lv->t[y][x]) || !mob_free(g, x, y) || lv->trap[y][x]) continue;
+                place_player(g, x, y);
+                for (int j = 0; j < MAP_H; j++)
+                    for (int i = 0; i < MAP_W; i++) lv->f[j][i] |= F_SEEN | (lv->trap[j][i] ? F_TRAP : 0);
+                compute_view(g);
+                return true;
+            }
+    }
+    return false;
 }
 
 bool game_debug_kindle(Game *g, int times)

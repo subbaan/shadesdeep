@@ -1,0 +1,12 @@
+{
+  "assets": [
+    {
+      "asset_id": "98f4d5e2-3672-4e66-a363-3a03964377b2",
+      "sha12": "308174188578",
+      "label": "creatures sheet 1 (3x3): player, rat, goblin / bat, slinger, ogre / eel, skeleton, spider",
+      "file": "art/spritecook/creatures-1.png",
+      "sliced_by": "tools/slice_sprites.py",
+      "model": "gemini-nano-banana-2.1"
+    }
+  ]
+}

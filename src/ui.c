@@ -219,6 +219,7 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
         snprintf(buf, sizeof buf, "FLAME %d/3", g->kindle);
         need += 2 * pad + font_width(hf, buf);
     }
+    if (g->snare > 0) need += 2 * pad + font_width(hf, "SNARED");
     bool two_rows = cv->w - tw_compact - pad < need + pad;     /* too narrow: buttons go on a row of their own */
     int rows = two_rows ? 2 : 1;
     int y = cv->h - h * rows;
@@ -273,6 +274,11 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     if (game_final(g) && g->kindle > 0) {
         snprintf(buf, sizeof buf, "FLAME %d/3", g->kindle);
         x = font_draw(hf, cv, x, base, buf, g->kindle >= 3 ? 0xfff0b0 : 0xffd060, 255) + pad;
+        diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
+        x += pad;
+    }
+    if (g->snare > 0) {
+        x = font_draw(hf, cv, x, base, "SNARED", 0xff7a50, 255) + pad;
         diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
         x += pad;
     }
@@ -373,6 +379,11 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
             snprintf(desc, sizeof desc, "%s A warming draught burns in you: for %d more turns no shade's touch can chill you.",
                      MOB_INFO[MK_PLAYER].desc, g->warm_left);
         else snprintf(desc, sizeof desc, "%s", MOB_INFO[MK_PLAYER].desc);
+        if (g->snare > 0) {
+            size_t dn = strlen(desc);
+            snprintf(desc + dn, sizeof desc - dn, " A snare holds your ankle: each step you try is a turn spent tearing at "
+                     "it (%d more). You can still fight, throw and use things.", g->snare);
+        }
         if (lv->burn[y][x]) {
             size_t dn = strlen(desc);
             snprintf(desc + dn, sizeof desc - dn, " You are standing in burning oil!");
@@ -390,6 +401,12 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         snprintf(title, sizeof title, "Eyes in the dark");
         snprintf(desc, sizeof desc, "Two pale eyes watch you from beyond your light. Whatever owns them is darker than the dark.");
         snprintf(hint, sizeof hint, "Throw a torch to see what it is");
+    } else if (lv->trap[y][x] && (lv->f[y][x] & F_TRAP)) {
+        snprintf(title, sizeof title, "%s", trap_name(lv->trap[y][x]));
+        title[0] = (char)(title[0] - 32);
+        snprintf(desc, sizeof desc, "%s Monsters of the deep know where their traps lie and step lightly over "
+                 "them, but one knocked onto it will set it off.", trap_desc(lv->trap[y][x]));
+        snprintf(hint, sizeof hint, "Travel goes around it");
     } else if (lv->burn[y][x] && vis) {
         snprintf(title, sizeof title, "Burning oil");
         snprintf(desc, sizeof desc, "Oil burning on the %s, for a few turns more. It's a fixed fire: shades can't bear it, "
@@ -544,6 +561,7 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Gear", "anything you find you can use; each weapon and armour plays differently" },
         { "Forge", "walk into a forge brazier to spend embers on your gear or yourself" },
         { "Chasms", "step in to jump down a level (it hurts; water below breaks the fall)" },
+        { "Traps", "from depth 2, hidden in the floor; good light helps you spot them, and travel avoids known ones" },
         { "The goal", "reach depth 26 and walk into its cold hearth with a lit torch, three times" },
         { "Map", "m  the whole level; click a place on it to travel there" },
         { "Water", "shallows splash; deep water puts out a torch; goblins won't swim, eels lurk" },

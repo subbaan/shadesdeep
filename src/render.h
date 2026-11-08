@@ -10,6 +10,12 @@ typedef struct Renderer Renderer;
 
 Renderer *render_new(void);
 void render_free(Renderer *r);
+/* drawn creature sprites from ASSETS/sprites, over the procedural ones; returns how many */
+int render_load_sprites(Renderer *r, const char *assets);
+/* After the world canvas has been zoomed onto the screen (cv_upscale, no
+ * offset): draw the creatures that have full-resolution sprites again, sharp. */
+void render_hires(Renderer *r, Canvas *scr, const Canvas *world, int zoom);
+void render_set_zoom(Renderer *r, int zoom);    /* before render_world: the zoom it will be shown at */
 
 /* Move the camera toward the player. world_w/h is the world canvas size. */
 void render_camera(Renderer *r, const Game *g, int world_w, int world_h, float dt, bool snap);

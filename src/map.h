@@ -57,7 +57,16 @@ enum {
     F_VIS     = 2,      /* in view this turn */
     F_CORR    = 4,      /* corridor */
     F_LOS     = 8,      /* in line of sight this turn, lit or not (eyes in the dark) */
+    F_TRAP    = 16,     /* the player knows of the trap here */
 };
+
+/* traps, hidden in the floor (Level.trap); saved as numbers: add new kinds at the end */
+typedef enum { TR_NONE, TR_ALARM, TR_GUST, TR_PIT, TR_SNARE, TR_COUNT } TrapKind;
+const char *trap_name(int k);
+const char *trap_desc(int k);
+
+/* rooms with a purpose (Room.kind) */
+typedef enum { RK_PLAIN, RK_STORE, RK_ARMOURY, RK_NEST } RoomKind;
 
 typedef enum { L_SCONCE, L_BRAZIER, L_CRYSTAL, L_MOSS, L_FLOORTORCH, L_PLAYER, L_OILFIRE, L_HEART } LightKind;
 
@@ -77,6 +86,8 @@ typedef struct {
     int x, y, w, h;     /* interior */
     bool dark;          /* started unlit */
     bool cave;
+    uint8_t kind;       /* RoomKind */
+    bool noticed;       /* the player has seen into it (special rooms announce themselves once) */
 } Room;
 
 typedef struct {
@@ -88,6 +99,7 @@ typedef struct {
     uint8_t scorch[MAP_H][MAP_W];   /* 1: a torch burned out here (soot and a charred stub); 2: oil burned here (soot) */
     uint8_t burn[MAP_H][MAP_W];     /* burning oil: turns left */
     uint8_t salt[MAP_H][MAP_W];     /* a line of salt that shades can't cross */
+    uint8_t trap[MAP_H][MAP_W];     /* TrapKind hidden here (F_TRAP once the player knows) */
     Room rooms[MAX_ROOMS];
     int nrooms;
     int hall;           /* the Heartflame's hall (room index), or -1 */
