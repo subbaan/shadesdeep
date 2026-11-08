@@ -47,17 +47,31 @@ typedef struct {
     float idle;         /* phase for idle bob */
     bool known;         /* the player has seen it before */
     int stun;           /* turns a shade is held by a sudden blaze */
+    int lvl;            /* depth it was born on: deeper monsters hit harder */
 } Mob;
 
 /* ---------------------------------------------------------------- items */
 
-typedef enum { IT_TORCH, IT_DART, IT_POTION, IT_COUNT } ItemKind;
+typedef enum {
+    IT_TORCH, IT_DART, IT_POTION,
+    IT_SWORD, IT_DAGGER, IT_SPEAR, IT_AXE, IT_MACE,         /* weapons */
+    IT_LEATHER, IT_CLOAK, IT_MAIL,                          /* armour */
+    IT_COUNT
+} ItemKind;
 
+typedef enum { GEAR_NONE, GEAR_WEAPON, GEAR_ARMOUR } GearKind;
+
+/* No strength or skill requirements: anything you find you can use, and each
+ * piece plays differently rather than simply being better. Tempering at a
+ * forge (with embers) makes the piece you like stronger. */
 typedef struct {
     const char *name, *plural;
     const char *desc;
-    int range;          /* throwing range in tiles */
-    bool usable;        /* has an "apply" action */
+    int range;          /* throwing range in tiles (0: not for throwing) */
+    bool usable;        /* has an "apply" action (light, drink, wield, wear) */
+    GearKind gear;
+    int acc, dmin, dmax;    /* weapons */
+    int def;                /* armour */
 } ItemInfo;
 
 extern const ItemInfo ITEM_INFO[IT_COUNT];
@@ -67,7 +81,7 @@ extern const ItemInfo ITEM_INFO[IT_COUNT];
 #define TORCH_FUEL 200  /* turns a carried torch burns */
 #define FLOOR_TORCH_FUEL 120
 
-typedef struct { ItemKind kind; int count; } Slot;
+typedef struct { ItemKind kind; int count; int plus; } Slot;    /* plus: tempering, for gear */
 
 typedef struct {
     bool alive;
@@ -75,6 +89,7 @@ typedef struct {
     int count;
     int x, y;
     bool dropped;       /* put down on purpose: explore leaves it alone */
+    int plus;
 } FloorItem;
 
 typedef struct {
@@ -172,6 +187,11 @@ typedef struct {
     int warm_t;                         /* turns spent warming */
     int torches_made;                   /* torches put on the floor so far (the supply is paced) */
     bool gnaw_told;                     /* explained that shades eat your torch's fuel */
+    Slot weapon, armour;                /* what you wield and wear (count 1) */
+    int embers;                         /* the forge's currency: from lit sconces and burnt shades */
+    int heart;                          /* times you've fed the forge for max HP */
+    int lantern;                        /* times you've trimmed your lantern */
+    bool forge_req;                     /* bumped a forge: the front end opens its menu */
     FloorItem items[MAX_DEPTH + 2][MAX_ITEMS];
     Projectile proj;
     Fx fx[MAX_FX];
@@ -212,13 +232,26 @@ int  game_path_preview(Game *g, int x, int y, int *out, int max);
 bool game_debug_to_chasm(Game *g);
 bool game_debug_to_water(Game *g, int wade);   /* developer: 0 shore, 1 shallows, 2 deep */
 bool game_debug_spawn(Game *g, MobKind k, int x, int y);
+bool game_debug_to_forge(Game *g);     /* developer: stand by the forge */
 bool game_debug_to_spot(Game *g, int kind);   /* developer: 0 corridor, 1 side door, 2 south wall,
                                                  * 3 by a cold sconce with a shade near, 4 and light it */   /* developer: put a monster there */
+
+/* the forge: feed it embers to temper gear or strengthen yourself */
+typedef enum { FORGE_WEAPON, FORGE_ARMOUR, FORGE_HEART, FORGE_LANTERN, FORGE_COUNT } ForgeOffer;
+int  game_forge_cost(const Game *g, ForgeOffer o);      /* embers, or -1 if it can't be done */
+const char *game_forge_label(const Game *g, ForgeOffer o, char *buf, size_t n);
+const char *game_forge_desc(ForgeOffer o);
+bool game_forge_buy(Game *g, ForgeOffer o);
+bool game_by_forge(Game *g);                            /* standing next to a forge brazier */
+
+/* combat numbers, for the interface */
+void game_weapon_stats(const Game *g, const Slot *w, int *acc, int *dmin, int *dmax);
+int  game_armour_def(const Slot *a);
 
 /* items */
 FloorItem *game_item_at(Game *g, int x, int y);
 FloorItem *game_items(Game *g, int depth);
-const char *game_item_name(ItemKind k, int count, char *buf, size_t n);   /* "3 darts", "a torch" */
+const char *game_item_name(ItemKind k, int count, int plus, char *buf, size_t n);   /* "3 darts", "a +1 spear" */
 /* The flight of a thrown item toward (tx, ty): tiles until it lands. */
 int  game_throw_path(Game *g, ItemKind k, int tx, int ty, int *out, int max, bool *hits);
 bool game_throw(Game *g, int slot, int tx, int ty);

@@ -3,3 +3,4 @@ build/
 *.o
 # design references stay local
 concepts/
+/lume-next

@@ -16,7 +16,7 @@ const char *tile_name(Tile t)
 {
     static const char *n[T_COUNT] = {
         "solid rock", "stone wall", "stone floor", "wooden door", "open door",
-        "chasm", "stairs down", "stairs up", "rubble", "shallow water", "deep water",
+        "chasm", "stairs down", "stairs up", "rubble", "shallow water", "deep water", "forge brazier",
     };
     return t < T_COUNT ? n[t] : "?";
 }
@@ -35,6 +35,8 @@ const char *tile_desc(Tile t)
     case T_SHALLOW:     return "Cold, ankle-deep water. Wading through it splashes, and splashing carries.";
     case T_DEEP:        return "Dark water too deep to wade. Swimming will put out a torch, and anything dropped here sinks. "
                                "Goblins won't follow you in.";
+    case T_BRAZIER:     return "An old forge's brazier, still burning on something that never runs out. Feed it embers "
+                               "to temper your weapon or armour, or to strengthen yourself. No shade comes near it.";
     default:            return "";
     }
 }
@@ -162,7 +164,7 @@ int level_add_light(Level *lv, LightKind k, int x, int y, int fx, int fy, bool l
     l->fuel = -1;
     switch (k) {
     case L_SCONCE:  l->r = 1.30f; l->g = 0.78f; l->b = 0.40f; l->radius = 8.0f; break;
-    case L_BRAZIER: l->r = 1.35f; l->g = 0.80f; l->b = 0.38f; l->radius = 8.5f; break;
+    case L_BRAZIER: l->r = 0.95f; l->g = 0.58f; l->b = 0.28f; l->radius = 8.5f; break;
     case L_CRYSTAL: l->r = 0.32f; l->g = 0.78f; l->b = 1.50f; l->radius = 7.5f; break;
     case L_MOSS:    l->r = 0.30f; l->g = 0.95f; l->b = 0.80f; l->radius = 4.5f; break;
     case L_FLOORTORCH: l->r = 1.30f; l->g = 0.74f; l->b = 0.36f; l->radius = 6.5f; break;
@@ -550,6 +552,27 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
             level_add_light(lv, L_SCONCE, x, y + 1, x, y, !rm->dark, r);
             placed++;
         }
+    }
+
+    /* a forge brazier, in a lit room away from the stairs up */
+    for (int tries = 0; tries < 200; tries++) {
+        int r = rng_range(&rng, 0, lv->nrooms - 1);
+        Room *rm = &lv->rooms[r];
+        if (r == start || rm->cave || rm->w < 5 || rm->h < 5 || (rm->dark && tries < 150)) continue;
+        int x = rm->x + rm->w / 2, y = rm->y + rm->h / 2;
+        bool ok = true;
+        for (int j = -1; j <= 1 && ok; j++)
+            for (int i = -1; i <= 1; i++)
+                if (tile_at(lv, x + i, y + j) != T_FLOOR) { ok = false; break; }
+        if (!ok) continue;
+        lv->t[y][x] = T_BRAZIER;
+        level_add_light(lv, L_BRAZIER, x, y, x, y, true, r);
+        if (rm->dark) {
+            rm->dark = false;
+            for (int i = 0; i < lv->nlights; i++)
+                if (lv->lights[i].room == r) lv->lights[i].lit = true;
+        }
+        break;
     }
 
     /* scattered rubble */

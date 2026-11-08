@@ -5,7 +5,7 @@ art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.6.0 (shades and the torch clock) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.7.0 (gear, embers and the forge) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 ## Build and run
 
@@ -64,6 +64,29 @@ sound; if no audio device opens, the game runs silent.
   chills: it takes max HP (up to half) until you warm up by a lit sconce or a
   torch on the floor; a torch in hand warms you only slowly. Resting by a fire
   also heals faster.
+- **Gear** has no strength or skill requirements: anything you find, you can
+  use, and each piece plays differently rather than simply being better.
+  Open Items, pick a weapon or armour and press Wield / Wear (the old piece
+  goes back in your pack). The item card shows its numbers next to yours.
+  - *Short sword* (you start with it): steady, accurate, no tricks.
+  - *Dagger*: triple damage on anything that hasn't noticed you.
+  - *Spear*: every thrust also hits whatever stands behind your target.
+  - *Axe*: hits every foe around you, but is harder to aim.
+  - *Mace*: knocks the foe back a step: into a wall for extra harm, into
+    deep water, or over the edge of a chasm.
+  - *Leather jerkin* (you start in it): some protection, no drawbacks.
+  - *Shadow cloak*: little protection, but in the dark things must be close
+    to notice you, and shades sense your warmth from half as far.
+  - *Mail coat*: strong protection, but it jingles (waking sleepers nearby)
+    and drags you under in deep water.
+- **Embers and the forge:** lighting a cold sconce gives you an ember, and so
+  does every shade that burns away. Each level has a forge brazier: walk into
+  it to spend embers on tempering your weapon or armour (+1 each time: more
+  accuracy and damage, or more armour), on +3 max HP, or on trimming your
+  lantern so its own dim glow shows you more without giving you away.
+  Tempering stays with the piece if you swap it out, and a hard fall down a
+  chasm can blunt or buckle tempered gear. Deeper monsters hit a little
+  harder, and gear found deeper is sometimes already tempered.
 - **Water:** wading through the shallows splashes, and the noise carries.
   Deep water must be swum: it puts out (and ruins) a lit torch, so you are
   asked twice before swimming with one, and anything dropped in it sinks.
@@ -93,6 +116,9 @@ shallows, or swimming. `LUME_DUMP_SPOT=0..4` stands in an east-west corridor
 (with a rat and darts beside you), beside a door in a side wall, just north
 of a room's south wall, or in front of a cold sconce with a shade two steps
 away (4 also lights the sconce). It applies after `LUME_DUMP_JUMP`. `LUME_DUMP_MAP=1` opens the map and `LUME_DUMP_HELP=1` the help.
+`LUME_DUMP_FORGE=N` stands by the forge with N embers and opens it (`N,0`
+leaves it shut), and `LUME_DUMP_GEAR="spear,1;mail,0"` puts gear in the pack (`LUME_DUMP_SLOT=N`
+picks the item `LUME_DUMP_MENU=item` shows).
 
 The sounds are synthesized by `tools/make_sounds.py` (Python 3 with numpy and
 scipy) into `assets/sounds` (files already there are kept, so sounds you swapped in survive; `--only

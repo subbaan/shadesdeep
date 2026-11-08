@@ -638,6 +638,8 @@ static void draw_reflections(Renderer *r, Canvas *cv, const View *v)
             reflect_one(cv, v, fx, l->fy * TILE + TILE - 23.0f, (l->fy + 1) * TILE + 2.0f, 0xffa850, 0.95f * f, 2.4f);
         else if (l->kind == L_FLOORTORCH)
             reflect_one(cv, v, fx, l->fy * TILE + 10.0f, l->fy * TILE + 24.0f, 0xffa850, 0.8f * f, 2.2f);
+        else if (l->kind == L_BRAZIER)
+            reflect_one(cv, v, fx, l->fy * TILE + TILE - 23.0f, (l->fy + 1) * TILE + 2.0f, 0xffa850, 1.0f * f, 3.0f);
         else if (l->kind == L_CRYSTAL)
             reflect_one(cv, v, fx, l->fy * TILE + 14.0f, (l->fy + 1) * TILE + 2.0f, 0x58a8ff, 0.55f * f, 3.0f);
     }
@@ -850,6 +852,23 @@ static void draw_fixture(Renderer *r, Canvas *cv, const View *v, const Light *l)
                 if (lg < 0.40f) lg = 0.40f;
                 if (lb < 0.38f) lb = 0.38f;
                 uint32_t lit = lightc(a & 0xffffff, lr, lg, lb);
+                cv->px[(size_t)y * cv->w + x] = v->fog ? fogmix(lit, memtone(a), vis, seen) : lit;
+            }
+    } else if (l->kind == L_BRAZIER) {
+        const Image *im = &r->t.brazier, *gl = &r->t.brazier_glow;
+        for (int j = 0; j < im->h; j++)
+            for (int i = 0; i < im->w; i++) {
+                uint32_t a = im->px[j * im->w + i];
+                if (!CA(a)) continue;
+                int x = sx + 2 + i, y = sy + TILE - im->h - 2 + j;
+                if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
+                uint32_t gc = gl->px[j * gl->w + i];
+                /* the iron takes the room's light, but no more than full: it must stay dark against the coals */
+                float lr = c.r < 1.1f ? c.r : 1.1f, lg = c.g < 0.9f ? c.g : 0.9f, lb = c.b < 0.75f ? c.b : 0.75f;
+                if (lr < 0.35f) lr = 0.35f;
+                if (lg < 0.3f) lg = 0.3f;
+                if (lb < 0.28f) lb = 0.28f;
+                uint32_t lit = CA(gc) ? (gc & 0xffffff) : lightc(a & 0xffffff, lr, lg, lb);
                 cv->px[(size_t)y * cv->w + x] = v->fog ? fogmix(lit, memtone(a), vis, seen) : lit;
             }
     } else if (l->kind == L_FLOORTORCH) {
@@ -1137,6 +1156,22 @@ static void draw_effects(Renderer *r, Canvas *cv, const View *v, float dt)
                     r->ember_acc[i] -= 1;
                     spawn(r, l->fx * TILE + 23.0f, l->fy * TILE + 12.0f, (rng_f(&r->rng) - 0.5f) * 12,
                           -16 - rng_f(&r->rng) * 20, 0.6f + rng_f(&r->rng) * 0.8f, rng_chance(&r->rng, 50) ? 0xffa040 : 0xffd080, 0.9f);
+                }
+            }
+        } else if (l->kind == L_BRAZIER) {
+            float by = sy + TILE - 2 - 26 + 5.0f;       /* top of the coals */
+            cv_glow(cv, sx + 16, (int)by - 4, 48, 0xff9a40, 0.12f * f * vis);
+            cv_glow(cv, sx + 16, (int)by - 4, 16, 0xffc070, 0.18f * f * vis);
+            flame(cv, sx + 11.0f, by + 1, 0.8f, v->time, l->phase, vis);
+            flame(cv, sx + 16.5f, by, 1.15f, v->time, l->phase + 1.7f, vis);
+            flame(cv, sx + 21.0f, by + 1, 0.75f, v->time, l->phase + 3.1f, vis);
+            if (v->fog && dt > 0) {
+                r->ember_acc[i] += dt * 3.5f;
+                while (r->ember_acc[i] >= 1) {
+                    r->ember_acc[i] -= 1;
+                    spawn(r, l->fx * TILE + 16.0f + (rng_f(&r->rng) - 0.5f) * 16, l->fy * TILE + TILE - 24.0f,
+                          (rng_f(&r->rng) - 0.5f) * 12, -20 - rng_f(&r->rng) * 26, 0.9f + rng_f(&r->rng) * 1.0f,
+                          rng_chance(&r->rng, 50) ? 0xffa040 : 0xffd080, 0.9f);
                 }
             }
         } else if (l->kind == L_MOSS) {

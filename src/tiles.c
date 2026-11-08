@@ -307,6 +307,50 @@ static void build_sconce(Image *im)
         }
 }
 
+/* An iron forge brazier: a wide bowl of coals on three splayed legs. */
+static void build_brazier(Image *im, Image *glow)
+{
+    const int W = 28, H = 26;
+    image_alloc(im, W, H);
+    image_alloc(glow, W, H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            uint32_t c = 0, gc = 0;
+            float dx = x - 13.5f;
+            /* legs: two splayed outer ones and a short one in front */
+            float lx = 13.5f + (y - 14) * 0.55f, rx = 13.5f - (y - 14) * 0.55f;
+            if (y >= 14 && y < H - 1 && (fabsf(dx - (lx - 13.5f + (y - 14) * 0.25f)) < 1.1f ||
+                                         fabsf(dx + (lx - 13.5f + (y - 14) * 0.25f)) < 1.1f))
+                c = (x < 14) ? 0x5a5450 : 0x2e2a28;
+            (void)rx;
+            if (y >= 15 && y < 22 && fabsf(dx) < 1.2f) c = 0x4a4440;
+            if (y == H - 1 && (fabsf(dx) > 10 && fabsf(dx) < 13)) c = 0x1e1a18;       /* feet */
+            /* the bowl: an ellipse, dark iron, rim lit from the left */
+            float ex = dx / 12.5f, ey = (y - 9.5f) / 5.5f;
+            float e = ex * ex + ey * ey;
+            if (e <= 1.0f && y >= 7) {
+                int sh = (int)(-dx * 2.2f) - (y - 9) * 3;
+                c = jitter(0x4a4440, sh + (int)((fbm(x * 0.6f, y * 0.6f, 41) - 0.5f) * 20));
+                if (y >= 14) c = jitter(c, -18);
+                if (fabsf(dx) > 11.0f) c = jitter(c, -20);
+            }
+            /* the rim and the coals heaped inside it */
+            if (y >= 4 && y <= 8) {
+                float cx = dx / 12.0f, cy = (y - 7.0f) / 2.6f;
+                float ce = cx * cx + cy * cy;
+                if (ce <= 1.0f) {
+                    float n = fbm(x * 0.7f, y * 1.1f, 43);
+                    uint32_t coal = n > 0.62f ? 0xffd070 : n > 0.48f ? 0xff7a28 : n > 0.36f ? 0xb8381c : 0x3a1a12;
+                    c = coal;
+                    if (n > 0.36f) gc = coal;
+                }
+                if (ce > 0.78f && ce <= 1.12f && y >= 6) c = dx < 0 ? 0x9a948c : 0x5a5450;     /* rim */
+            }
+            if (c) put(im, x, y, A(c));
+            if (gc) put(glow, x, y, A(gc));
+        }
+}
+
 static void build_crystal(Image *im)
 {
     image_alloc(im, 24, 26);
@@ -517,6 +561,182 @@ static const Pal I_POTION_PAL[] = {
     { 'R', 0xff7a80, 1 }, { 'd', 0x801820, 1 },
 };
 
+static const char *const I_SWORD[16] = {
+    "................",
+    "..............k.",
+    ".............kmk",
+    "............kmMk",
+    "...........kmMk.",
+    "..........kmMk..",
+    ".........kmMk...",
+    "........kmMk....",
+    "...kk..kmMk.....",
+    "...kgkkmMk......",
+    "....kgmMk.......",
+    ".....kgk........",
+    "....kwkgk.......",
+    "...kwk.kgk......",
+    "..kpk...kk......",
+    "...k............",
+};
+static const Pal I_SWORD_PAL[] = {
+    { 'k', 0x16110e, 0 }, { 'm', 0xd8dce4, 0 }, { 'M', 0x8a909a, 0 }, { 'g', 0xb08a3a, 0 }, { 'w', 0x5a3a20, 0 }, { 'p', 0xc8a050, 0 },
+};
+
+static const char *const I_DAGGER[16] = {
+    "................",
+    "................",
+    "................",
+    "................",
+    "...........kk...",
+    "..........kmk...",
+    ".........kmMk...",
+    "........kmMk....",
+    ".......kmMk.....",
+    "....kk.mMk......",
+    "....kgkMk.......",
+    ".....kgk........",
+    "....kwkgk.......",
+    "...kwk.kk.......",
+    "...kk...........",
+    "................",
+};
+static const Pal I_DAGGER_PAL[] = {
+    { 'k', 0x16110e, 0 }, { 'm', 0xd8dce4, 0 }, { 'M', 0x8a909a, 0 }, { 'g', 0x8a8a90, 0 }, { 'w', 0x3a2a1c, 0 },
+};
+
+static const char *const I_SPEAR[16] = {
+    "............kk..",
+    "...........kmmk.",
+    "...........mMmk.",
+    "..........kmMk..",
+    ".........kkkk...",
+    "........kwk.....",
+    ".......kwk......",
+    "......kwk.......",
+    ".....kwk........",
+    "....kwk.........",
+    "...kwk..........",
+    "..kwk...........",
+    ".kwk............",
+    ".kk.............",
+    "................",
+    "................",
+};
+static const Pal I_SPEAR_PAL[] = {
+    { 'k', 0x16110e, 0 }, { 'm', 0xd8dce4, 0 }, { 'M', 0x8a909a, 0 }, { 'w', 0x8a6034, 0 },
+};
+
+static const char *const I_AXE[16] = {
+    "................",
+    "........kkk.....",
+    ".......kmmMk....",
+    "......kmmMMMk...",
+    "......kmMkkMMk..",
+    ".......kkwkkMk..",
+    "........kwk.kk..",
+    ".......kwk......",
+    "......kwk.......",
+    ".....kwk........",
+    "....kwk.........",
+    "...kwk..........",
+    "..kwk...........",
+    "..kk............",
+    "................",
+    "................",
+};
+static const Pal I_AXE_PAL[] = {
+    { 'k', 0x16110e, 0 }, { 'm', 0xd0d4dc, 0 }, { 'M', 0x7a808a, 0 }, { 'w', 0x7a5430, 0 },
+};
+
+static const char *const I_MACE[16] = {
+    "................",
+    "..........k.k...",
+    ".........kMkMk..",
+    "........kMmmMMk.",
+    "........kmMMMMk.",
+    ".......kkMMMMk..",
+    "......kwkkMkk...",
+    ".....kwk..k.....",
+    "....kwk.........",
+    "...kwk..........",
+    "..kwk...........",
+    ".kgk............",
+    ".kk.............",
+    "................",
+    "................",
+    "................",
+};
+static const Pal I_MACE_PAL[] = {
+    { 'k', 0x16110e, 0 }, { 'm', 0xb0b4bc, 0 }, { 'M', 0x5a5e66, 0 }, { 'w', 0x5a3a20, 0 }, { 'g', 0x8a8a90, 0 },
+};
+
+static const char *const I_LEATHER[16] = {
+    "................",
+    "................",
+    "....kkk..kkk....",
+    "...klLkkkkLlk...",
+    "..klLLlllllLLk..",
+    "..klLLlllllLLk..",
+    "..kkkLlllllLkk..",
+    "....kLlbbblLk...",
+    "....kLlllllLk...",
+    "....kLlbbblLk...",
+    "....kLlllllLk...",
+    "....kLLLLLLLk...",
+    ".....kkkkkkk....",
+    "................",
+    "................",
+    "................",
+};
+static const Pal I_LEATHER_PAL[] = {
+    { 'k', 0x16110e, 0 }, { 'l', 0x9a6a3e, 0 }, { 'L', 0x6a4426, 0 }, { 'b', 0xc8a050, 0 },
+};
+
+static const char *const I_CLOAK[16] = {
+    "................",
+    "......kkkk......",
+    ".....kcggck.....",
+    "....kccggcck....",
+    "....kcCkkCck....",
+    "...kcCk..kCck...",
+    "...kcCk..kCck...",
+    "..kcCck..kcCck..",
+    "..kcCck..kcCck..",
+    ".kcCCck..kcCCck.",
+    ".kcCCck..kcCCck.",
+    ".kcCCcckkccCCck.",
+    "kcCCCcccccccCCck",
+    "kkkkkkkkkkkkkkkk",
+    "................",
+    "................",
+};
+static const Pal I_CLOAK_PAL[] = {
+    { 'k', 0x0e0c12, 0 }, { 'c', 0x3a3448, 0 }, { 'C', 0x262232, 0 }, { 'g', 0xa08a50, 0 },
+};
+
+static const char *const I_MAIL[16] = {
+    "................",
+    "................",
+    "....kkk..kkk....",
+    "...kmMkkkkMmk...",
+    "..kmMmMmMmMmMk..",
+    "..kMmMmMmMmMmk..",
+    "..kkkmMmMmMkkk..",
+    "....kMmMmMmk....",
+    "....kmMmMmMk....",
+    "....kMmMmMmk....",
+    "....kmMmMmMk....",
+    "....kMmMmMmk....",
+    "....kmMmMmMk....",
+    ".....kkkkkk.....",
+    "................",
+    "................",
+};
+static const Pal I_MAIL_PAL[] = {
+    { 'k', 0x16110e, 0 }, { 'm', 0xb8bcc4, 0 }, { 'M', 0x6a6e78, 0 },
+};
+
 void tiles_build(Tiles *t)
 {
     memset(t, 0, sizeof *t);
@@ -534,6 +754,7 @@ void tiles_build(Tiles *t)
     build_door_open(&t->door_open, false);
     build_door_open(&t->door_open_side, true);
     build_sconce(&t->sconce);
+    build_brazier(&t->brazier, &t->brazier_glow);
     build_crystal(&t->crystal);
     for (int i = 0; i < 3; i++) build_rubble(&t->rubble[i], i);
     build_sprite(&t->mob[MK_PLAYER], &t->mob_glow[MK_PLAYER], HERO, HERO_PAL, sizeof HERO_PAL / sizeof *HERO_PAL);
@@ -544,6 +765,16 @@ void tiles_build(Tiles *t)
     build_sprite(&t->item[IT_TORCH], &t->item_glow[IT_TORCH], I_TORCH, I_TORCH_PAL, sizeof I_TORCH_PAL / sizeof *I_TORCH_PAL);
     build_sprite(&t->item[IT_DART], &t->item_glow[IT_DART], I_DART, I_DART_PAL, sizeof I_DART_PAL / sizeof *I_DART_PAL);
     build_sprite(&t->item[IT_POTION], &t->item_glow[IT_POTION], I_POTION, I_POTION_PAL, sizeof I_POTION_PAL / sizeof *I_POTION_PAL);
+#define GEAR_SPRITE(K, A) build_sprite(&t->item[K], &t->item_glow[K], A, A##_PAL, sizeof A##_PAL / sizeof *A##_PAL)
+    GEAR_SPRITE(IT_SWORD, I_SWORD);
+    GEAR_SPRITE(IT_DAGGER, I_DAGGER);
+    GEAR_SPRITE(IT_SPEAR, I_SPEAR);
+    GEAR_SPRITE(IT_AXE, I_AXE);
+    GEAR_SPRITE(IT_MACE, I_MACE);
+    GEAR_SPRITE(IT_LEATHER, I_LEATHER);
+    GEAR_SPRITE(IT_CLOAK, I_CLOAK);
+    GEAR_SPRITE(IT_MAIL, I_MAIL);
+#undef GEAR_SPRITE
 }
 
 void tiles_free(Tiles *t)

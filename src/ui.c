@@ -219,6 +219,12 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
         diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
         x += pad;
     }
+    if (g->embers > 0 || g->heart || g->lantern || g->weapon.plus || g->armour.plus) {
+        snprintf(buf, sizeof buf, "EMBERS %d", g->embers);
+        x = font_draw(hf, cv, x, base, buf, 0xff9a48, 255) + pad;
+        diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
+        x += pad;
+    }
     int turn_x = x;
     snprintf(buf, sizeof buf, "TURN %d", g->turn);
     x = font_width(hf, buf) + x + pad;
@@ -301,6 +307,8 @@ static void sidebar(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
     }
 }
 
+static void gear_text(Game *g, const Slot *sl, const char *desc, char *out, size_t n);
+
 static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
 {
     if (f->hover_x < 0 || (!f->targeting && (f->mx < 0 || !f->tip))) return;
@@ -331,6 +339,10 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         snprintf(title, sizeof title, "Eyes in the dark");
         snprintf(desc, sizeof desc, "Two pale eyes watch you from beyond your light. Whatever owns them is darker than the dark.");
         snprintf(hint, sizeof hint, "Throw a torch to see what it is");
+    } else if (t == T_BRAZIER) {
+        snprintf(title, sizeof title, "Forge brazier");
+        snprintf(desc, sizeof desc, "%s You have %d ember%s.", tile_desc(t), g->embers, g->embers == 1 ? "" : "s");
+        snprintf(hint, sizeof hint, "Click to use the forge");
     } else if (l && l->kind == L_SCONCE) {
         snprintf(title, sizeof title, l->lit ? "Burning sconce" : "Cold sconce");
         snprintf(desc, sizeof desc, l->lit ? "A torch in an iron bracket lights the room around it. You can be seen in its light, "
@@ -347,10 +359,11 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
     } else if (game_item_at(g, x, y)) {
         FloorItem *it = game_item_at(g, x, y);
         char nm[64];
-        game_item_name(it->kind, it->count, nm, sizeof nm);
+        game_item_name(it->kind, it->count, it->plus, nm, sizeof nm);
         snprintf(title, sizeof title, "%s", nm);
         if (title[0] >= 'a' && title[0] <= 'z') title[0] = (char)(title[0] - 32);
-        snprintf(desc, sizeof desc, "%s", ITEM_INFO[it->kind].desc);
+        Slot sl = { it->kind, it->count, it->plus };
+        gear_text(g, &sl, ITEM_INFO[it->kind].desc, desc, sizeof desc);
         snprintf(hint, sizeof hint, "Click to pick it up");
     } else if (l && l->kind == L_MOSS) {
         snprintf(title, sizeof title, "Glowmoss");
@@ -437,19 +450,19 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Explore", "x  (stops when something comes into view)" },
         { "Rest", "z or . a turn,  Z until healed" },
         { "Stairs", ">  travel to and descend,  <  climb" },
-        { "Light a sconce", "walk into it, or click it" },
-        { "Items", "i  your pack (click an item for its actions)" },
+        { "Items", "i  your pack: pick an item to use, wield, throw or drop it  (a use, d drop)" },
         { "Throw", "t  then aim with the mouse or keys, Tab to cycle targets" },
-        { "Use", "a  light a torch, drink a potion;  d  drop" },
         { "Torch", "T  light or snuff;  walk onto a burning torch to take it up" },
+        { "Sconces", "walk into a cold one (or click it) to light it and take an ember" },
         { "Shades", "your torch keeps them back; a sconce lit around one, or a thrown torch, burns it" },
         { "Chill", "a shade's touch lowers max HP until you warm up by a fire" },
+        { "Gear", "anything you find you can use; each weapon and armour plays differently" },
+        { "Forge", "walk into a forge brazier to spend embers on your gear or yourself" },
         { "Chasms", "step in to jump down a level (it hurts; water below breaks the fall)" },
         { "Map", "m  the whole level; click a place on it to travel there" },
         { "Water", "shallows splash; deep water puts out a torch and goblins won't swim" },
-        { "Zoom", "+ and -  or the mouse wheel" },
+        { "Zoom", "+ and -  or the mouse wheel;  text size is kitty's font zoom (ctrl+shift+= / -)" },
         { "Sound", "F2 turns it off and on" },
-        { "Text size", "kitty's own font zoom (ctrl+shift+= / -)" },
         { "Quit", "Esc twice" },
     };
     int n = sizeof L / sizeof *L;
@@ -489,16 +502,84 @@ static int icon_scale(const UI *ui)
     return s < 1 ? 1 : s;
 }
 
+/* an item's description, with its numbers (and yours to compare) for gear */
+static void gear_text(Game *g, const Slot *sl, const char *desc, char *out, size_t n)
+{
+    const ItemInfo *ii = &ITEM_INFO[sl->kind];
+    if (ii->gear == GEAR_WEAPON) {
+        int a, lo, hi, ca, clo, chi;
+        game_weapon_stats(g, sl, &a, &lo, &hi);
+        game_weapon_stats(g, &g->weapon, &ca, &clo, &chi);
+        snprintf(out, n, "%s Hit %d, damage %d-%d (yours: %d, %d-%d).", desc, a, lo, hi, ca, clo, chi);
+    } else if (ii->gear == GEAR_ARMOUR) {
+        snprintf(out, n, "%s Armour %d (yours: %d).", desc, game_armour_def(sl), game_armour_def(&g->armour));
+    } else {
+        snprintf(out, n, "%s", desc);
+    }
+}
+
+static const char *const FORGE_KEYS = "abcd";
+
+static void forge_panel(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int bottom)
+{
+    Font *hf = ui->head, *bf = ui->body, *sf = ui->small;
+    int pad = ui->px * 7 / 10, w = ui->px * 19;
+    int indent = font_width(sf, "a)") + ui->px / 3, rows[FORGE_COUNT], sum = 0;
+    for (int o = 0; o < FORGE_COUNT; o++) {
+        rows[o] = font_line(bf) + font_wrap(sf, NULL, 0, 0, w - indent - pad * 3, game_forge_desc((ForgeOffer)o), 0, 0) + pad / 2;
+        sum += rows[o];
+    }
+    int h = pad * 2 + font_line(hf) + font_line(sf) + sum + font_line(sf) + pad;
+    int x = cv->w - w - ui->px / 2, y = bottom - h - ui->px / 2;
+    if (y < 4) y = 4;
+    panel(ui, cv, x, y, w, h, 240, true);
+    font_draw(hf, cv, x + pad, y + pad + font_ascent(hf), "The forge", GOLD, 255);
+    char buf[160];
+    snprintf(buf, sizeof buf, "%d ember%s", g->embers, g->embers == 1 ? "" : "s");
+    font_draw(hf, cv, x + w - pad - font_width(hf, buf), y + pad + font_ascent(hf), buf, 0xff9a48, 255);
+    int yy = y + pad + font_line(hf);
+    font_draw(sf, cv, x + pad, yy + font_ascent(sf), "Feed it embers from lit sconces and burnt-out shades.", 0x8a7c62, 255);
+    yy += font_line(sf) + pad / 2;
+    for (int o = 0; o < FORGE_COUNT; o++) {
+        int row = rows[o];
+        int cost = game_forge_cost(g, (ForgeOffer)o);
+        bool ok = cost >= 0 && g->embers >= cost;
+        bool hov = ok && f->mx >= x && f->mx < x + w && f->my >= yy && f->my < yy + row;
+        if (hov) cv_blend_rect(cv, x + 3, yy, w - 6, row, 0x4a3820, 170);
+        int base = yy + font_ascent(bf) + pad / 4;
+        char key[4] = { FORGE_KEYS[o], ')', 0 };
+        int tx = font_draw(sf, cv, x + pad, base, key, ok ? GOLD : GOLD_DIM, 255) + ui->px / 3;
+        game_forge_label(g, (ForgeOffer)o, buf, sizeof buf);
+        font_draw(bf, cv, tx, base, buf, ok ? (hov ? 0xfff2d0 : 0xe2d4b4) : 0x7a7060, 255);
+        if (cost >= 0) {
+            char c[24];
+            snprintf(c, sizeof c, "%d", cost);
+            font_draw(bf, cv, x + w - pad - font_width(bf, c), base, c, ok ? 0xff9a48 : 0x7a5a40, 255);
+        }
+        font_wrap(sf, cv, tx, yy + font_line(bf) + pad / 6, w - indent - pad * 3, game_forge_desc((ForgeOffer)o),
+                  ok ? 0xb8aa8c : 0x6a6050, 255);
+        if (ok) add_btn_arg(ui, x, yy, w, row, UA_FORGE, o);
+        yy += row;
+    }
+    font_draw(sf, cv, x + pad, y + h - pad / 2 - font_line(sf) / 4, "Pick with a letter or the mouse, Esc closes", 0x8a7c62, 255);
+}
+
 static void menu_panel(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int bottom)
 {
-    static const char *TITLES[] = { "", "Pack", "Throw what?", "Use what?", "Drop what?", "" };
+    static const char *TITLES[] = { "", "Pack", "Throw what?", "Use what?", "Drop what?", "", "" };
     Font *hf = ui->head, *bf = ui->body, *sf = ui->small;
     int pad = ui->px * 7 / 10, s = icon_scale(ui), row = TILE * s + ui->px / 4;
-    int w = ui->px * 15;
+    int w = ui->px * 17;
+    if (f->menu == MENU_FORGE) {
+        forge_panel(ui, cv, g, f, bottom);
+        return;
+    }
     if (f->menu == MENU_ITEM && f->menu_slot >= 0 && f->menu_slot < g->ninv) {
         Slot *sl = &g->inv[f->menu_slot];
         const ItemInfo *ii = &ITEM_INFO[sl->kind];
-        int dh = font_wrap(sf, NULL, 0, 0, w - pad * 2, ii->desc, 0, 0);
+        char gdesc[480];
+        gear_text(g, sl, ii->desc, gdesc, sizeof gdesc);
+        int dh = font_wrap(sf, NULL, 0, 0, w - pad * 2, gdesc, 0, 0);
         int bh = font_line(hf) * 3 / 2;
         int h = pad * 3 + TILE * s * 3 / 2 + dh + bh + pad;
         int x = cv->w - w - ui->px / 2, y = bottom - h - ui->px / 2;
@@ -506,26 +587,43 @@ static void menu_panel(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int bottom
         int big = s * 3 / 2 > s ? s * 3 / 2 : s + 1;
         cv_image_scaled(cv, &ui->icons[sl->kind], x + pad, y + pad, big, 255);
         char nm[64];
-        game_item_name(sl->kind, sl->count, nm, sizeof nm);
+        game_item_name(sl->kind, sl->count, sl->plus, nm, sizeof nm);
         char title[80];
         snprintf(title, sizeof title, "%c) %s", 'a' + f->menu_slot, nm);
         font_draw(hf, cv, x + pad * 2 + TILE * big, y + pad + TILE * big / 2 + font_ascent(hf) / 3, title, GOLD, 255);
         int yy = y + pad + TILE * s * 3 / 2 + pad / 2;
-        yy += font_wrap(sf, cv, x + pad, yy, w - pad * 2, ii->desc, 0xd8cbb0, 255);
+        yy += font_wrap(sf, cv, x + pad, yy, w - pad * 2, gdesc, 0xd8cbb0, 255);
         int bx = x + pad, by = y + h - pad - bh;
         if (sl->kind == IT_TORCH) bx += button(ui, cv, bx, by, bh, "a", g->torch_lit ? "Fresh" : "Light", UA_ITEM_USE, f->mx, f->my, true) + pad / 2;
         if (sl->kind == IT_POTION) bx += button(ui, cv, bx, by, bh, "q", "Drink", UA_ITEM_USE, f->mx, f->my, true) + pad / 2;
-        bx += button(ui, cv, bx, by, bh, "t", "Throw", UA_ITEM_THROW, f->mx, f->my, true) + pad / 2;
+        if (ii->gear != GEAR_NONE)
+            bx += button(ui, cv, bx, by, bh, "a", ii->gear == GEAR_WEAPON ? "Wield" : "Wear", UA_ITEM_USE, f->mx, f->my, true) + pad / 2;
+        if (ii->range > 0) bx += button(ui, cv, bx, by, bh, "t", "Throw", UA_ITEM_THROW, f->mx, f->my, true) + pad / 2;
         button(ui, cv, bx, by, bh, "d", "Drop", UA_ITEM_DROP, f->mx, f->my, true);
         return;
     }
     int n = g->ninv > 0 ? g->ninv : 1;
-    int h = pad * 2 + font_line(hf) + n * row + font_line(sf) + pad / 2;
+    bool worn = f->menu == MENU_INV;
+    int wl = font_line(sf);
+    int h = pad * 2 + font_line(hf) + n * row + font_line(sf) + pad / 2 + (worn ? wl * 2 + pad / 2 : 0);
     int x = cv->w - w - ui->px / 2, y = bottom - h - ui->px / 2;
     if (y < 4) y = 4;
     panel(ui, cv, x, y, w, h, 235, true);
     font_draw(hf, cv, x + pad, y + pad + font_ascent(hf), TITLES[f->menu], GOLD, 255);
     int yy = y + pad + font_line(hf);
+    if (worn) {
+        char a[64], line[128];
+        int acc, dmin, dmax;
+        game_weapon_stats(g, &g->weapon, &acc, &dmin, &dmax);
+        game_item_name(g->weapon.kind, 1, g->weapon.plus, a, sizeof a);
+        snprintf(line, sizeof line, "Wielding %s  (hit %d, damage %d-%d)", a, acc, dmin, dmax);
+        font_draw(sf, cv, x + pad, yy + font_ascent(sf), line, 0xc8b890, 255);
+        yy += wl;
+        game_item_name(g->armour.kind, 1, g->armour.plus, a, sizeof a);
+        snprintf(line, sizeof line, "Wearing %s  (armour %d)", a, game_armour_def(&g->armour));
+        font_draw(sf, cv, x + pad, yy + font_ascent(sf), line, 0xc8b890, 255);
+        yy += wl + pad / 2;
+    }
     if (!g->ninv) font_draw(bf, cv, x + pad, yy + font_ascent(bf), "Your pack is empty.", C_DIM, 255);
     for (int i = 0; i < g->ninv; i++) {
         Slot *sl = &g->inv[i];
@@ -534,7 +632,7 @@ static void menu_panel(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int bottom
         if (hov) cv_blend_rect(cv, x + 3, yy, w - 6, row, 0x4a3820, 170);
         cv_image_scaled(cv, &ui->icons[sl->kind], x + pad, yy + ui->px / 8, s, ok ? 255 : 90);
         char nm[64], line[96];
-        game_item_name(sl->kind, sl->count, nm, sizeof nm);
+        game_item_name(sl->kind, sl->count, sl->plus, nm, sizeof nm);
         snprintf(line, sizeof line, "%s", nm);
         int base = yy + row / 2 + font_ascent(bf) / 3;
         int tx = x + pad * 2 + TILE * s;

@@ -46,6 +46,7 @@ typedef enum {
     T_RUBBLE,           /* floor with debris, walkable */
     T_SHALLOW,          /* wade through: splashes */
     T_DEEP,             /* swim: puts out a torch, swallows what falls in */
+    T_BRAZIER,          /* a forge brazier standing on the floor: blocks the way, lights the room */
     T_COUNT
 } Tile;
 

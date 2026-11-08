@@ -379,8 +379,31 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     if (getenv("LUME_DUMP_TORCH")) game_torch_toggle(g);
     if (getenv("LUME_DUMP_MAP")) { ctl.map = true; ctl.map_stale = true; }
     if (getenv("LUME_DUMP_HELP")) ctl.help = true;
+    /* LUME_DUMP_FORGE=N: stand by the forge with N embers and open it ("N,0": don't open it) */
+    if (getenv("LUME_DUMP_FORGE")) {
+        g->embers = atoi(getenv("LUME_DUMP_FORGE"));
+        if (game_debug_to_forge(g)) { if (!strstr(getenv("LUME_DUMP_FORGE"), ",0")) ctl.menu = MENU_FORGE; }
+        else fprintf(stderr, "%s: no forge on this level\n", LUME_NAME);
+    }
     const char *dm = getenv("LUME_DUMP_MENU");
     if (dm) ctl.menu = !strcmp(dm, "throw") ? MENU_THROW : !strcmp(dm, "use") ? MENU_USE : !strcmp(dm, "item") ? MENU_ITEM : MENU_INV;
+    if (getenv("LUME_DUMP_SLOT")) ctl.menu_slot = atoi(getenv("LUME_DUMP_SLOT"));     /* which item LUME_DUMP_MENU=item shows */
+    /* LUME_DUMP_GEAR="kind,plus;...": put gear in the pack (kinds: sword dagger spear axe mace leather cloak mail) */
+    if (getenv("LUME_DUMP_GEAR")) {
+        static const char *N[] = { "sword", "dagger", "spear", "axe", "mace", "leather", "cloak", "mail" };
+        const char *q = getenv("LUME_DUMP_GEAR");
+        while (*q && g->ninv < MAX_INV) {
+            for (int i = 0; i < 8; i++)
+                if (!strncmp(q, N[i], strlen(N[i]))) {
+                    const char *c = strchr(q, ',');
+                    g->inv[g->ninv++] = (Slot){ (ItemKind)(IT_SWORD + i), 1, c ? atoi(c + 1) : 0 };
+                    break;
+                }
+            const char *e = strchr(q, ';');
+            if (!e) break;
+            q = e + 1;
+        }
+    }
     int adx, ady;
     float frac = 0.5f;
     if (getenv("LUME_DUMP_AIM") && sscanf(getenv("LUME_DUMP_AIM"), "%d,%d", &adx, &ady) == 2) {
@@ -699,11 +722,19 @@ int main(int argc, char **argv)
             }
         } else if (ctl.menu != MENU_NONE) {
             int pick = -1;
-            if (ctl.menu == MENU_ITEM) {
+            if (ctl.menu == MENU_FORGE) {
+                int o = -1;
+                for (int k = 0; k < FORGE_COUNT; k++)
+                    if (PLAIN('a' + k)) o = k;
+                if (click == UA_FORGE) o = carg;
+                if (!game_by_forge(g)) ctl.menu = MENU_NONE;
+                else if (o >= 0) game_forge_buy(g, (ForgeOffer)o);
+                else if (map_click || g_input.mclick[2]) ctl.menu = MENU_NONE;
+            } else if (ctl.menu == MENU_ITEM) {
                 int sl = ctl.menu_slot;
                 bool valid = sl >= 0 && sl < g->ninv;
                 if (!valid) ctl.menu = MENU_INV;
-                else if (PLAIN('t') || click == UA_ITEM_THROW) start_aim(g, &ctl, sl, &hv);
+                else if ((PLAIN('t') && ITEM_INFO[g->inv[sl].kind].range > 0) || click == UA_ITEM_THROW) start_aim(g, &ctl, sl, &hv);
                 else if (((PLAIN('a') || PLAIN('q')) && ITEM_INFO[g->inv[sl].kind].usable) || click == UA_ITEM_USE) {
                     ctl.menu = MENU_NONE;
                     game_use(g, sl);
@@ -778,6 +809,10 @@ int main(int argc, char **argv)
             }
         }
         if (ctl.help && g_input.mclick[0] && click == UA_CLOSE) ctl.help = false;
+        if (g->forge_req) {
+            g->forge_req = false;
+            if (g->state == GS_PLAY && ctl.menu == MENU_NONE && !ctl.targeting) ctl.menu = MENU_FORGE;
+        }
         #undef SHIFTED
         #undef PLAIN
         input_clear_edges();

@@ -24,6 +24,8 @@ typedef struct {
     Image door_open;
     Image door_open_side;
     Image sconce;           /* bracket and torch, unlit colours */
+    Image brazier;          /* forge brazier on its legs, 28 x 26; feet at the bottom */
+    Image brazier_glow;     /* its coals (emissive) */
     Image crystal;          /* emissive */
     Image rubble[3];
     Image mob[MK_COUNT];    /* TILE x TILE, feet at the bottom */

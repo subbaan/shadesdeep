@@ -13,7 +13,7 @@ typedef enum {
     UA_NONE, UA_EXPLORE, UA_REST, UA_STAIRS, UA_HELP, UA_ZOOM_IN, UA_ZOOM_OUT,
     UA_JUMP_YES, UA_JUMP_NO, UA_NEW_GAME, UA_QUIT, UA_CLOSE,
     UA_INV, UA_THROW, UA_TORCH, UA_PICK, UA_ITEM_THROW, UA_ITEM_USE, UA_ITEM_DROP, UA_MENU_BACK,
-    UA_MAP,
+    UA_MAP, UA_FORGE,
 } UiAction;
 
 /* where the map overview sits on screen, and which tiles it shows */
@@ -24,11 +24,12 @@ typedef struct {
 } MapLayout;
 
 /* item menus, Brogue style: pick from the pack, then act */
-typedef enum { MENU_NONE, MENU_INV, MENU_THROW, MENU_USE, MENU_DROP, MENU_ITEM } MenuKind;
+typedef enum { MENU_NONE, MENU_INV, MENU_THROW, MENU_USE, MENU_DROP, MENU_ITEM, MENU_FORGE } MenuKind;
 
 static inline bool menu_allows(MenuKind m, ItemKind k)
 {
     if (m == MENU_USE) return ITEM_INFO[k].usable;
+    if (m == MENU_THROW) return ITEM_INFO[k].range > 0;
     return true;
 }
 

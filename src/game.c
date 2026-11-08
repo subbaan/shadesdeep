@@ -27,7 +27,48 @@ const ItemInfo ITEM_INFO[IT_COUNT] = {
                     "Anything that hears it land may come to look.", 9, false },
     [IT_POTION] = { "healing potion", "healing potions",
                     "A flask of ruby liquid that knits wounds closed when drunk.", 7, true },
+    [IT_SWORD]  = { "short sword", "short swords",
+                    "A plain, well-balanced blade. It does nothing clever and nothing badly.",
+                    0, true, GEAR_WEAPON, 85, 2, 5, 0 },
+    [IT_DAGGER] = { "dagger", "daggers",
+                    "A slim blade for quiet work. A foe that hasn't noticed you (asleep, or not hunting you) "
+                    "takes triple damage. Weak in an open fight.",
+                    0, true, GEAR_WEAPON, 95, 1, 3, 0 },
+    [IT_SPEAR]  = { "spear", "spears",
+                    "Long reach: every thrust also strikes whatever stands behind your target.",
+                    0, true, GEAR_WEAPON, 80, 2, 5, 0 },
+    [IT_AXE]    = { "axe", "axes",
+                    "A wide, heavy swing that strikes every foe around you at once, though it's hard to aim.",
+                    0, true, GEAR_WEAPON, 72, 2, 5, 0 },
+    [IT_MACE]   = { "mace", "maces",
+                    "A brutal iron head. A hit knocks the foe back a step: into a wall for extra harm, into "
+                    "deep water, or over the edge of a chasm.",
+                    0, true, GEAR_WEAPON, 70, 3, 6, 0 },
+    [IT_LEATHER] = { "leather jerkin", "leather jerkins",
+                    "Boiled leather. Some protection and no drawbacks.",
+                    0, true, GEAR_ARMOUR, 0, 0, 0, 10 },
+    [IT_CLOAK]  = { "shadow cloak", "shadow cloaks",
+                    "Thin, dark wool: little protection, but in the dark things must come close to notice you, "
+                    "and shades feel your warmth from only half as far.",
+                    0, true, GEAR_ARMOUR, 0, 0, 0, 4 },
+    [IT_MAIL]   = { "mail coat", "mail coats",
+                    "Riveted iron rings: strong protection, but it rings with every step, waking what sleeps "
+                    "nearby, and in deep water it drags you under.",
+                    0, true, GEAR_ARMOUR, 0, 0, 0, 22 },
 };
+
+static bool stacks(ItemKind k) { return ITEM_INFO[k].gear == GEAR_NONE; }
+
+void game_weapon_stats(const Game *g, const Slot *w, int *acc, int *dmin, int *dmax)
+{
+    (void)g;
+    const ItemInfo *ii = &ITEM_INFO[w->kind];
+    *acc = ii->acc + 3 * w->plus;
+    *dmin = ii->dmin + w->plus / 2;
+    *dmax = ii->dmax + w->plus;
+}
+
+int game_armour_def(const Slot *a) { return ITEM_INFO[a->kind].def + 3 * a->plus; }
 
 static const int DX8[8] = { 0, 1, 0, -1, 1, 1, -1, -1 };
 static const int DY8[8] = { -1, 0, 1, 0, -1, 1, 1, -1 };
@@ -166,6 +207,8 @@ static void spawn_mobs(Game *g, int d)
             k = MK_SHADE;
         Mob *m = &g->mobs[d][placed++];
         mob_init(m, k, x, y);
+        m->lvl = d;
+        m->hp = m->maxhp = MOB_INFO[k].hp + MOB_INFO[k].hp * (d - 1) / 8;
         m->asleep = k != MK_SHADE && rng_chance(&r, 65);
         m->flip = rng_chance(&r, 50);
     }
@@ -189,8 +232,25 @@ static void spawn_items(Game *g, int d)
         if (k == IT_TORCH && g->torches_made + 1 > d * TORCHES_PER_LEVEL + 1.5f) k = IT_DART;
         if (k == IT_TORCH) g->torches_made++;
         FloorItem *it = &g->items[d][placed++];
-        *it = (FloorItem){ true, k, 1, x, y, false };
+        *it = (FloorItem){ true, k, 1, x, y, false, 0 };
         if (it->kind == IT_DART) it->count = rng_range(&r, 2, 4);
+    }
+    /* a piece of gear on most levels, sometimes already tempered deeper down */
+    if (rng_chance(&r, 70)) {
+        static const ItemKind GEAR[] = { IT_DAGGER, IT_SPEAR, IT_AXE, IT_MACE, IT_SWORD, IT_CLOAK, IT_MAIL, IT_LEATHER };
+        for (int tries = 0; tries < 2000 && placed < MAX_ITEMS; tries++) {
+            int x = rng_range(&r, 1, MAP_W - 2), y = rng_range(&r, 1, MAP_H - 2);
+            if (lv->t[y][x] != T_FLOOR || lv->room[y][x] < 0) continue;
+            bool taken = false;
+            for (int i = 0; i < placed; i++)
+                if (g->items[d][i].x == x && g->items[d][i].y == y) taken = true;
+            if (taken) continue;
+            ItemKind k = GEAR[rng_range(&r, 0, (int)(sizeof GEAR / sizeof *GEAR) - 1)];
+            int plus = 0;
+            for (int i = 0; i < d / 3; i++) if (rng_chance(&r, 40)) plus++;
+            g->items[d][placed++] = (FloorItem){ true, k, 1, x, y, false, plus };
+            break;
+        }
     }
     /* ...nor fall far behind it */
     for (int tries = 0; tries < 2000 && g->torches_made < (int)(d * TORCHES_PER_LEVEL) && placed < MAX_ITEMS; tries++) {
@@ -200,7 +260,7 @@ static void spawn_items(Game *g, int d)
         for (int i = 0; i < placed; i++)
             if (g->items[d][i].x == x && g->items[d][i].y == y) taken = true;
         if (taken) continue;
-        g->items[d][placed++] = (FloorItem){ true, IT_TORCH, 1, x, y, false };
+        g->items[d][placed++] = (FloorItem){ true, IT_TORCH, 1, x, y, false, 0 };
         g->torches_made++;
     }
 }
@@ -222,7 +282,7 @@ typedef struct { Game *g; Level *lv; } ViewCtx;
 static void plight_mark(void *vc, int x, int y, float d)
 {
     ViewCtx *c = vc;
-    float r = c->g->torch_lit ? 7.0f : 3.6f;
+    float r = c->g->torch_lit ? 7.0f : 3.6f + c->g->lantern;
     if (d > r) return;
     float k = 1.0f - d / r;
     c->g->plight[y][x] = d < 1 ? 1.0f : k * k * (3 - 2 * k);
@@ -270,7 +330,7 @@ static void compute_view(Game *g)
         for (int x = 0; x < MAP_W; x++) lv->f[y][x] &= (uint8_t)~(F_VIS | F_LOS);
     memset(g->plight, 0, sizeof g->plight);
     ViewCtx c = { g, lv };
-    fov_cast(lv, g->player.x, g->player.y, g->torch_lit ? 8 : 4, plight_mark, &c);
+    fov_cast(lv, g->player.x, g->player.y, g->torch_lit ? 8 : 4 + g->lantern, plight_mark, &c);
     fov_cast(lv, g->player.x, g->player.y, 24, view_mark, &c);
     int n = count_visible_mobs(g);
     bool fresh = false;
@@ -318,10 +378,12 @@ Game *game_new(uint32_t seed)
     compute_view(g);
     for (int y = 0; y < MAP_H; y++)
         for (int x = 0; x < MAP_W; x++) g->visf[y][x] = (lv->f[y][x] & F_VIS) ? 1.0f : 0.0f;
-    g->inv[0] = (Slot){ IT_TORCH, 2 };
-    g->inv[1] = (Slot){ IT_DART, 5 };
-    g->inv[2] = (Slot){ IT_POTION, 1 };
+    g->inv[0] = (Slot){ IT_TORCH, 2, 0 };
+    g->inv[1] = (Slot){ IT_DART, 5, 0 };
+    g->inv[2] = (Slot){ IT_POTION, 1, 0 };
     g->ninv = 3;
+    g->weapon = (Slot){ IT_SWORD, 1, 0 };
+    g->armour = (Slot){ IT_LEATHER, 1, 0 };
     game_msg(g, C_INFO, "you descend into the dark. Light is precious down here.");
     game_msg(g, C_DIM, "click to travel, x explores, ? for help.");
     return g;
@@ -353,23 +415,53 @@ static bool diag_ok(const Level *lv, int x, int y, int dx, int dy)
     return !tile_solid(a) && a != T_DOOR && !tile_solid(b) && b != T_DOOR;
 }
 
+static void ember(Game *g, int n, const char *why);
+
 static void kill_mob(Game *g, Mob *m)
 {
     m->alive = false;
     g->kills++;
+    if (m->kind == MK_SHADE) ember(g, 1, "the shade leaves a cold ember behind as it goes");
 }
 
-static void attack(Game *g, Mob *a, Mob *d)
+static void mob_stats(Game *g, const Mob *m, int *acc, int *dmin, int *dmax, int *def)
+{
+    const MobInfo *mi = &MOB_INFO[m->kind];
+    if (m == &g->player) {
+        game_weapon_stats(g, &g->weapon, acc, dmin, dmax);
+        *def = mi->def + game_armour_def(&g->armour);
+        return;
+    }
+    int up = m->lvl > 1 ? m->lvl - 1 : 0;      /* deeper monsters are a little sharper */
+    *acc = mi->acc + up * 2;
+    *dmin = mi->dmin + up / 5;
+    *dmax = mi->dmax + up / 3;
+    *def = mi->def + up;
+}
+
+static void ember(Game *g, int n, const char *why)
+{
+    g->embers += n;
+    game_msg(g, C_GOOD, "%s (+%d ember%s, %d now).", why, n, n == 1 ? "" : "s", g->embers);
+    floater(g, g->player.x, g->player.y, 0xffa040, "+ember");
+}
+
+/* returns true if it hit */
+static bool attack(Game *g, Mob *a, Mob *d)
 {
     const MobInfo *ai = &MOB_INFO[a->kind], *di = &MOB_INFO[d->kind];
     bool pl_att = a == &g->player, pl_def = d == &g->player;
+    int acc, dmin, dmax, def, x0, x1, x2;
+    mob_stats(g, a, &acc, &dmin, &dmax, &x0);
+    mob_stats(g, d, &x0, &x1, &x2, &def);
+    bool unaware = !pl_def && (d->asleep || !d->hunting);
     a->bump = 1.0f;
     a->bdx = d->x - a->x;
     a->bdy = d->y - a->y;
     if (a->kind != MK_SHADE) sfx_ex(g, SND_SWING, a->x, a->y, false, 0, pl_att ? 1.0f : 0.7f);
     if (!pl_att && rng_chance(&g->rng, 30)) vocal(g, a);
     if (a->bdx) a->flip = a->bdx < 0;
-    int chance = ai->acc - di->def;
+    int chance = acc - def;
     if (d->asleep) chance = 100;
     d->asleep = false;
     if (!pl_def) { d->hunting = true; d->tx = a->x; d->ty = a->y; }
@@ -377,9 +469,11 @@ static void attack(Game *g, Mob *a, Mob *d)
         if (pl_att) game_msg(g, C_DIM, "you miss the %s.", di->name);
         else if (pl_def) game_msg(g, C_DIM, "the %s misses you.", ai->name);
         floater(g, d->x, d->y, 0xb0b0b0, "miss");
-        return;
+        return false;
     }
-    int dmg = rng_range(&g->rng, ai->dmin, ai->dmax);
+    int dmg = rng_range(&g->rng, dmin, dmax);
+    bool sneak = pl_att && g->weapon.kind == IT_DAGGER && unaware;
+    if (sneak) dmg *= 3;
     int chill = 0;
     if (a->kind == MK_SHADE && pl_def) {
         /* the cold of its touch takes from your max HP until a fire warms you */
@@ -409,16 +503,17 @@ static void attack(Game *g, Mob *a, Mob *d)
         } else {
             game_msg(g, C_BAD, "the %s hits you.", ai->name);
         }
-        return;
+        return true;
     }
     if (d->hp <= 0) {
         kill_mob(g, d);
-        game_msg(g, C_GOOD, "you slay the %s!", di->name);
+        game_msg(g, C_GOOD, sneak ? "you strike the unaware %s dead!" : "you slay the %s!", di->name);
         if (d->kind == MK_SHADE) { push_fx(g, FX_DISSOLVE, d->x, d->y); sfx(g, SND_DISSOLVE, d->x, d->y); }
         else sfx_ex(g, SND_KILL, d->x, d->y, false, 0.1f, 1);
     } else {
-        game_msg(g, C_TEXT, "you hit the %s.", di->name);
+        game_msg(g, C_TEXT, sneak ? "you strike the unaware %s!" : "you hit the %s.", di->name);
     }
+    return true;
 }
 
 /* --------------------------------------------------------------- monsters */
@@ -565,7 +660,7 @@ static void update_light(Game *g)
     if (lv->light_dirty) level_relight(lv);
     memset(g->plight, 0, sizeof g->plight);
     ViewCtx c = { g, lv };
-    fov_cast(lv, g->player.x, g->player.y, g->torch_lit ? 8 : 4, plight_mark, &c);
+    fov_cast(lv, g->player.x, g->player.y, g->torch_lit ? 8 : 4 + g->lantern, plight_mark, &c);
 }
 
 static void monsters_act(Game *g)
@@ -582,13 +677,14 @@ static void monsters_act(Game *g)
         if (!m->alive) continue;
         const MobInfo *mi = &MOB_INFO[m->kind];
         int dist = cheb(m->x, m->y, p->x, p->y);
-        float range = pb > 0.30f ? (float)mi->perception : 2.5f;
+        bool cloak = g->armour.kind == IT_CLOAK;
+        float range = pb > 0.30f ? (float)mi->perception : cloak ? 1.5f : 2.5f;
         bool shade = m->kind == MK_SHADE;
         if (shade) {
             /* a shade within your torch's glow gnaws at the flame */
             if (g->torch_lit && g->plight[m->y][m->x] > 0 && dist <= 8) gnaw++;
             if (shade_burns(g, m)) continue;
-            range = (float)mi->perception;          /* it feels your warmth, lit or not */
+            range = (float)mi->perception * (cloak ? 0.5f : 1.0f);   /* it feels your warmth, lit or not */
         }
         bool sees = dist <= range && los(lv, m->x, m->y, p->x, p->y);
         if (m->asleep) {
@@ -718,6 +814,103 @@ static void change_level(Game *g, int depth, int x, int y)
 }
 
 static void pickup(Game *g);
+static void nearest_floor(Level *lv, int *x, int *y);
+
+/* the mace's knockback: a step back, a wall, deep water or a fall */
+static void knock_back(Game *g, Mob *m, int dx, int dy)
+{
+    Level *lv = game_level(g);
+    int nx = m->x + dx, ny = m->y + dy;
+    Tile t = tile_at(lv, nx, ny);
+    const char *nm = MOB_INFO[m->kind].name;
+    bool seen = lv->f[m->y][m->x] & F_VIS;
+    if (t == T_CHASM) {
+        /* over the edge: it lands, hurt, on the level below */
+        int d = g->depth + 1, bx = nx, by = ny;
+        if (seen) game_msg(g, C_GOOD, "the blow knocks the %s over the edge of the chasm!", nm);
+        push_fx(g, FX_FALL, nx, ny);
+        sfx_ex(g, SND_FALL, nx, ny, false, 0.3f, 0.6f);
+        m->alive = false;
+        if (g->lv[d]) {
+            nearest_floor(g->lv[d], &bx, &by);
+            Mob *ms = g->mobs[d];
+            for (int i = 0; i < MAX_MOBS; i++)
+                if (!ms[i].alive) {
+                    Mob keep = *m;
+                    mob_init(&ms[i], keep.kind, bx, by);
+                    ms[i].lvl = keep.lvl;
+                    ms[i].maxhp = keep.maxhp;
+                    ms[i].hp = keep.hp - rng_range(&g->rng, 3, 6);
+                    ms[i].alive = ms[i].hp > 0;
+                    break;
+                }
+            g->lower_dirty = true;
+        }
+        return;
+    }
+    if (tile_solid(t) || t == T_DOOR || t == T_BRAZIER || !in_map(nx, ny)) {
+        int dmg = rng_range(&g->rng, 1, 3);
+        m->hp -= dmg;
+        m->flash = 1;
+        char tx[16];
+        snprintf(tx, sizeof tx, "%d", dmg);
+        floater(g, m->x, m->y, 0xffd27a, tx);
+        sfx_ex(g, SND_THUD, m->x, m->y, false, 0.1f, 0.8f);
+        if (m->hp <= 0) {
+            kill_mob(g, m);
+            if (seen) game_msg(g, C_GOOD, "the blow smashes the %s against the %s!", nm, t == T_DOOR ? "door" : "wall");
+            if (m->kind == MK_SHADE) push_fx(g, FX_DISSOLVE, m->x, m->y);
+        } else if (seen) {
+            game_msg(g, C_TEXT, "the %s slams into the %s.", nm, t == T_DOOR ? "door" : "wall");
+        }
+        return;
+    }
+    if (!mob_free(g, nx, ny)) return;
+    if (m->kind == MK_SHADE && game_firelight(g, nx, ny) > SHADE_FEAR) {
+        /* knocked into the fire it fears */
+        mob_go(g, m, nx, ny);
+        return;
+    }
+    mob_go(g, m, nx, ny);
+    if (seen) game_msg(g, C_TEXT, t == T_DEEP ? "the %s is knocked into the deep water." : "the %s staggers back.", nm);
+}
+
+/* you attack the monster at m with whatever you wield */
+static void player_strike(Game *g, Mob *m)
+{
+    Mob *p = &g->player;
+    int dx = m->x - p->x, dy = m->y - p->y;
+    Level *lv = game_level(g);
+    switch (g->weapon.kind) {
+    case IT_AXE: {
+        /* everything around you, the one you swung at first */
+        Mob *around[8];
+        int n = 0;
+        around[n++] = m;
+        for (int d = 0; d < 8; d++) {
+            Mob *o = game_mob_at(g, p->x + DX8[d], p->y + DY8[d]);
+            if (o && o != m && diag_ok(lv, p->x, p->y, DX8[d], DY8[d]) && game_mob_noticed(g, o)) around[n++] = o;
+        }
+        for (int i = 0; i < n; i++)
+            if (around[i]->alive) attack(g, p, around[i]);
+        if (n > 1) sfx_ex(g, SND_SWING, p->x, p->y, false, 0.1f, 0.8f);
+        break;
+    }
+    case IT_SPEAR: {
+        int bx = m->x + dx, by = m->y + dy;
+        attack(g, p, m);
+        Mob *b = game_mob_at(g, bx, by);
+        if (b && b->alive && !tile_opaque(tile_at(lv, m->x, m->y))) attack(g, p, b);
+        break;
+    }
+    case IT_MACE:
+        if (attack(g, p, m) && m->alive) knock_back(g, m, dx, dy);
+        break;
+    default:
+        attack(g, p, m);
+        break;
+    }
+}
 
 bool game_move(Game *g, int dx, int dy)
 {
@@ -729,9 +922,14 @@ bool game_move(Game *g, int dx, int dy)
     Tile t = (Tile)lv->t[ny][nx];
     Mob *m = game_mob_at(g, nx, ny);
     if (m && diag_ok(lv, p->x, p->y, dx, dy)) {
-        attack(g, p, m);
+        player_strike(g, m);
         end_turn(g);
         return true;
+    }
+    if (t == T_BRAZIER) {
+        g->forge_req = true;
+        game_stop(g);
+        return false;
     }
     if (tile_solid(t)) {
         Light *l = level_light_on(lv, nx, ny);
@@ -740,6 +938,7 @@ bool game_move(Game *g, int dx, int dy)
             lv->light_dirty = true;
             if (l->room >= 0) lv->rooms[l->room].dark = false;
             game_msg(g, C_WARN, "you light the sconce. Warm light spills across the room.");
+            ember(g, 1, "you take an ember from the new flame");
             flare(g);
             sfx(g, SND_SCONCE, l->fx, l->fy);
             game_stop(g);
@@ -766,11 +965,14 @@ bool game_move(Game *g, int dx, int dy)
         return false;
     }
     Tile here = (Tile)lv->t[p->y][p->x];
-    if (t == T_DEEP && here != T_DEEP && g->torch_lit && (g->wade_x != nx || g->wade_y != ny)) {
+    bool mail = g->armour.kind == IT_MAIL;
+    if (t == T_DEEP && here != T_DEEP && (g->torch_lit || mail) && (g->wade_x != nx || g->wade_y != ny)) {
         g->wade_x = nx;
         g->wade_y = ny;
         game_stop(g);
-        game_msg(g, C_WARN, "that water is deep: swimming will put out your torch. Move again to swim.");
+        game_msg(g, C_WARN, g->torch_lit && mail ? "that water is deep: it will put out your torch, and your mail will drag you under. Move again to swim."
+                            : mail ? "that water is deep, and your mail will drag you under. Move again to swim."
+                            : "that water is deep: swimming will put out your torch. Move again to swim.");
         return false;
     }
     g->wade_x = g->wade_y = -1;
@@ -785,13 +987,30 @@ bool game_move(Game *g, int dx, int dy)
                 push_fx(g, FX_STEAM, nx, ny);
                 sfx(g, SND_HISS, nx, ny);
                 game_msg(g, C_WARN, "your torch hisses out as you swim. It's soaked through.");
-            } else if (here != T_DEEP) {
+            } else if (here != T_DEEP && !mail) {
                 game_msg(g, C_DIM, "you swim out into the deep water.");
+            }
+            if (mail) {
+                int dmg = rng_range(&g->rng, 2, 3);
+                p->hp -= dmg;
+                p->flash = 1;
+                char tx[16];
+                snprintf(tx, sizeof tx, "%d", dmg);
+                floater(g, nx, ny, 0xff5a4a, tx);
+                if (p->hp <= 0) {
+                    game_msg(g, C_BAD, "your mail drags you down into the dark water, and you do not come up.");
+                    g->state = GS_DEAD;
+                    sfx_ex(g, SND_DIE, nx, ny, true, 0.25f, 1);
+                    return true;
+                }
+                game_msg(g, C_BAD, "your mail drags you under; you choke on cold water.");
             }
             make_noise(g, nx, ny, 3);
         } else if (rng_chance(&g->rng, 50)) {
             make_noise(g, nx, ny, 4);
         }
+    } else if (mail && rng_chance(&g->rng, 60)) {
+        make_noise(g, nx, ny, 3);       /* the rings jingle */
     }
     pickup(g);
     if (t == T_STAIRS_DOWN && g->autom != AUTO_STAIRS)
@@ -862,6 +1081,12 @@ void game_jump_answer(Game *g, bool yes)
     p->hp -= dmg;
     p->flash = 1.0f;
     g->shake = 0.6f;
+    /* the landing is hard on what you carry: tempered gear may lose an edge */
+    if ((g->weapon.plus > 0 || g->armour.plus > 0) && rng_chance(&g->rng, wet ? 25 : 60)) {
+        Slot *s = g->weapon.plus > 0 && (g->armour.plus == 0 || rng_chance(&g->rng, 50)) ? &g->weapon : &g->armour;
+        s->plus--;
+        game_msg(g, C_WARN, "the fall %s your %s (now +%d).", s == &g->weapon ? "blunts" : "buckles", ITEM_INFO[s->kind].name, s->plus);
+    }
     char t[16];
     snprintf(t, sizeof t, "%d", dmg);
     floater(g, p->x, p->y, 0xff5a4a, t);
@@ -1122,7 +1347,7 @@ bool game_debug_to_water(Game *g, int wade)
     return false;
 }
 
-static bool place_item(Game *g, int depth, ItemKind k, int count, int x, int y, bool dropped);
+static bool place_item(Game *g, int depth, ItemKind k, int count, int x, int y, bool dropped, int plus);
 /* developer: 0 stand in an east-west corridor with a rat and a dart beside you,
  * 1 stand beside a door in a side (north-south) wall, 2 stand just north of a room's south wall */
 bool game_debug_to_spot(Game *g, int kind)
@@ -1173,7 +1398,7 @@ bool game_debug_to_spot(Game *g, int kind)
                 if (ms[i].alive && abs(ms[i].x - px) < 4 && abs(ms[i].y - py) < 4) ms[i].alive = false;
             place_player(g, px, py);
             if (kind != 1) {
-                place_item(g, g->depth, IT_DART, 2, px - 1, py, true);
+                place_item(g, g->depth, IT_DART, 2, px - 1, py, true, 0);
                 for (int i = 0; i < MAX_MOBS; i++)
                     if (!ms[i].alive) { mob_init(&ms[i], MK_RAT, px + 2, py); break; }
             }
@@ -1252,10 +1477,11 @@ FloorItem *game_item_at(Game *g, int x, int y)
     return NULL;
 }
 
-const char *game_item_name(ItemKind k, int count, char *buf, size_t n)
+const char *game_item_name(ItemKind k, int count, int plus, char *buf, size_t n)
 {
     const ItemInfo *ii = &ITEM_INFO[k];
-    if (count == 1) snprintf(buf, n, "%s %s", k == IT_POTION ? "a" : "a", ii->name);
+    if (plus > 0) snprintf(buf, n, "a +%d %s", plus, ii->name);
+    else if (count == 1) snprintf(buf, n, "%s %s", ii->name[0] == 'a' ? "an" : "a", ii->name);
     else snprintf(buf, n, "%d %s", count, ii->plural);
     return buf;
 }
@@ -1265,12 +1491,13 @@ static void push_fx(Game *g, FxKind k, int x, int y)
     if (g->nfx < MAX_FX) g->fx[g->nfx++] = (Fx){ k, x, y };
 }
 
-static bool add_item(Game *g, ItemKind k, int count)
+static bool add_item(Game *g, ItemKind k, int count, int plus)
 {
-    for (int i = 0; i < g->ninv; i++)
-        if (g->inv[i].kind == k) { g->inv[i].count += count; return true; }
+    if (stacks(k))
+        for (int i = 0; i < g->ninv; i++)
+            if (g->inv[i].kind == k) { g->inv[i].count += count; return true; }
     if (g->ninv >= MAX_INV) return false;
-    g->inv[g->ninv++] = (Slot){ k, count };
+    g->inv[g->ninv++] = (Slot){ k, count, plus };
     return true;
 }
 
@@ -1281,14 +1508,15 @@ static void take_one(Game *g, int slot)
     g->ninv--;
 }
 
-static bool place_item(Game *g, int depth, ItemKind k, int count, int x, int y, bool dropped)
+static bool place_item(Game *g, int depth, ItemKind k, int count, int x, int y, bool dropped, int plus)
 {
     if (g->lv[depth] && tile_at(g->lv[depth], x, y) == T_DEEP) return true;     /* sinks out of reach */
     FloorItem *it = g->items[depth];
+    if (stacks(k))
+        for (int i = 0; i < MAX_ITEMS; i++)
+            if (it[i].alive && it[i].x == x && it[i].y == y && it[i].kind == k) { it[i].count += count; return true; }
     for (int i = 0; i < MAX_ITEMS; i++)
-        if (it[i].alive && it[i].x == x && it[i].y == y && it[i].kind == k) { it[i].count += count; return true; }
-    for (int i = 0; i < MAX_ITEMS; i++)
-        if (!it[i].alive) { it[i] = (FloorItem){ true, k, count, x, y, dropped }; return true; }
+        if (!it[i].alive) { it[i] = (FloorItem){ true, k, count, x, y, dropped, plus }; return true; }
     return false;
 }
 
@@ -1322,13 +1550,13 @@ static void pickup(Game *g)
     FloorItem *it = game_item_at(g, p->x, p->y);
     if (!it) return;
     char nm[64];
-    if (!add_item(g, it->kind, it->count)) {
-        game_msg(g, C_DIM, "your pack is full; you leave %s.", game_item_name(it->kind, it->count, nm, sizeof nm));
+    if (!add_item(g, it->kind, it->count, it->plus)) {
+        game_msg(g, C_DIM, "your pack is full; you leave %s.", game_item_name(it->kind, it->count, it->plus, nm, sizeof nm));
         return;
     }
     int slot = 0;
     for (int i = 0; i < g->ninv; i++) if (g->inv[i].kind == it->kind) slot = i;
-    game_msg(g, C_GOOD, "you pick up %s (%c).", game_item_name(it->kind, it->count, nm, sizeof nm), 'a' + slot);
+    game_msg(g, C_GOOD, "you pick up %s (%c).", game_item_name(it->kind, it->count, it->plus, nm, sizeof nm), 'a' + slot);
     sfx(g, SND_PICKUP, p->x, p->y);
     it->alive = false;
 }
@@ -1475,7 +1703,7 @@ static void resolve_throw(Game *g)
             int bx = x, by = y;
             if (g->lv[g->depth + 1]) {
                 nearest_floor(g->lv[g->depth + 1], &bx, &by);
-                place_item(g, g->depth + 1, IT_DART, 1, bx, by, false);
+                place_item(g, g->depth + 1, IT_DART, 1, bx, by, false, 0);
             }
             game_msg(g, C_DIM, "the dart clatters away into the chasm.");
             sfx_ex(g, SND_CLINK, x, y, false, 0.7f, 0.3f);
@@ -1483,9 +1711,9 @@ static void resolve_throw(Game *g)
             push_fx(g, FX_SPLASH, x, y);
             sfx_ex(g, SND_WADE, x, y, false, 0, 0.6f);
             if (lv->t[y][x] == T_DEEP) game_msg(g, C_DIM, "the dart sinks into the deep water.");
-            else place_item(g, g->depth, IT_DART, 1, x, y, false);
+            else place_item(g, g->depth, IT_DART, 1, x, y, false, 0);
         } else if (rng_chance(&g->rng, 85)) {
-            place_item(g, g->depth, IT_DART, 1, x, y, false);
+            place_item(g, g->depth, IT_DART, 1, x, y, false, 0);
             if (!m) sfx(g, SND_CLINK, x, y);
         } else {
             game_msg(g, C_DIM, "the dart snaps.");
@@ -1612,9 +1840,25 @@ bool game_use(Game *g, int slot)
         end_turn(g);
         return true;
     }
-    default:
-        game_msg(g, C_DIM, "you can't use that; try throwing it.");
-        return false;
+    default: {
+        const ItemInfo *ii = &ITEM_INFO[g->inv[slot].kind];
+        if (ii->gear == GEAR_NONE) {
+            game_msg(g, C_DIM, "you can't use that; try throwing it.");
+            return false;
+        }
+        /* swap it with what you have on: the old piece goes into the pack in its place */
+        Slot *cur = ii->gear == GEAR_WEAPON ? &g->weapon : &g->armour;
+        Slot old = *cur;
+        *cur = g->inv[slot];
+        g->inv[slot] = old;
+        char a[64], b[64];
+        game_item_name(cur->kind, 1, cur->plus, a, sizeof a);
+        game_item_name(old.kind, 1, old.plus, b, sizeof b);
+        game_msg(g, C_INFO, ii->gear == GEAR_WEAPON ? "you now wield %s, and pack away %s." : "you now wear %s, and pack away %s.", a, b);
+        sfx(g, SND_PICKUP, p->x, p->y);
+        end_turn(g);
+        return true;
+    }
     }
 }
 
@@ -1624,18 +1868,127 @@ bool game_drop(Game *g, int slot)
     Mob *p = &g->player;
     FloorItem *here = game_item_at(g, p->x, p->y);
     Slot s = g->inv[slot];
-    if (here && here->kind != s.kind) { game_msg(g, C_DIM, "there's already something here."); return false; }
-    if (!place_item(g, g->depth, s.kind, s.count, p->x, p->y, true)) return false;
+    if (here && (here->kind != s.kind || !stacks(s.kind))) { game_msg(g, C_DIM, "there's already something here."); return false; }
+    if (!place_item(g, g->depth, s.kind, s.count, p->x, p->y, true, s.plus)) return false;
     for (int i = slot; i < g->ninv - 1; i++) g->inv[i] = g->inv[i + 1];
     g->ninv--;
     char nm[64];
     if (game_level(g)->t[p->y][p->x] == T_DEEP) {
-        game_msg(g, C_DIM, "you let go of %s and it sinks out of sight.", game_item_name(s.kind, s.count, nm, sizeof nm));
+        game_msg(g, C_DIM, "you let go of %s and it sinks out of sight.", game_item_name(s.kind, s.count, s.plus, nm, sizeof nm));
         sfx_ex(g, SND_SWIM, p->x, p->y, false, 0, 0.6f);
     } else {
-        game_msg(g, C_TEXT, "you put down %s.", game_item_name(s.kind, s.count, nm, sizeof nm));
+        game_msg(g, C_TEXT, "you put down %s.", game_item_name(s.kind, s.count, s.plus, nm, sizeof nm));
         sfx_ex(g, SND_PICKUP, p->x, p->y, false, 0, 0.7f);
     }
     end_turn(g);
     return true;
+}
+
+/* ------------------------------------------------------------------ forge */
+
+bool game_by_forge(Game *g)
+{
+    Level *lv = game_level(g);
+    for (int d = 0; d < 8; d++)
+        if (tile_at(lv, g->player.x + DX8[d], g->player.y + DY8[d]) == T_BRAZIER) return true;
+    return false;
+}
+
+#define LANTERN_MAX 2
+
+int game_forge_cost(const Game *g, ForgeOffer o)
+{
+    switch (o) {
+    case FORGE_WEAPON:  return 3 + 2 * g->weapon.plus;
+    case FORGE_ARMOUR:  return 3 + 2 * g->armour.plus;
+    case FORGE_HEART:   return 4 + 2 * g->heart;
+    case FORGE_LANTERN: return g->lantern >= LANTERN_MAX ? -1 : 5 + 3 * g->lantern;
+    default:            return -1;
+    }
+}
+
+const char *game_forge_label(const Game *g, ForgeOffer o, char *buf, size_t n)
+{
+    char nm[64];
+    switch (o) {
+    case FORGE_WEAPON:
+        game_item_name(g->weapon.kind, 1, g->weapon.plus, nm, sizeof nm);
+        snprintf(buf, n, "Temper your %s to +%d", ITEM_INFO[g->weapon.kind].name, g->weapon.plus + 1);
+        break;
+    case FORGE_ARMOUR:
+        snprintf(buf, n, "Temper your %s to +%d", ITEM_INFO[g->armour.kind].name, g->armour.plus + 1);
+        break;
+    case FORGE_HEART:   snprintf(buf, n, "Kindle your heart: +3 max HP"); break;
+    case FORGE_LANTERN:
+        snprintf(buf, n, g->lantern >= LANTERN_MAX ? "Your lantern is as bright as it gets" : "Trim your lantern");
+        break;
+    default: buf[0] = 0;
+    }
+    return buf;
+}
+
+const char *game_forge_desc(ForgeOffer o)
+{
+    switch (o) {
+    case FORGE_WEAPON:  return "More accurate, and it hits harder. Tempering stays with the weapon if you swap it out.";
+    case FORGE_ARMOUR:  return "Harder to hit. Tempering stays with the armour if you change.";
+    case FORGE_HEART:   return "Three more max HP, for good.";
+    case FORGE_LANTERN: return "Your lantern's own dim glow (not a torch) reaches a tile further: you see more in the dark without being seen.";
+    default:            return "";
+    }
+}
+
+bool game_forge_buy(Game *g, ForgeOffer o)
+{
+    if (g->state != GS_PLAY) return false;
+    int cost = game_forge_cost(g, o);
+    if (cost < 0) return false;
+    if (g->embers < cost) {
+        game_msg(g, C_DIM, "the forge wants %d embers for that; you have %d.", cost, g->embers);
+        return false;
+    }
+    g->embers -= cost;
+    Mob *p = &g->player;
+    switch (o) {
+    case FORGE_WEAPON:
+        g->weapon.plus++;
+        game_msg(g, C_GOOD, "you feed the forge and work your %s in its heart. It comes out +%d.", ITEM_INFO[g->weapon.kind].name, g->weapon.plus);
+        break;
+    case FORGE_ARMOUR:
+        g->armour.plus++;
+        game_msg(g, C_GOOD, "you feed the forge and work your %s in its heat. It comes out +%d.", ITEM_INFO[g->armour.kind].name, g->armour.plus);
+        break;
+    case FORGE_HEART:
+        g->heart++;
+        p->maxhp += 3;
+        p->hp += 3;
+        game_msg(g, C_GOOD, "you hold your hands to the flames and something in you catches. (+3 max HP)");
+        break;
+    case FORGE_LANTERN:
+        g->lantern++;
+        game_msg(g, C_GOOD, "you trim your lantern's wick with a coal from the forge. Its glow reaches further.");
+        break;
+    default: return false;
+    }
+    sfx(g, SND_IGNITE, p->x, p->y);
+    push_fx(g, FX_SPARKS, p->x, p->y);
+    end_turn(g);
+    return true;
+}
+
+/* developer: stand next to this level's forge */
+bool game_debug_to_forge(Game *g)
+{
+    Level *lv = game_level(g);
+    for (int y = 1; y < MAP_H - 1; y++)
+        for (int x = 1; x < MAP_W - 1; x++) {
+            if (lv->t[y][x] != T_BRAZIER) continue;
+            Mob *ms = g->mobs[g->depth];
+            for (int i = 0; i < MAX_MOBS; i++)
+                if (ms[i].alive && abs(ms[i].x - x) < 5 && abs(ms[i].y - y) < 5) ms[i].alive = false;
+            place_player(g, x, y + 1);
+            compute_view(g);
+            return true;
+        }
+    return false;
 }
