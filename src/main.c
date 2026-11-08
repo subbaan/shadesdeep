@@ -406,7 +406,7 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     static Hover hv;
     hv.awake = hv.tip_live = hv.tip_arm = mx >= 0;
     Ctl ctl = { .menu_slot = 0, .tslot = -1 };
-    ui_set_icons(ui, render_item_icons(r));
+    ui_set_icons(ui, render_item_icons(r), render_item_icons_hi(r));
     /* developer views: SHADESDEEP_DUMP_TORCH=1 lights a torch, SHADESDEEP_DUMP_MENU=inv|throw|use|item,
      * SHADESDEEP_DUMP_AIM="dx,dy" aims a torch, SHADESDEEP_DUMP_THROW="dx,dy,frac" freezes one mid-flight */
     if (getenv("SHADESDEEP_DUMP_TORCH")) game_torch_toggle(g);
@@ -525,6 +525,19 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     if (rc) fprintf(stderr, "%s: cannot write %s\n", SHADESDEEP_NAME, path);
     else printf("%s: wrote %s (%dx%d, zoom %d, seed %u, depth %d, turn %d)\n", SHADESDEEP_NAME, path, w, h, fr.zoom,
                 seed, g->depth, g->turn);
+    /* SHADESDEEP_DUMP_FRAMES=N[,FPS]: then N more frames, FILE-001.png on, FPS a second (default 24) */
+    int nframes = 0, ffps = 24;
+    if (getenv("SHADESDEEP_DUMP_FRAMES")) sscanf(getenv("SHADESDEEP_DUMP_FRAMES"), "%d,%d", &nframes, &ffps);
+    if (ffps < 1) ffps = 24;
+    for (int i = 1; i <= nframes && !rc; i++) {
+        game_update(g, 1.0f / ffps);
+        draw_frame(r, ui, g, &fr, &hv, &ctl, mx, my, 1.0f / ffps, ffps, false);
+        char fp[PATH_MAX + 16];
+        const char *dot = strrchr(path, '.');
+        int stem = dot && !strchr(dot, '/') ? (int)(dot - path) : (int)strlen(path);
+        snprintf(fp, sizeof fp, "%.*s-%03d.png", stem, path, i);
+        if ((rc = canvas_write_png(&fr.screen, fp))) fprintf(stderr, "%s: cannot write %s\n", SHADESDEEP_NAME, fp);
+    }
     free(fr.screen.px);
     free(fr.world.px);
     render_free(r);
@@ -687,7 +700,7 @@ int main(int argc, char **argv)
     bool save_gone = false;
     Renderer *r = render_new();
     if (!classic_art) render_load_sprites(r, assets);
-    ui_set_icons(ui, render_item_icons(r));
+    ui_set_icons(ui, render_item_icons(r), render_item_icons_hi(r));
     if (!no_sound) {
         if (snd_init(assets) != 0) game_msg(g, C_DIM, "(no sound: %s)", snd_status());
         else if (start_muted) snd_toggle_mute();

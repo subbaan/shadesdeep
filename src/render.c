@@ -26,16 +26,20 @@ typedef struct { float x, y, age, life, str; } Ripple;
  * world canvas is zoomed up, render_hires draws it again from that sprite,
  * on the screen pixels where the small sprite is still what shows. */
 typedef struct {
-    int kind;
+    const Image *im, *gl;   /* the full-resolution picture and its glow */
+    int glow_a;             /* how strongly the glow shows (255: in place of the lit colour) */
     int x, y, W;            /* canvas pixels: top-left and size of the drawn square */
     bool flip, asleep, sub;
     int wl;                 /* waterline (canvas y) when sub */
     float lr, lg, lb, alpha;
     int fl;                 /* white flash, 0..230 */
+    bool fog;               /* fade it into memory like the floor: visibility fv, seen fs */
+    float fv, fs;
     bool stick;             /* the player's torch haft, hand (sx0, sy0) to head (sx1, sy1) */
     int sx0, sy0, sx1, sy1;
 } HiCmd;
-#define MAX_HICMD (MAX_MOBS + 1)
+#define MAX_HICMD (MAX_MOBS + 1 + MAX_ITEMS)
+#define MAX_MOTES 130
 
 struct Renderer {
     Tiles t;
@@ -67,6 +71,7 @@ struct Renderer {
     float rip_acc[MAX_MOBS + 1];        /* idle ripples around anything standing in water */
     float flash_t, flash_x, flash_y;    /* flash powder going off: seconds left, world pixels */
     float ember_acc[MAX_LIGHTS];
+    struct { float x, y, ph, sp, dx; bool ok; } mote[MAX_MOTES];     /* dust in the air, world pixels */
     uint8_t noise[256 * 256];
     Rng rng;
 };
@@ -1285,6 +1290,18 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
     }
     float breathe = (fmodf(v->time + m->idle, 1.6f) < 0.8f) ? 0 : 1;
     if (m->asleep) breathe = (fmodf(v->time * 0.5f + m->idle, 2.0f) < 1.0f) ? 0 : 1;
+    /* its idle animation, if it has one, each creature at its own point in the loop;
+     * the frames breathe for it, and a sleeper holds still */
+    int nfr = tiles_frames(&r->t, m->kind), frame = 0;
+    if (nfr) {
+        static const float fps[MK_COUNT] = { [MK_OGRE] = 5, [MK_BAT] = 13, [MK_RAT] = 9, [MK_GOBLIN] = 8 };
+        float rate = fps[m->kind] > 0 ? fps[m->kind] : 7;
+        if (!m->asleep) {
+            frame = (int)floorf((v->time + m->idle * 5.3f) * rate) % nfr;
+            if (frame < 0) frame += nfr;
+            breathe = 0;
+        }
+    }
     bool bat = m->kind == MK_BAT;
     if (bat) breathe = m->asleep ? breathe : sinf(v->time * 9 + m->idle * 4) * 2.0f;
     int px = (int)lroundf(m->rx * TILE + ox) - v->camx;
@@ -1316,13 +1333,22 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
     px -= (W - TILE) / 2;
     py -= W - TILE;
     const Image *im = &r->t.mob[m->kind], *gl = &r->t.mob_glow[m->kind];
+    if (nfr) {
+        im = &r->t.mob_fr[m->kind][frame];
+        gl = &r->t.mob_fr_glow[m->kind][frame];
+    }
     int fl = m->flash > 0 ? (int)(m->flash * 230) : 0;
     /* a full-resolution sprite to draw over this one once zoomed: note what it covers */
     int hid = 0;
     if (cv == r->rec_cv && r->t.mob_hi[m->kind].px && r->nhic < MAX_HICMD) {
         hid = ++r->nhic;
-        r->hic[hid - 1] = (HiCmd){ m->kind, px, py, W, m->flip, m->asleep, sub != 0, wl,
-                                   lr * 1.1f, lg * 1.1f, lb * 1.1f, alpha, fl, false, 0, 0, 0, 0 };
+        const Image *him = &r->t.mob_hi[m->kind], *hgl = &r->t.mob_hi_glow[m->kind];
+        if (nfr && tiles_hi_frames(&r->t, m->kind) == nfr) {
+            him = &r->t.mob_hi_fr[m->kind][frame];
+            hgl = &r->t.mob_hi_fr_glow[m->kind][frame];
+        }
+        r->hic[hid - 1] = (HiCmd){ him, hgl, 255, px, py, W, m->flip, m->asleep, sub != 0, wl,
+                                   lr * 1.1f, lg * 1.1f, lb * 1.1f, alpha, fl, false, 1, 1, false, 0, 0, 0, 0 };
     }
     for (int j = 0; j < W; j++) {
         int y = py + j;
@@ -1629,6 +1655,53 @@ static void draw_effects(Renderer *r, Canvas *cv, const View *v, float dt)
     }
 }
 
+/* Dust hanging in the air: it drifts slowly and only shows where light
+ * catches it, twinkling, so a torch-lit room glitters a little. */
+static void draw_motes(Renderer *r, Canvas *cv, const View *v, float dt)
+{
+    const Level *lv = v->lv;
+    float x0 = (float)v->camx - 16, y0 = (float)v->camy - 16, w = cv->w + 32.0f, h = cv->h + 32.0f;
+    for (int i = 0; i < MAX_MOTES; i++) {
+        __typeof__(r->mote[0]) *m = &r->mote[i];
+        if (!m->ok || m->x < x0 || m->y < y0 || m->x > x0 + w || m->y > y0 + h) {
+            /* somewhere open and in view (most of the screen is solid rock) */
+            for (int tries = 0; tries < 12; tries++) {
+                m->x = x0 + rng_f(&r->rng) * w;
+                m->y = y0 + rng_f(&r->rng) * h;
+                int qx = (int)(m->x / TILE), qy = (int)(m->y / TILE);
+                if (in_map(qx, qy) && !tile_opaque((Tile)lv->t[qy][qx]) && (!v->fog || (lv->f[qy][qx] & F_VIS))) break;
+            }
+            m->ph = rng_f(&r->rng) * 6.283f;
+            m->sp = 0.4f + rng_f(&r->rng) * 0.9f;
+            m->dx = (rng_f(&r->rng) - 0.5f) * 3;
+            m->ok = true;
+        }
+        /* a lazy wander, sinking very slowly */
+        m->x += (m->dx + sinf(v->time * 0.7f * m->sp + m->ph) * 2.5f) * dt;
+        m->y += (1.2f * m->sp + cosf(v->time * 0.9f * m->sp + m->ph * 1.3f) * 2.0f) * dt;
+        int tx = (int)(m->x / TILE), ty = (int)(m->y / TILE);
+        if (!in_map(tx, ty) || tile_opaque((Tile)lv->t[ty][tx]) || (v->fog && !(lv->f[ty][tx] & F_VIS))) {
+            if (rng_chance(&r->rng, 3)) m->ok = false;        /* drifted out of sight: find it a new place, now and then */
+            continue;
+        }
+        CF c;
+        light_at_px(r, m->x, m->y, &c);
+        float l = (c.r + c.g + c.b) / 3;
+        if (v->fog) l *= c.v;
+        if (l < 0.35f) continue;
+        float tw = 0.5f + 0.5f * sinf(v->time * (2.2f + m->sp * 2.5f) + m->ph * 3);
+        float k = clampf((l - 0.35f) * 1.4f, 0, 1) * tw * tw;
+        if (k < 0.05f) continue;
+        int px = (int)m->x - v->camx, py = (int)m->y - v->camy;
+        /* a speck of light, paler than what lights it, with a soft halo */
+        float cr = fminf(c.r, 1.3f) / 1.3f, cg = fminf(c.g, 1.3f) / 1.3f, cb = fminf(c.b, 1.3f) / 1.3f;
+        uint32_t col = RGB(clampi((int)(170 + 85 * cr), 0, 255), clampi((int)(150 + 95 * cg), 0, 255), clampi((int)(110 + 120 * cb), 0, 255));
+        if ((unsigned)px < (unsigned)cv->w && (unsigned)py < (unsigned)cv->h)
+            blend_px(&cv->px[(size_t)py * cv->w + px], col, (int)(245 * k));
+        cv_glow(cv, px, py, 3, col, 0.45f * k);
+    }
+}
+
 static void draw_items(Renderer *r, Canvas *cv, const View *v)
 {
     if (!v->items) return;
@@ -1650,8 +1723,25 @@ static void draw_items(Renderer *r, Canvas *cv, const View *v)
                     blend_px(&cv->px[(size_t)y * cv->w + x], 0, (int)(70 * (1 - d)));
             }
         CF c00 = r->corner[ty][tx], c10 = r->corner[ty][tx + 1], c01 = r->corner[ty + 1][tx], c11 = r->corner[ty + 1][tx + 1];
-        draw_lit(cv, sx, sy, im, TILE, TILE, &c00, &c10, &c01, &c11, 1.15f, 1.15f, 0, v->fog, NULL, 0);
         bool vis = !v->fog || (lv->f[ty][tx] & F_VIS);
+        /* in full view, with a full-resolution picture: note it for render_hires */
+        int hid = 0;
+        if (cv == r->rec_cv && r->t.item_hi[it->kind].px && r->nhic < MAX_HICMD) {
+            hid = ++r->nhic;
+            float lr = (c00.r + c10.r + c01.r + c11.r) / 4 * 1.15f, lg = (c00.g + c10.g + c01.g + c11.g) / 4 * 1.15f;
+            float lb = (c00.b + c10.b + c01.b + c11.b) / 4 * 1.15f;
+            float fv = (c00.v + c10.v + c01.v + c11.v) / 4, fs = (c00.s + c10.s + c01.s + c11.s) / 4;
+            r->hic[hid - 1] = (HiCmd){ &r->t.item_hi[it->kind], &r->t.item_hi_glow[it->kind], vis ? 150 : 0, sx, sy, TILE,
+                                       false, false, false, 0, lr, lg, lb, 1, 0, v->fog, fv, fs, false, 0, 0, 0, 0 };
+            for (int j = 0; j < TILE; j++)
+                for (int k = 0; k < TILE; k++) {
+                    int x = sx + k, y = sy + j;
+                    if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
+                    size_t o = (size_t)y * cv->w + x;
+                    if (!r->own[o]) r->hbg[o] = cv->px[o];
+                }
+        }
+        draw_lit(cv, sx, sy, im, TILE, TILE, &c00, &c10, &c01, &c11, 1.15f, 1.15f, 0, v->fog, NULL, 0);
         const Image *gl = &r->t.item_glow[it->kind];
         if (vis)
             for (int j = 0; j < TILE; j++)
@@ -1660,6 +1750,14 @@ static void draw_items(Renderer *r, Canvas *cv, const View *v)
                     int x = sx + k, y = sy + j;
                     if (CA(g) && (unsigned)x < (unsigned)cv->w && (unsigned)y < (unsigned)cv->h)
                         blend_px(&cv->px[(size_t)y * cv->w + x], g & 0xffffff, 150);
+                }
+        if (hid)
+            for (int j = 0; j < TILE; j++)
+                for (int k = 0; k < TILE; k++) {
+                    int x = sx + k, y = sy + j;
+                    if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
+                    size_t o = (size_t)y * cv->w + x;
+                    if (!r->own[o]) { r->own[o] = (uint16_t)hid; r->hwr[o] = cv->px[o]; }
                 }
         /* now and then a glint catches the eye */
         if (vis && v->fog) {
@@ -2058,6 +2156,7 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
     if (!ov->tlen) draw_path(cv, &v, ov->path, ov->plen, -1, -1, g->time);
     draw_rows(r, cv, &v);
     draw_effects(r, cv, &v, dt);
+    draw_motes(r, cv, &v, dt);
     if (g->proj.active) draw_projectile(r, cv, &v, &g->proj, dt);
     draw_throw_preview(cv, &v, ov, &g->player);
     if (ov->hx >= 0) draw_path(cv, &v, NULL, 0, ov->hx, ov->hy, g->time);
@@ -2110,7 +2209,9 @@ static inline uint32_t hi_texel(const Image *im, const Image *gl, const HiCmd *c
     *a = (int)CA(p);
     if (!*a) return 0;
     uint32_t g = gl->px[(size_t)y * gl->w + x];
-    uint32_t col = CA(g) ? (g & 0xffffff) : lightc(p & 0xffffff, c->lr, c->lg, c->lb);
+    uint32_t col = lightc(p & 0xffffff, c->lr, c->lg, c->lb);
+    if (c->fog) col = fogmix(col, memtone(p & 0xffffff), c->fv, c->fs);
+    if (CA(g) && c->glow_a) col = c->glow_a >= 255 ? (g & 0xffffff) : mix(col, g & 0xffffff, c->glow_a);
     if (c->asleep && !CA(g)) col = mix(col, 0x202838, 60);
     if (c->fl) col = mix(col, 0xffffff, c->fl);
     return col;
@@ -2173,7 +2274,7 @@ void render_hires(Renderer *r, Canvas *scr, const Canvas *world, int zoom)
     if (zoom < 2 || !r->nhic || world->w != r->hcv_w || world->h != r->hcv_h) return;
     for (int k = 0; k < r->nhic; k++) {
         const HiCmd *c = &r->hic[k];
-        const Image *im = &r->t.mob_hi[c->kind], *gl = &r->t.mob_hi_glow[c->kind];
+        const Image *im = c->im, *gl = c->gl;
         int D = c->W * zoom;
         float s = (float)im->w / (float)D;          /* sprite texels per screen pixel */
         float sharp = fmaxf(1.0f / s, 1.5f);        /* "sharp bilinear": blend only near texel edges */
@@ -2266,6 +2367,7 @@ void render_map(Renderer *r, Game *g, Canvas *dst, int tx, int ty, int tw, int t
 }
 
 const Image *render_item_icons(const Renderer *r) { return r->t.item; }
+const Image *render_item_icons_hi(const Renderer *r) { return r->t.item_hi; }
 
 int render_load_sprites(Renderer *r, const char *assets)
 {
@@ -2279,5 +2381,6 @@ int render_load_sprites(Renderer *r, const char *assets)
     if (cnt) { r->hand_x = (int)(sx / cnt); r->hand_y = (int)(sy / cnt); }
     r->any_hi = false;
     for (int k = 0; k < MK_COUNT; k++) r->any_hi |= r->t.mob_hi[k].px != NULL;
+    for (int k = 0; k < IT_COUNT; k++) r->any_hi |= r->t.item_hi[k].px != NULL;
     return n;
 }

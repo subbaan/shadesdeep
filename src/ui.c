@@ -17,6 +17,7 @@ typedef struct { int x, y, w, h; } Box;
 struct UI {
     Font *head, *body, *small, *big;
     Image icons[IT_COUNT];  /* not owned: set by ui_set_icons */
+    Image icons_hi[IT_COUNT];   /* full resolution ones, px NULL when none */
     int cell_h;
     float scale;
     int px;                 /* body text size */
@@ -84,9 +85,19 @@ static void add_btn_arg(UI *ui, int x, int y, int w, int h, UiAction a, int arg)
 
 static void add_btn(UI *ui, int x, int y, int w, int h, UiAction a) { add_btn_arg(ui, x, y, w, h, a, 0); }
 
-void ui_set_icons(UI *ui, const Image *icons)
+void ui_set_icons(UI *ui, const Image *icons, const Image *icons_hi)
 {
-    for (int i = 0; i < IT_COUNT; i++) ui->icons[i] = icons[i];
+    for (int i = 0; i < IT_COUNT; i++) {
+        ui->icons[i] = icons[i];
+        ui->icons_hi[i] = icons_hi ? icons_hi[i] : (Image){ 0 };
+    }
+}
+
+/* an item's picture, s times its tile size: from the full-resolution one when there is one */
+static void item_icon(const UI *ui, Canvas *cv, int k, int x, int y, int s, int alpha)
+{
+    if (ui->icons_hi[k].px && s > 1) cv_image_fit(cv, &ui->icons_hi[k], x, y, TILE * s, alpha);
+    else cv_image_scaled(cv, &ui->icons[k], x, y, s, alpha);
 }
 
 static void add_panel(UI *ui, int x, int y, int w, int h)
@@ -689,7 +700,7 @@ static void menu_panel(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int bottom
         int x = cv->w - w - ui->px / 2, y = bottom - h - ui->px / 2;
         panel(ui, cv, x, y, w, h, 235, true);
         int big = s * 3 / 2 > s ? s * 3 / 2 : s + 1;
-        cv_image_scaled(cv, &ui->icons[sl->kind], x + pad, y + pad, big, 255);
+        item_icon(ui, cv, sl->kind, x + pad, y + pad, big, 255);
         char nm[64];
         game_item_name(sl->kind, sl->count, sl->plus, nm, sizeof nm);
         char title[80];
@@ -737,7 +748,7 @@ static void menu_panel(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int bottom
         bool ok = menu_allows(f->menu, sl->kind);
         bool hov = ok && f->mx >= x && f->mx < x + w && f->my >= yy && f->my < yy + row;
         if (hov) cv_blend_rect(cv, x + 3, yy, w - 6, row, 0x4a3820, 170);
-        cv_image_scaled(cv, &ui->icons[sl->kind], x + pad, yy + ui->px / 8, s, ok ? 255 : 90);
+        item_icon(ui, cv, sl->kind, x + pad, yy + ui->px / 8, s, ok ? 255 : 90);
         char nm[64], line[96];
         game_item_name(sl->kind, sl->count, sl->plus, nm, sizeof nm);
         snprintf(line, sizeof line, "%s", nm);

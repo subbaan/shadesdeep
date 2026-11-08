@@ -39,6 +39,7 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
 void render_map(Renderer *r, Game *g, Canvas *dst, int tx, int ty, int tw, int th);
 
 const Image *render_item_icons(const Renderer *r);        /* IT_COUNT pictures */
+const Image *render_item_icons_hi(const Renderer *r);     /* the same at full resolution (px NULL: none) */
 int render_dump_lower(const Renderer *r, const char *path);   /* developer aid */
 
 #endif

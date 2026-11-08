@@ -52,6 +52,8 @@ void cv_disc(Canvas *cv, float cx, float cy, float r, uint32_t c, int a);     /*
 void cv_ring(Canvas *cv, float cx, float cy, float r, float width, uint32_t c, int a);
 /* Draw an image scaled up by an integer factor (for interface icons). */
 void cv_image_scaled(Canvas *cv, const Image *im, int x, int y, int s, int alpha);
+/* draw im into a size x size box: averaged when shrinking, "sharp bilinear" when enlarging */
+void cv_image_fit(Canvas *cv, const Image *im, int x, int y, int size, int alpha);
 void cv_line(Canvas *cv, int x0, int y0, int x1, int y1, uint32_t c, int a);
 /* Draw an image (sprite rect sx,sy,sw,sh) with alpha at x,y; flip mirrors it. */
 void cv_image(Canvas *cv, const Image *im, int sx, int sy, int sw, int sh, int x, int y, int flip);

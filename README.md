@@ -5,7 +5,9 @@ art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.13.2 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
+
+Version: 0.14.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -41,10 +43,12 @@ sound; if no audio device opens, the game runs silent.
   down and descend, `<` climb; `i` items, `t` throw, `a` / `q` use,
   `d` drop, `T` light or snuff your torch; `m` map; `+` / `-` zoom;
   F2 sound on/off; `?` help; Esc twice saves and quits.
-- **Art:** the player and creatures are pixel-art sprites made with
-  [SpriteCook](https://spritecook.ai), drawn from the full-detail art when
-  zoomed in so they stay sharp; `--classic-art` brings back the original
-  built-in ones.
+- **Art:** the player, the creatures and the items are pixel art made with
+  [SpriteCook](https://spritecook.ai). Every creature has an idle animation
+  (breathing, a swaying lantern, a whirling sling, flapping wings), dust
+  glitters in the torchlight, and at zoom 2 and up everything is drawn from the
+  full-detail art so it stays sharp; `--classic-art` brings back the original
+  built-in sprites.
 - **Saving:** quitting (or closing the window) saves the game, and the next
   start carries on where you left off; it's also saved on every new level.
   Death (or winning) deletes the save. It lives in `~/.local/share/shadesdeep/save.gz`;
@@ -155,7 +159,8 @@ away (4 also lights the sconce). It applies after `SHADESDEEP_DUMP_JUMP`. `SHADE
 `SHADESDEEP_DUMP_MOBS="bat,2,0;ogre,0,2"` puts creatures near the player (rat,
 goblin, shade, bat, slinger, ogre, eel; `eel+` is an eel above the water).
 `SHADESDEEP_DUMP_FORGE=N` stands by the forge with N embers and opens it (`N,0`
-leaves it shut), and `SHADESDEEP_DUMP_GEAR="spear,1;mail,0"` puts gear in the pack (`SHADESDEEP_DUMP_SLOT=N`
+leaves it shut), `SHADESDEEP_DUMP_FRAMES=N[,FPS]` writes N more frames after the
+first (`out-001.png` on, FPS a second, default 24: for checking animation), and `SHADESDEEP_DUMP_GEAR="spear,1;mail,0"` puts gear in the pack (`SHADESDEEP_DUMP_SLOT=N`
 picks the item `SHADESDEEP_DUMP_MENU=item` shows).
 
 The sounds are synthesized by `tools/make_sounds.py` (Python 3 with numpy and
@@ -171,11 +176,16 @@ to its procedural sprite in `src/tiles.c`. `NAME_hi.png` (and `NAME_hi_glow.png`
 is the same creature at full resolution on a square canvas laid out like the
 32x32 one: at zoom 2 and up, `render_hires` draws it straight onto the zoomed
 screen wherever the small sprite is still what shows, so walls in front keep
-covering it and glows and shadows drawn over it are put back on top. They are sliced from the SpriteCook
-sheet in `art/spritecook/` by `tools/slice_sprites.py` (Python 3 with Pillow:
+covering it and glows and shadows drawn over it are put back on top.
+`NAME_anim.png` and `NAME_hi_anim.png` (with `_glow` strips) are an idle
+animation, its frames side by side. Items are `item_NAME.png` with `_glow`,
+`_hi` and `_hi_glow` in the same way; the menus draw their icons from the
+`_hi` ones. All of them are sliced from the SpriteCook art in
+`art/spritecook/` (`creatures-1.png`, `items-1.png` and the animation strips
+in `anim/`) by `tools/slice_sprites.py` (Python 3 with Pillow and numpy:
 `python3 tools/slice_sprites.py art/spritecook/creatures-1.png assets/sprites`),
-which crops, mirrors and scales each creature, keeps its eyes, and adds a dark
-rim; `spritecook-assets.json` records the SpriteCook asset ids. The tiles,
-items, shades and the Hollow are still procedural (`src/tiles.c`,
-`src/render.c`). Fonts: Cinzel and Alegreya (SIL Open Font License, see
+which crops, mirrors and scales each picture, lines every animation frame up on
+its still, keeps the eyes, and adds a dark rim; `spritecook-assets.json` records
+the SpriteCook asset ids. The floors, walls, shades and the Hollow are still
+procedural (`src/tiles.c`, `src/render.c`). Fonts: Cinzel and Alegreya (SIL Open Font License, see
 `assets/fonts/`).

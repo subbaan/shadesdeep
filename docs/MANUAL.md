@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.13.2. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.14.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -69,12 +69,17 @@ pop up cards.
 
 **Text size** follows kitty's own font zoom (`ctrl+shift+=` / `-`).
 
-**The creatures' look:** you, the rats, goblins, slingers, bats, ogres and eels
-are drawn pixel-art sprites (their eyes, and your lantern, glow in the dark).
-Zoomed in (`+`, or the mouse wheel) they're drawn from the full-detail art
-rather than blown up, so they stay sharp at any zoom.
-Start with `--classic-art` to play with the game's original blocky sprites
-instead. Shades and the Hollow are always drawn live, as moving darkness.
+**The look:** you, the rats, goblins, slingers, bats, ogres and eels are drawn
+pixel-art sprites, and each one is never quite still: you breathe and your
+lantern sways, rats sniff, goblins fidget, slingers whirl their slings, ogres
+heave, bats flap and eels sway. Their eyes, and your lantern, glow in the dark.
+Every item has its own picture too, on the floor and in your pack, and the
+healing potion, warming draught and embers glow. Dust drifts in the air and
+glitters where the light catches it. Zoomed in (`+`, or the mouse wheel)
+creatures and items are drawn from the full-detail art rather than blown up, so
+they stay sharp at any zoom. Start with `--classic-art` to play with the
+game's original blocky sprites instead (it doesn't still the dust). Shades and
+the Hollow are always drawn live, as moving darkness.
 
 ### Saving
 

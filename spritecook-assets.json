@@ -7,6 +7,63 @@
       "file": "art/spritecook/creatures-1.png",
       "sliced_by": "tools/slice_sprites.py",
       "model": "gemini-nano-banana-2.1"
+    },
+    {
+      "asset_id": "c07b7976-7c9d-4547-9fa2-3f06ac4221e7",
+      "sha12": "5336c7e99717",
+      "label": "items sheet 1 (4x4): torch, dart, potion, sword / dagger, spear, axe, mace / leather, cloak, mail, oil / flash, salt, warmth, embers",
+      "file": "art/spritecook/items-1.png",
+      "sliced_by": "tools/slice_sprites.py",
+      "model": "gemini-nano-banana-2.1"
+    },
+    {
+      "asset_id": "53e951c5-2c5a-49af-a58a-1ceb243de31b",
+      "sha12": "14a351bfb130",
+      "label": "player idle animation, 8 frames (spritesheet)",
+      "file": "art/spritecook/anim/player.png",
+      "sliced_by": "tools/slice_sprites.py"
+    },
+    {
+      "asset_id": "d5bdcccd-c0e7-4bd3-82c9-96be1c2f5c07",
+      "sha12": "aa6c754e795a",
+      "label": "rat idle animation, 8 frames (spritesheet)",
+      "file": "art/spritecook/anim/rat.png",
+      "sliced_by": "tools/slice_sprites.py"
+    },
+    {
+      "asset_id": "cb04e271-bf62-4e69-842f-41b98b51dc8d",
+      "sha12": "1cc3c596d14e",
+      "label": "goblin idle animation, 8 frames (spritesheet)",
+      "file": "art/spritecook/anim/goblin.png",
+      "sliced_by": "tools/slice_sprites.py"
+    },
+    {
+      "asset_id": "9eabe731-d7be-48ad-8317-337081f79447",
+      "sha12": "f36bd0e1b57b",
+      "label": "slinger idle animation, 8 frames (spritesheet)",
+      "file": "art/spritecook/anim/slinger.png",
+      "sliced_by": "tools/slice_sprites.py"
+    },
+    {
+      "asset_id": "1c723131-cf42-45f6-a23a-5d8ee3c39ab1",
+      "sha12": "594a3cbe99fa",
+      "label": "eel idle animation, 8 frames (spritesheet)",
+      "file": "art/spritecook/anim/eel.png",
+      "sliced_by": "tools/slice_sprites.py"
+    },
+    {
+      "asset_id": "0146811d-1756-47a9-a74e-214cd643ee16",
+      "sha12": "e15a279dd2ba",
+      "label": "ogre idle animation, 8 frames (spritesheet)",
+      "file": "art/spritecook/anim/ogre.png",
+      "sliced_by": "tools/slice_sprites.py"
+    },
+    {
+      "asset_id": "fe3b19e7-2c44-444e-a6d2-21c7c146ed18",
+      "sha12": "47a0467c728f",
+      "label": "bat idle animation, 8 frames (spritesheet)",
+      "file": "art/spritecook/anim/bat.png",
+      "sliced_by": "tools/slice_sprites.py"
     }
   ]
 }

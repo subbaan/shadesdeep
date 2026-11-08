@@ -82,6 +82,52 @@ void cv_ring(Canvas *cv, float cx, float cy, float r, float width, uint32_t c, i
         }
 }
 
+void cv_image_fit(Canvas *cv, const Image *im, int x, int y, int size, int alpha)
+{
+    if (size <= 0 || !im->px) return;
+    float s = (float)im->w / size;                  /* source texels per box pixel */
+    float sharp = 1 / s < 1.5f ? 1.5f : 1 / s;
+    for (int j = 0; j < size; j++) {
+        int yy = y + j;
+        if ((unsigned)yy >= (unsigned)cv->h) continue;
+        for (int i = 0; i < size; i++) {
+            int xx = x + i;
+            if ((unsigned)xx >= (unsigned)cv->w) continue;
+            float ar = 0, ag = 0, ab = 0, aa = 0;
+            if (s > 1) {
+                /* every texel under this pixel, equally */
+                int x0 = (int)(i * s), x1 = (int)((i + 1) * s), y0 = (int)(j * s), y1 = (int)((j + 1) * s);
+                if (x1 <= x0) x1 = x0 + 1;
+                if (y1 <= y0) y1 = y0 + 1;
+                int n = 0;
+                for (int v = y0; v < y1 && v < im->h; v++)
+                    for (int u = x0; u < x1 && u < im->w; u++, n++) {
+                        uint32_t c = im->px[(size_t)v * im->w + u];
+                        float a = (float)CA(c);
+                        ar += CR(c) * a; ag += CG(c) * a; ab += CB(c) * a; aa += a;
+                    }
+                if (!n) continue;
+                aa /= n; ar /= n; ag /= n; ab /= n;
+            } else {
+                float fx = (i + 0.5f) * s - 0.5f, fy = (j + 0.5f) * s - 0.5f;
+                int x0 = (int)floorf(fx), y0 = (int)floorf(fy);
+                float tx = clampf((fx - x0 - 0.5f) * sharp + 0.5f, 0, 1), ty = clampf((fy - y0 - 0.5f) * sharp + 0.5f, 0, 1);
+                float w[4] = { (1 - tx) * (1 - ty), tx * (1 - ty), (1 - tx) * ty, tx * ty };
+                for (int q = 0; q < 4; q++) {
+                    int u = x0 + (q & 1), v = y0 + (q >> 1);
+                    if (w[q] <= 0 || (unsigned)u >= (unsigned)im->w || (unsigned)v >= (unsigned)im->h) continue;
+                    uint32_t c = im->px[(size_t)v * im->w + u];
+                    float a = CA(c) * w[q];
+                    ar += CR(c) * a; ag += CG(c) * a; ab += CB(c) * a; aa += a;
+                }
+            }
+            if (aa <= 0.5f) continue;
+            uint32_t c = RGB((int)(ar / aa + 0.5f), (int)(ag / aa + 0.5f), (int)(ab / aa + 0.5f));
+            blend_px(&cv->px[(size_t)yy * cv->w + xx], c, (int)(aa * alpha / 255));
+        }
+    }
+}
+
 void cv_image_scaled(Canvas *cv, const Image *im, int x, int y, int s, int alpha)
 {
     for (int j = 0; j < im->h * s; j++) {

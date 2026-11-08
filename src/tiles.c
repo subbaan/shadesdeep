@@ -1000,6 +1000,31 @@ static const char *const MOB_FILE[MK_COUNT] = {
     [MK_SLINGER] = "slinger", [MK_OGRE] = "ogre", [MK_EEL] = "eel",
 };
 
+static const char *const ITEM_FILE[IT_COUNT] = {
+    [IT_TORCH] = "torch", [IT_DART] = "dart", [IT_POTION] = "potion", [IT_SWORD] = "sword",
+    [IT_DAGGER] = "dagger", [IT_SPEAR] = "spear", [IT_AXE] = "axe", [IT_MACE] = "mace",
+    [IT_LEATHER] = "leather", [IT_CLOAK] = "cloak", [IT_MAIL] = "mail", [IT_OIL] = "oil",
+    [IT_FLASH] = "flash", [IT_SALT] = "salt", [IT_WARMTH] = "warmth", [IT_EMBERS] = "embers",
+};
+
+/* a square full-resolution picture (TILE..8 TILE) and its glow, the same size or a blank one */
+static bool load_hi(const char *path, const char *gpath, Image *hi, Image *hg)
+{
+    *hi = (Image){ 0 };
+    *hg = (Image){ 0 };
+    if (access(path, R_OK) != 0 || image_load(hi, path) != 0) return false;
+    if (hi->w != hi->h || hi->w < TILE || hi->w > 8 * TILE) {
+        fprintf(stderr, "%s: %s is %dx%d, not square (%d to %d); ignored\n", SHADESDEEP_NAME, path, hi->w, hi->h, TILE, 8 * TILE);
+        image_free(hi);
+        return false;
+    }
+    if (access(gpath, R_OK) != 0 || image_load(hg, gpath) != 0 || hg->w != hi->w || hg->h != hi->h) {
+        if (hg->px) image_free(hg);
+        image_alloc(hg, hi->w, hi->h);
+    }
+    return true;
+}
+
 static bool load_tile_png(Image *im, const char *path)
 {
     if (image_load(im, path) != 0) return false;
@@ -1009,9 +1034,58 @@ static bool load_tile_png(Image *im, const char *path)
     return false;
 }
 
+/* split a strip of n square frames (each fw wide) from path into out[]; glow
+ * strip (may be missing) into gout[]. Returns n, 0 if absent or the wrong shape. */
+static int load_strip(const char *path, const char *gpath, int fw, Image *out, Image *gout)
+{
+    Image st = { 0 }, gs = { 0 };
+    if (access(path, R_OK) != 0 || image_load(&st, path) != 0) return 0;
+    int n = st.w / fw;
+    if (st.h != fw || st.w % fw || n < 2 || n > MAX_FRAMES) {
+        fprintf(stderr, "%s: %s is %dx%d, not frames of %dx%d side by side; ignored\n",
+                SHADESDEEP_NAME, path, st.w, st.h, fw, fw);
+        image_free(&st);
+        return 0;
+    }
+    bool g = access(gpath, R_OK) == 0 && image_load(&gs, gpath) == 0 && gs.w == st.w && gs.h == st.h;
+    for (int f = 0; f < n; f++) {
+        image_alloc(&out[f], fw, fw);
+        image_alloc(&gout[f], fw, fw);
+        for (int y = 0; y < fw; y++) {
+            memcpy(&out[f].px[(size_t)y * fw], &st.px[(size_t)y * st.w + f * fw], (size_t)fw * 4);
+            if (g) memcpy(&gout[f].px[(size_t)y * fw], &gs.px[(size_t)y * gs.w + f * fw], (size_t)fw * 4);
+        }
+    }
+    image_free(&st);
+    image_free(&gs);
+    return n;
+}
+
 int tiles_load_sprites(Tiles *t, const char *dir)
 {
     int n = 0;
+    for (int k = 0; k < IT_COUNT; k++) {
+        if (!ITEM_FILE[k]) continue;
+        char p[4096], gp[4096];
+        Image im, gl, hi, hg;
+        snprintf(p, sizeof p, "%s/sprites/item_%s.png", dir, ITEM_FILE[k]);
+        if (access(p, R_OK) != 0 || !load_tile_png(&im, p)) continue;
+        snprintf(p, sizeof p, "%s/sprites/item_%s_glow.png", dir, ITEM_FILE[k]);
+        if (access(p, R_OK) != 0 || !load_tile_png(&gl, p)) image_alloc(&gl, TILE, TILE);
+        image_free(&t->item[k]);
+        image_free(&t->item_glow[k]);
+        t->item[k] = im;
+        t->item_glow[k] = gl;
+        n++;
+        snprintf(p, sizeof p, "%s/sprites/item_%s_hi.png", dir, ITEM_FILE[k]);
+        snprintf(gp, sizeof gp, "%s/sprites/item_%s_hi_glow.png", dir, ITEM_FILE[k]);
+        if (load_hi(p, gp, &hi, &hg)) {
+            image_free(&t->item_hi[k]);
+            image_free(&t->item_hi_glow[k]);
+            t->item_hi[k] = hi;
+            t->item_hi_glow[k] = hg;
+        }
+    }
     for (int k = 0; k < MK_COUNT; k++) {
         if (!MOB_FILE[k]) continue;
         char p[4096];
@@ -1025,6 +1099,10 @@ int tiles_load_sprites(Tiles *t, const char *dir)
         t->mob[k] = im;
         t->mob_glow[k] = gl;
         n++;
+        char gp[4096];
+        snprintf(p, sizeof p, "%s/sprites/%s_anim.png", dir, MOB_FILE[k]);
+        snprintf(gp, sizeof gp, "%s/sprites/%s_anim_glow.png", dir, MOB_FILE[k]);
+        int nf = load_strip(p, gp, TILE, t->mob_fr[k], t->mob_fr_glow[k]);
         /* full resolution: any square size from TILE up, its glow the same size */
         Image hi = { 0 }, hg = { 0 };
         snprintf(p, sizeof p, "%s/sprites/%s_hi.png", dir, MOB_FILE[k]);
@@ -1043,6 +1121,15 @@ int tiles_load_sprites(Tiles *t, const char *dir)
         image_free(&t->mob_hi_glow[k]);
         t->mob_hi[k] = hi;
         t->mob_hi_glow[k] = hg;
+        if (nf) {
+            snprintf(p, sizeof p, "%s/sprites/%s_hi_anim.png", dir, MOB_FILE[k]);
+            snprintf(gp, sizeof gp, "%s/sprites/%s_hi_anim_glow.png", dir, MOB_FILE[k]);
+            int nh = load_strip(p, gp, hi.w, t->mob_hi_fr[k], t->mob_hi_fr_glow[k]);
+            if (nh && nh != nf) {
+                fprintf(stderr, "%s: %s has %d frames, %s_anim.png %d; ignored\n", SHADESDEEP_NAME, p, nh, MOB_FILE[k], nf);
+                for (int f = 0; f < nh; f++) { image_free(&t->mob_hi_fr[k][f]); image_free(&t->mob_hi_fr_glow[k][f]); }
+            }
+        }
     }
     return n;
 }
