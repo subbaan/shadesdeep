@@ -53,7 +53,7 @@ static void grow(void **buf, size_t *cap, size_t need)
 
 static void shm_name(char *out, size_t n, unsigned seq)
 {
-    snprintf(out, n, "/lume-%d-%u", (int)getpid(), seq);
+    snprintf(out, n, "/shadesdeep-%d-%u", (int)getpid(), seq);
 }
 
 /* Canvas -> packed RGB, nearest-neighbour upscaled by s. */

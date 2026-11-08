@@ -1,6 +1,6 @@
 /* Dungeon levels: tiles, rooms, light sources, field of view and lighting. */
-#ifndef LUME_MAP_H
-#define LUME_MAP_H
+#ifndef SHADESDEEP_MAP_H
+#define SHADESDEEP_MAP_H
 
 #include <stdbool.h>
 #include <stdint.h>

@@ -1,6 +1,6 @@
-# Lume — Player's Manual
+# Shadesdeep — Player's Manual
 
-*Covers Lume 0.8.1. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.9.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches and
@@ -65,15 +65,15 @@ pop up cards.
 ### Saving
 
 There's one game at a time, and it's always kept. Quitting (`Esc` twice, or
-just closing the window) saves it, and the next time you start Lume you carry
+just closing the window) saves it, and the next time you start Shadesdeep you carry
 on exactly where you left off. The game is also saved each time you reach a
 new level, in case something goes wrong. **Dying ends the game for good:** the
 save is deleted and the next start is a new dungeon.
 
-The save lives in `~/.local/share/lume/save.gz`. Starting with `--new`
+The save lives in `~/.local/share/shadesdeep/save.gz`. Starting with `--new`
 begins a fresh game (your saved one is replaced when you quit), `--save=FILE`
 keeps it somewhere else, and `--no-save` plays without one. A save from a
-version of Lume that this one can't read is set aside as `save.gz.old`
+version of Shadesdeep that this one can't read is set aside as `save.gz.old`
 rather than deleted.
 
 ---
@@ -111,7 +111,7 @@ the game is choosing when to be seen.
 
 ## Torches
 
-Torches are the clock in Lume, the way food is in other roguelikes. You find
+Torches are the clock in Shadesdeep, the way food is in other roguelikes. You find
 about three for every four levels, plus the two you start with, and the
 supply is paced so you're never flooded or starved by luck.
 

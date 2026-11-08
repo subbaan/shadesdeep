@@ -178,22 +178,52 @@ static void hp_bar(Canvas *cv, int x, int y, int w, int h, int hp, int max)
 static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
 {
     int h = font_line(ui->head) * 2;
-    int y = cv->h - h;
-    *top = y;
-    cv_blend_rect(cv, 0, y, cv->w, h, INK, 225);
-    cv_fill(cv, 0, y, cv->w, 1, GOLD_DIM);
-    cv_fill(cv, 0, y + 2, cv->w, 1, 0x2a2214);
-    add_panel(ui, 0, y, cv->w, h);
     Font *hf = ui->head;
-    int base = y + (h + font_ascent(hf) * 7 / 10) / 2;
     int pad = ui->px;
     Mob *p = &g->player;
+    char buf[64];
+
+    /* the actions, right-aligned; measured first to see whether everything fits on one row */
+    bool has_torch = g->torch_fuel > 0;
+    for (int i = 0; i < g->ninv; i++) if (g->inv[i].kind == IT_TORCH) has_torch = true;
+    const char *tl = g->torch_lit ? "Snuff" : "Torch";
+    struct { const char *k, *l; UiAction a; bool en; } B[] = {
+        { "x", "Explore", UA_EXPLORE, true }, { "Z", "Rest", UA_REST, true }, { "t", "Throw", UA_THROW, g->ninv > 0 },
+        { "i", "Items", UA_INV, true }, { "T", tl, UA_TORCH, has_torch || g->torch_lit }, { ">", "Descend", UA_STAIRS, true },
+        { "m", "Map", UA_MAP, true }, { NULL, "?", UA_HELP, true },
+    };
+    int nb = 8, gap = ui->px / 2, tw_full = 0, tw_compact = 0;
+    for (int i = 0; i < nb; i++) {
+        tw_full += button_width(ui, B[i].k, B[i].l) + gap;
+        tw_compact += button_width(ui, NULL, B[i].l) + gap;
+    }
+    /* the readouts on the left: health, depth, torch, embers */
+    snprintf(buf, sizeof buf, "HP %d/%d", p->hp, game_max_hp(g));
+    int need = pad + font_width(hf, buf) + pad / 2 + ui->px * 5 + pad;
+    snprintf(buf, sizeof buf, "DEPTH %d", g->depth);
+    need += 2 * pad + font_width(hf, buf);
+    if (g->torch_lit || g->torch_fuel > 0) {
+        snprintf(buf, sizeof buf, "TORCH %d", g->torch_fuel);
+        need += 2 * pad + font_width(hf, buf);
+    }
+    if (g->embers > 0 || g->heart || g->lantern || g->weapon.plus || g->armour.plus) {
+        snprintf(buf, sizeof buf, "EMBERS %d", g->embers);
+        need += 2 * pad + font_width(hf, buf);
+    }
+    bool two_rows = cv->w - tw_compact - pad < need + pad;     /* too narrow: buttons go on a row of their own */
+    int rows = two_rows ? 2 : 1;
+    int y = cv->h - h * rows;
+    *top = y;
+    cv_blend_rect(cv, 0, y, cv->w, h * rows, INK, 225);
+    cv_fill(cv, 0, y, cv->w, 1, GOLD_DIM);
+    cv_fill(cv, 0, y + 2, cv->w, 1, 0x2a2214);
+    add_panel(ui, 0, y, cv->w, h * rows);
+    int base = y + (h + font_ascent(hf) * 7 / 10) / 2;
 
     /* left: health */
     int x = pad;
     int mhp = game_max_hp(g);
     uint32_t hc = p->hp * 3 <= p->maxhp ? 0xff6a50 : g->chill ? 0xb8e0ff : 0xe2d4b4;
-    char buf[64];
     snprintf(buf, sizeof buf, "HP %d/%d", p->hp, mhp);
     x = font_draw(hf, cv, x, base, buf, hc, 255) + pad / 2;
     int bw = ui->px * 5, hbh = ui->px / 3 + 2, byy = base - font_ascent(hf) * 6 / 10;
@@ -230,26 +260,16 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     x = font_width(hf, buf) + x + pad;
     int left_end = x;
 
-    /* right: actions */
-    int bh = h * 64 / 100, by = y + (h - bh) / 2;
-    bool has_torch = g->torch_fuel > 0;
-    for (int i = 0; i < g->ninv; i++) if (g->inv[i].kind == IT_TORCH) has_torch = true;
-    const char *tl = g->torch_lit ? "Snuff" : "Torch";
-    struct { const char *k, *l; UiAction a; bool en; } B[] = {
-        { "x", "Explore", UA_EXPLORE, true }, { "Z", "Rest", UA_REST, true }, { "t", "Throw", UA_THROW, g->ninv > 0 },
-        { "i", "Items", UA_INV, true }, { "T", tl, UA_TORCH, has_torch || g->torch_lit }, { ">", "Descend", UA_STAIRS, true },
-        { "m", "Map", UA_MAP, true }, { NULL, "?", UA_HELP, true },
-    };
-    int nb = 8, gap = ui->px / 2, tw = 0;
-    for (int i = 0; i < nb; i++) tw += button_width(ui, B[i].k, B[i].l) + gap;
-    bool compact = cv->w - tw - pad < turn_x;       /* the turn counter goes before the key hints do */
-    if (compact) {     /* narrow window: drop the key hints */
-        tw = 0;
-        for (int i = 0; i < nb; i++) tw += button_width(ui, NULL, B[i].l) + gap;
-    }
-    if (cv->w - tw - pad >= left_end || cv->w - tw - pad >= turn_x + font_width(hf, buf))
+    /* right (or the row below): actions */
+    int row = two_rows ? y + h : y;
+    int bh = h * 64 / 100, by = row + (h - bh) / 2;
+    int room = two_rows ? 0 : turn_x;               /* the turn counter goes before the key hints do */
+    bool compact = cv->w - tw_full - pad < room;
+    int tw = compact ? tw_compact : tw_full;     /* narrow window: drop the key hints */
+    if (two_rows ? turn_x + font_width(hf, buf) <= cv->w - pad
+                 : cv->w - tw - pad >= left_end || cv->w - tw - pad >= turn_x + font_width(hf, buf))
         font_draw(hf, cv, turn_x, base, buf, 0xb8aa8c, 255);
-    int bx = cv->w - tw - pad / 2;
+    int bx = two_rows ? (cv->w - tw) / 2 : cv->w - tw - pad / 2;
     for (int i = 0; i < nb; i++) {
         bool en = g->state == GS_PLAY && B[i].en;
         bx += button(ui, cv, bx, by, bh, compact ? NULL : B[i].k, B[i].l, B[i].a, f->mx, f->my,
@@ -800,7 +820,7 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
 
     /* version, top right */
     char ver[48];
-    snprintf(ver, sizeof ver, "Lume %s", LUME_VERSION);
+    snprintf(ver, sizeof ver, "Shadesdeep %s", SHADESDEEP_VERSION);
     int vw = font_width(ui->small, ver);
     font_draw_shadow(ui->small, cv, cv->w - vw - ui->px / 2, font_ascent(ui->small) + ui->px / 3, ver, 0x8a7c62, 200);
     if (f->show_fps) {

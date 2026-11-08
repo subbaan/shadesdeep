@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthesize Lume's sound effects and ambient loops as WAV files.
+"""Synthesize Shadesdeep's sound effects and ambient loops as WAV files.
 
 Everything is made from noise and oscillators, then put in a small stone room
 (a convolution reverb), so no recorded samples are needed. Some events get

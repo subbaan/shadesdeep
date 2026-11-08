@@ -21,7 +21,7 @@
 
 #include "version.h"
 
-#define SAVE_MAGIC  "LUMESAVE"
+#define SAVE_MAGIC  "SHADESDP"
 #define SAVE_FORMAT 1u
 
 typedef struct {
@@ -55,8 +55,8 @@ bool save_default_path(char *out, size_t n)
 {
     const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME");
     int w;
-    if (xdg && xdg[0] == '/') w = snprintf(out, n, "%s/lume/save.gz", xdg);
-    else if (home && home[0]) w = snprintf(out, n, "%s/.local/share/lume/save.gz", home);
+    if (xdg && xdg[0] == '/') w = snprintf(out, n, "%s/shadesdeep/save.gz", xdg);
+    else if (home && home[0]) w = snprintf(out, n, "%s/.local/share/shadesdeep/save.gz", home);
     else return false;
     return w > 0 && (size_t)w < n;
 }
@@ -120,7 +120,7 @@ int save_write(const Game *g, const char *path, char *err, size_t n)
     Header h = { .format = SAVE_FORMAT, .layout = layout_print(),
                  .game_size = sizeof(Game), .level_size = sizeof(Level) };
     memcpy(h.magic, SAVE_MAGIC, 8);
-    snprintf(h.version, sizeof h.version, "%s", LUME_VERSION);
+    snprintf(h.version, sizeof h.version, "%s", SHADESDEEP_VERSION);
     bool ok = put(f, &h, sizeof h) && put(f, g, sizeof *g);
     for (int d = 0; ok && d < MAX_DEPTH + 2; d++) {
         uint8_t have = g->lv[d] != NULL;
@@ -155,7 +155,7 @@ Game *save_read(const char *path, bool *incompatible, char *err, size_t n)
         || h.level_size != sizeof(Level)) {
         gzclose(f);
         *incompatible = true;
-        snprintf(err, n, "the saved game is from Lume %s, which this version (%s) can't read", h.version, LUME_VERSION);
+        snprintf(err, n, "the saved game is from Shadesdeep %s, which this version (%s) can't read", h.version, SHADESDEEP_VERSION);
         return NULL;
     }
     Game *g = malloc(sizeof *g);

@@ -1,4 +1,4 @@
-/* Lume: a graphical roguelike for the kitty terminal. The dungeon is drawn
+/* Shadesdeep: a graphical roguelike for the kitty terminal. The dungeon is drawn
  * into a software framebuffer and presented through the kitty graphics
  * protocol; input is kitty's keyboard protocol plus SGR-pixel mouse. */
 #include <getopt.h>
@@ -38,7 +38,7 @@ static bool dir_has_fonts(const char *dir)
     return access(p, R_OK) == 0;
 }
 
-/* assets/ next to the executable, one level up (build/), ../share/lume, or ./assets */
+/* assets/ next to the executable, one level up (build/), ../share/shadesdeep, or ./assets */
 static int find_assets(char *out, size_t n, const char *override)
 {
     if (override) {
@@ -51,7 +51,7 @@ static int find_assets(char *out, size_t n, const char *override)
         exe[len] = 0;
         char *slash = strrchr(exe, '/');
         if (slash) *slash = 0;
-        const char *rel[] = { "assets", "../assets", "../share/lume/assets" };
+        const char *rel[] = { "assets", "../assets", "../share/shadesdeep/assets" };
         for (int i = 0; i < 3; i++) {
             snprintf(out, n, "%s/%s", exe, rel[i]);
             if (dir_has_fonts(out)) return 0;
@@ -75,7 +75,7 @@ static void usage(FILE *f)
 {
     fprintf(f,
         "Usage: %s [options]\n"
-        "Lume, a graphical roguelike for the kitty terminal.\n"
+        "Shadesdeep, a graphical roguelike for the kitty terminal.\n"
         "\n"
         "  -s, --seed=N        dungeon seed (default: random)\n"
         "  -z, --zoom=N        pixel zoom (default: picked from the window height)\n"
@@ -86,7 +86,7 @@ static void usage(FILE *f)
         "      --new           start a new game even if there is a saved one (it is\n"
         "                      replaced when you quit)\n"
         "      --save=FILE     where to keep the saved game\n"
-        "                      (default ~/.local/share/lume/save.gz)\n"
+        "                      (default ~/.local/share/shadesdeep/save.gz)\n"
         "      --no-save       don't resume or save a game\n"
         "      --mute          start with the sound off (F2 toggles it in the game)\n"
         "      --no-sound      don't open the audio device at all\n"
@@ -103,12 +103,12 @@ static void usage(FILE *f)
         "In the game press ? for the controls, m for the map. Mouse: click to travel\n"
         "or attack, hover for descriptions, wheel to zoom. Esc twice saves and quits;\n"
         "the next start picks the game up again. Dying ends it for good.\n",
-        LUME_NAME);
+        SHADESDEEP_NAME);
 }
 
 static void print_caps(FILE *o, const TermCaps *c, const TermSize *ts)
 {
-    fprintf(o, "%s %s capability probe\n", LUME_NAME, LUME_VERSION);
+    fprintf(o, "%s %s capability probe\n", SHADESDEEP_NAME, SHADESDEEP_VERSION);
     fprintf(o, "  window:              %dx%d px, %dx%d cells, cell %dx%d px\n",
             ts->xpix, ts->ypix, ts->cols, ts->rows, ts->cellw, ts->cellh);
     fprintf(o, "  keyboard protocol:   %s", c->kb_proto ? "yes" : "NO");
@@ -350,7 +350,7 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     char err[256], fonts[PATH_MAX + 8];
     snprintf(fonts, sizeof fonts, "%s/fonts", assets);
     UI *ui = ui_new(fonts, err, sizeof err);
-    if (!ui) { fprintf(stderr, "%s: %s\n", LUME_NAME, err); return 1; }
+    if (!ui) { fprintf(stderr, "%s: %s\n", SHADESDEEP_NAME, err); return 1; }
     ui_set_scale(ui, cellh, tscale);
     Game *g = game_new(seed);
     Renderer *r = render_new();
@@ -368,12 +368,12 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         }
         game_stop(g);
     }
-    if (getenv("LUME_DUMP_CHASM") && !game_debug_to_chasm(g)) fprintf(stderr, "%s: no chasm on this level\n", LUME_NAME);
-    /* LUME_DUMP_WATER=0|1|2: stand by a pool, in its shallows, or swimming in it */
-    if (getenv("LUME_DUMP_WATER") && !game_debug_to_water(g, atoi(getenv("LUME_DUMP_WATER"))))
-        fprintf(stderr, "%s: no deep water on this level\n", LUME_NAME);
-    /* LUME_DUMP_JUMP=N: jump down N chasms (developer test of level changes) */
-    for (int j = getenv("LUME_DUMP_JUMP") ? atoi(getenv("LUME_DUMP_JUMP")) : 0; j > 0 && g->state == GS_PLAY; j--) {
+    if (getenv("SHADESDEEP_DUMP_CHASM") && !game_debug_to_chasm(g)) fprintf(stderr, "%s: no chasm on this level\n", SHADESDEEP_NAME);
+    /* SHADESDEEP_DUMP_WATER=0|1|2: stand by a pool, in its shallows, or swimming in it */
+    if (getenv("SHADESDEEP_DUMP_WATER") && !game_debug_to_water(g, atoi(getenv("SHADESDEEP_DUMP_WATER"))))
+        fprintf(stderr, "%s: no deep water on this level\n", SHADESDEEP_NAME);
+    /* SHADESDEEP_DUMP_JUMP=N: jump down N chasms (developer test of level changes) */
+    for (int j = getenv("SHADESDEEP_DUMP_JUMP") ? atoi(getenv("SHADESDEEP_DUMP_JUMP")) : 0; j > 0 && g->state == GS_PLAY; j--) {
         if (!game_debug_to_chasm(g)) break;
         game_move(g, 0, -1);
         game_move(g, 0, -1);
@@ -382,33 +382,33 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         g->player.hp = g->player.maxhp;
         for (int i = 0; i < 200; i++) game_update(g, 0.02f);
     }
-    /* LUME_DUMP_SPOT=0..4: an east-west corridor, a side-wall door, a room's south wall,
-     * a cold sconce with a shade near (4: and light it). After LUME_DUMP_JUMP */
-    if (getenv("LUME_DUMP_SPOT") && !game_debug_to_spot(g, atoi(getenv("LUME_DUMP_SPOT"))))
-        fprintf(stderr, "%s: no such spot on this level\n", LUME_NAME);
+    /* SHADESDEEP_DUMP_SPOT=0..4: an east-west corridor, a side-wall door, a room's south wall,
+     * a cold sconce with a shade near (4: and light it). After SHADESDEEP_DUMP_JUMP */
+    if (getenv("SHADESDEEP_DUMP_SPOT") && !game_debug_to_spot(g, atoi(getenv("SHADESDEEP_DUMP_SPOT"))))
+        fprintf(stderr, "%s: no such spot on this level\n", SHADESDEEP_NAME);
     for (int i = 0; i < 120; i++) game_update(g, 1.0f / 60);
     static Hover hv;
     hv.awake = hv.tip_live = hv.tip_arm = mx >= 0;
     Ctl ctl = { .menu_slot = 0, .tslot = -1 };
     ui_set_icons(ui, render_item_icons(r));
-    /* developer views: LUME_DUMP_TORCH=1 lights a torch, LUME_DUMP_MENU=inv|throw|use|item,
-     * LUME_DUMP_AIM="dx,dy" aims a torch, LUME_DUMP_THROW="dx,dy,frac" freezes one mid-flight */
-    if (getenv("LUME_DUMP_TORCH")) game_torch_toggle(g);
-    if (getenv("LUME_DUMP_MAP")) { ctl.map = true; ctl.map_stale = true; }
-    if (getenv("LUME_DUMP_HELP")) ctl.help = true;
-    /* LUME_DUMP_FORGE=N: stand by the forge with N embers and open it ("N,0": don't open it) */
-    if (getenv("LUME_DUMP_FORGE")) {
-        g->embers = atoi(getenv("LUME_DUMP_FORGE"));
-        if (game_debug_to_forge(g)) { if (!strstr(getenv("LUME_DUMP_FORGE"), ",0")) ctl.menu = MENU_FORGE; }
-        else fprintf(stderr, "%s: no forge on this level\n", LUME_NAME);
+    /* developer views: SHADESDEEP_DUMP_TORCH=1 lights a torch, SHADESDEEP_DUMP_MENU=inv|throw|use|item,
+     * SHADESDEEP_DUMP_AIM="dx,dy" aims a torch, SHADESDEEP_DUMP_THROW="dx,dy,frac" freezes one mid-flight */
+    if (getenv("SHADESDEEP_DUMP_TORCH")) game_torch_toggle(g);
+    if (getenv("SHADESDEEP_DUMP_MAP")) { ctl.map = true; ctl.map_stale = true; }
+    if (getenv("SHADESDEEP_DUMP_HELP")) ctl.help = true;
+    /* SHADESDEEP_DUMP_FORGE=N: stand by the forge with N embers and open it ("N,0": don't open it) */
+    if (getenv("SHADESDEEP_DUMP_FORGE")) {
+        g->embers = atoi(getenv("SHADESDEEP_DUMP_FORGE"));
+        if (game_debug_to_forge(g)) { if (!strstr(getenv("SHADESDEEP_DUMP_FORGE"), ",0")) ctl.menu = MENU_FORGE; }
+        else fprintf(stderr, "%s: no forge on this level\n", SHADESDEEP_NAME);
     }
-    const char *dm = getenv("LUME_DUMP_MENU");
+    const char *dm = getenv("SHADESDEEP_DUMP_MENU");
     if (dm) ctl.menu = !strcmp(dm, "throw") ? MENU_THROW : !strcmp(dm, "use") ? MENU_USE : !strcmp(dm, "item") ? MENU_ITEM : MENU_INV;
-    if (getenv("LUME_DUMP_SLOT")) ctl.menu_slot = atoi(getenv("LUME_DUMP_SLOT"));     /* which item LUME_DUMP_MENU=item shows */
-    /* LUME_DUMP_GEAR="kind,plus;...": put gear in the pack (kinds: sword dagger spear axe mace leather cloak mail) */
-    if (getenv("LUME_DUMP_GEAR")) {
+    if (getenv("SHADESDEEP_DUMP_SLOT")) ctl.menu_slot = atoi(getenv("SHADESDEEP_DUMP_SLOT"));     /* which item SHADESDEEP_DUMP_MENU=item shows */
+    /* SHADESDEEP_DUMP_GEAR="kind,plus;...": put gear in the pack (kinds: sword dagger spear axe mace leather cloak mail) */
+    if (getenv("SHADESDEEP_DUMP_GEAR")) {
         static const char *N[] = { "sword", "dagger", "spear", "axe", "mace", "leather", "cloak", "mail" };
-        const char *q = getenv("LUME_DUMP_GEAR");
+        const char *q = getenv("SHADESDEEP_DUMP_GEAR");
         while (*q && g->ninv < MAX_INV) {
             for (int i = 0; i < 8; i++)
                 if (!strncmp(q, N[i], strlen(N[i]))) {
@@ -423,31 +423,31 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     }
     int adx, ady;
     float frac = 0.5f;
-    if (getenv("LUME_DUMP_AIM") && sscanf(getenv("LUME_DUMP_AIM"), "%d,%d", &adx, &ady) == 2) {
+    if (getenv("SHADESDEEP_DUMP_AIM") && sscanf(getenv("SHADESDEEP_DUMP_AIM"), "%d,%d", &adx, &ady) == 2) {
         start_aim(g, &ctl, 0, &hv);
         ctl.tx = g->player.x + adx;
         ctl.ty = g->player.y + ady;
     }
-    if (getenv("LUME_DUMP_THROW") && sscanf(getenv("LUME_DUMP_THROW"), "%d,%d,%f", &adx, &ady, &frac) >= 2) {
+    if (getenv("SHADESDEEP_DUMP_THROW") && sscanf(getenv("SHADESDEEP_DUMP_THROW"), "%d,%d,%f", &adx, &ady, &frac) >= 2) {
         if (game_throw(g, 0, g->player.x + adx, g->player.y + ady))
             while (g->proj.active && g->proj.pos < g->proj.n * frac) game_update(g, 1.0f / 240);
         if (frac >= 1) for (int i = 0; i < 60; i++) game_update(g, 1.0f / 60);
     }
-    /* LUME_DUMP_SHADE="dx,dy[;dx,dy...]": shades near the player */
-    if (getenv("LUME_DUMP_SHADE")) {
-        const char *s = getenv("LUME_DUMP_SHADE");
+    /* SHADESDEEP_DUMP_SHADE="dx,dy[;dx,dy...]": shades near the player */
+    if (getenv("SHADESDEEP_DUMP_SHADE")) {
+        const char *s = getenv("SHADESDEEP_DUMP_SHADE");
         int sx, sy, used;
         while (sscanf(s, "%d,%d%n", &sx, &sy, &used) == 2) {
             if (!game_debug_spawn(g, MK_SHADE, g->player.x + sx, g->player.y + sy))
-                fprintf(stderr, "%s: no room for a shade at %+d,%+d\n", LUME_NAME, sx, sy);
+                fprintf(stderr, "%s: no room for a shade at %+d,%+d\n", SHADESDEEP_NAME, sx, sy);
             s += used;
             if (*s != ';') break;
             s++;
         }
     }
-    /* LUME_DUMP_MOBS="kind,dx,dy[;...]": any creatures near the player (eel+ is an eel above the water) */
-    if (getenv("LUME_DUMP_MOBS")) {
-        const char *s = getenv("LUME_DUMP_MOBS");
+    /* SHADESDEEP_DUMP_MOBS="kind,dx,dy[;...]": any creatures near the player (eel+ is an eel above the water) */
+    if (getenv("SHADESDEEP_DUMP_MOBS")) {
+        const char *s = getenv("SHADESDEEP_DUMP_MOBS");
         char nm[24];
         int sx, sy, used;
         while (sscanf(s, "%23[^,],%d,%d%n", nm, &sx, &sy, &used) == 3) {
@@ -457,15 +457,15 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
             for (int i = 1; i < MK_COUNT; i++)
                 if (!strcmp(nm, MOB_INFO[i].name) || (i == MK_SLINGER && !strcmp(nm, "slinger"))) k = i;
             if (k == MK_COUNT || !game_debug_spawn(g, (MobKind)k, g->player.x + sx, g->player.y + sy))
-                fprintf(stderr, "%s: can't put a %s at %+d,%+d\n", LUME_NAME, nm, sx, sy);
+                fprintf(stderr, "%s: can't put a %s at %+d,%+d\n", SHADESDEEP_NAME, nm, sx, sy);
             else if (up) game_mob_at(g, g->player.x + sx, g->player.y + sy)->surfaced = 3;
             s += used;
             if (*s != ';') break;
             s++;
         }
     }
-    /* LUME_DUMP_REST=N: wait N turns (lets thrown torches burn out) */
-    for (int n = getenv("LUME_DUMP_REST") ? atoi(getenv("LUME_DUMP_REST")) : 0; n > 0 && g->state == GS_PLAY; n--) {
+    /* SHADESDEEP_DUMP_REST=N: wait N turns (lets thrown torches burn out) */
+    for (int n = getenv("SHADESDEEP_DUMP_REST") ? atoi(getenv("SHADESDEEP_DUMP_REST")) : 0; n > 0 && g->state == GS_PLAY; n--) {
         game_rest(g);
         for (int i = 0; i < 30 && game_busy(g); i++) game_update(g, 1.0f / 30);
     }
@@ -477,10 +477,10 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         if (!freeze) game_update(g, 1.0f / 60);
         draw_frame(r, ui, g, &fr, &hv, &ctl, mx, my, freeze ? 0 : 1.0f / 60, 60, false);
     }
-    if (getenv("LUME_DUMP_LOWER")) render_dump_lower(r, getenv("LUME_DUMP_LOWER"));
+    if (getenv("SHADESDEEP_DUMP_LOWER")) render_dump_lower(r, getenv("SHADESDEEP_DUMP_LOWER"));
     int rc = canvas_write_png(&fr.screen, path);
-    if (rc) fprintf(stderr, "%s: cannot write %s\n", LUME_NAME, path);
-    else printf("%s: wrote %s (%dx%d, zoom %d, seed %u, depth %d, turn %d)\n", LUME_NAME, path, w, h, fr.zoom,
+    if (rc) fprintf(stderr, "%s: cannot write %s\n", SHADESDEEP_NAME, path);
+    else printf("%s: wrote %s (%dx%d, zoom %d, seed %u, depth %d, turn %d)\n", SHADESDEEP_NAME, path, w, h, fr.zoom,
                 seed, g->depth, g->turn);
     free(fr.screen.px);
     free(fr.world.px);
@@ -543,25 +543,25 @@ int main(int argc, char **argv)
     while ((o = getopt_long(argc, argv, "s:z:t:f:m:a:hV", opts, NULL)) != -1) {
         switch (o) {
         case 's': seed = (uint32_t)strtoul(optarg, NULL, 10); seed_given = true; break;
-        case 'z': zoom_opt = atoi(optarg); if (zoom_opt < 1 || zoom_opt > 6) { fprintf(stderr, "%s: zoom must be 1-6\n", LUME_NAME); return 2; } break;
-        case 't': tscale = (float)atof(optarg); if (tscale < 0.5f || tscale > 3) { fprintf(stderr, "%s: text scale must be 0.5-3\n", LUME_NAME); return 2; } break;
-        case 'f': fps = atoi(optarg); if (fps < 10 || fps > 240) { fprintf(stderr, "%s: fps must be 10-240\n", LUME_NAME); return 2; } break;
-        case 'm': if (kgfx_parse_tx(optarg, &tx)) { fprintf(stderr, "%s: bad mode '%s'\n", LUME_NAME, optarg); return 2; } break;
+        case 'z': zoom_opt = atoi(optarg); if (zoom_opt < 1 || zoom_opt > 6) { fprintf(stderr, "%s: zoom must be 1-6\n", SHADESDEEP_NAME); return 2; } break;
+        case 't': tscale = (float)atof(optarg); if (tscale < 0.5f || tscale > 3) { fprintf(stderr, "%s: text scale must be 0.5-3\n", SHADESDEEP_NAME); return 2; } break;
+        case 'f': fps = atoi(optarg); if (fps < 10 || fps > 240) { fprintf(stderr, "%s: fps must be 10-240\n", SHADESDEEP_NAME); return 2; } break;
+        case 'm': if (kgfx_parse_tx(optarg, &tx)) { fprintf(stderr, "%s: bad mode '%s'\n", SHADESDEEP_NAME, optarg); return 2; } break;
         case 'a': assets_opt = optarg; break;
         case 'F': show_fps = true; break;
         case 'Q': start_muted = true; break;
         case 'N': no_sound = true; break;
         case 'P': probe_only = true; break;
         case 'D': dump_path = optarg; break;
-        case 'S': if (sscanf(optarg, "%dx%d", &dump_w, &dump_h) != 2) { fprintf(stderr, "%s: bad size\n", LUME_NAME); return 2; } break;
+        case 'S': if (sscanf(optarg, "%dx%d", &dump_w, &dump_h) != 2) { fprintf(stderr, "%s: bad size\n", SHADESDEEP_NAME); return 2; } break;
         case 'C': dump_cell = atoi(optarg); break;
         case 'E': steps = atoi(optarg); break;
-        case 'H': if (sscanf(optarg, "%d,%d", &hover_x, &hover_y) != 2) { fprintf(stderr, "%s: bad hover\n", LUME_NAME); return 2; } break;
+        case 'H': if (sscanf(optarg, "%d,%d", &hover_x, &hover_y) != 2) { fprintf(stderr, "%s: bad hover\n", SHADESDEEP_NAME); return 2; } break;
         case 'W': new_game = true; break;
         case 'L': save_opt = optarg; break;
         case 'X': no_save = true; break;
         case 'h': usage(stdout); return 0;
-        case 'V': printf("%s %s\n", LUME_NAME, LUME_VERSION); return 0;
+        case 'V': printf("%s %s\n", SHADESDEEP_NAME, SHADESDEEP_VERSION); return 0;
         default:  usage(stderr); return 2;
         }
     }
@@ -570,12 +570,12 @@ int main(int argc, char **argv)
     char assets[PATH_MAX];
     bool have_assets = find_assets(assets, sizeof assets, assets_opt) == 0;
     if (dump_path) {
-        if (!have_assets) { fprintf(stderr, "%s: assets not found (use --assets DIR)\n", LUME_NAME); return 1; }
+        if (!have_assets) { fprintf(stderr, "%s: assets not found (use --assets DIR)\n", SHADESDEEP_NAME); return 1; }
         return dump_frame(assets, seed, dump_path, dump_w, dump_h, dump_cell, steps, zoom_opt, tscale, hover_x, hover_y);
     }
 
     if (term_init()) {
-        fprintf(stderr, "%s: stdin and stdout must be a terminal\n", LUME_NAME);
+        fprintf(stderr, "%s: stdin and stdout must be a terminal\n", SHADESDEEP_NAME);
         return 1;
     }
     atexit(term_restore);
@@ -603,7 +603,7 @@ int main(int argc, char **argv)
     }
     if (fatal) {
         term_restore();
-        fprintf(stderr, "%s: %s\n", LUME_NAME, fatal);
+        fprintf(stderr, "%s: %s\n", SHADESDEEP_NAME, fatal);
         return 1;
     }
     if (tx == TX_SHM && !caps.gfx_shm) tx = TX_DIRECTZ;
@@ -923,8 +923,8 @@ int main(int argc, char **argv)
     snd_shutdown();
     kgfx_cleanup(&kg);
     term_restore();
-    if (save_err[0]) fprintf(stderr, "%s: %s\n", LUME_NAME, save_err);
-    else if (saved) printf("Game saved (depth %d). Run %s again to carry on.\n", g->depth, LUME_NAME);
+    if (save_err[0]) fprintf(stderr, "%s: %s\n", SHADESDEEP_NAME, save_err);
+    else if (saved) printf("Game saved (depth %d). Run %s again to carry on.\n", g->depth, SHADESDEEP_NAME);
     free(fr.screen.px);
     free(fr.world.px);
     render_free(r);

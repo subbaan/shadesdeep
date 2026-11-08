@@ -5,7 +5,7 @@ CFLAGS  += $(shell pkg-config --cflags libpng freetype2 sdl3)
 LDLIBS  += $(shell pkg-config --libs libpng freetype2 sdl3) -lm -lz
 
 BUILD := build
-BIN   := $(BUILD)/lume
+BIN   := $(BUILD)/shadesdeep
 SRC   := $(wildcard src/*.c)
 OBJ   := $(SRC:src/%.c=$(BUILD)/%.o)
 HDR   := $(wildcard src/*.h)
@@ -24,7 +24,7 @@ $(BUILD):
 	mkdir -p $@
 
 link: $(BIN)
-	ln -sfn $(BIN) lume
+	ln -sfn $(BIN) shadesdeep
 
 clean:
 	rm -f $(OBJ) $(BIN)

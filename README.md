@@ -1,19 +1,19 @@
-# Lume
+# Shadesdeep
 
 A graphical roguelike played **inside the kitty terminal**: real RGBA pixel
 art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.8.1 (saving) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.9.0 (the game formerly known as Lume) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
 ## Build and run
 
 ```sh
-make            # builds build/lume and symlinks ./lume
-./lume          # run inside kitty
+make              # builds build/shadesdeep and symlinks ./shadesdeep
+./shadesdeep      # run inside kitty
 ```
 
 Needs a C compiler (GNU C11), Make, pkg-config, and the libpng, zlib,
@@ -35,7 +35,7 @@ sound; if no audio device opens, the game runs silent.
   F2 sound on/off; `?` help; Esc twice saves and quits.
 - **Saving:** quitting (or closing the window) saves the game, and the next
   start carries on where you left off; it's also saved on every new level.
-  Death deletes the save. It lives in `~/.local/share/lume/save.gz`;
+  Death deletes the save. It lives in `~/.local/share/shadesdeep/save.gz`;
   `--new` starts afresh, `--save=FILE` and `--no-save` change or skip it.
 - **Map:** `m` (or the Map button) shows the whole explored level, drawn
   with the game's own graphics: you, the stairs and any creatures you can make
@@ -111,28 +111,28 @@ sound; if no audio device opens, the game runs silent.
 
 Text size follows kitty's own font size (ctrl+shift+= / -), or set `--text`.
 The pixel zoom is picked from the window height; override it with `--zoom` or
-`+` / `-`. `./lume --help` lists every option.
+`+` / `-`. `./shadesdeep --help` lists every option.
 
 ## Development
 
-`./lume --dump out.png [--seed N] [--size WxH] [--cell H] [--steps N]` renders
-a frame to PNG without a terminal. `LUME_DUMP_CHASM=1` stands at the edge of a
-chasm with the level revealed, `LUME_DUMP_JUMP=N` jumps down N chasms, and
-`LUME_DUMP_LOWER=file.png` writes the rendered level below. `LUME_DUMP_TORCH=1`
-lights a torch, `LUME_DUMP_MENU=inv|throw|use|item` opens a menu,
-`LUME_DUMP_AIM=dx,dy` aims a torch and `LUME_DUMP_THROW=dx,dy,frac` freezes a
-thrown torch part-way through its flight. `LUME_DUMP_REST=N` waits N turns
-first (e.g. to let a thrown torch burn out). `LUME_DUMP_SHADE="dx,dy;dx,dy"`
-puts shades near the player. `LUME_DUMP_WATER=0|1|2` stands by a pool, in its
-shallows, or swimming. `LUME_DUMP_SPOT=0..4` stands in an east-west corridor
+`./shadesdeep --dump out.png [--seed N] [--size WxH] [--cell H] [--steps N]` renders
+a frame to PNG without a terminal. `SHADESDEEP_DUMP_CHASM=1` stands at the edge of a
+chasm with the level revealed, `SHADESDEEP_DUMP_JUMP=N` jumps down N chasms, and
+`SHADESDEEP_DUMP_LOWER=file.png` writes the rendered level below. `SHADESDEEP_DUMP_TORCH=1`
+lights a torch, `SHADESDEEP_DUMP_MENU=inv|throw|use|item` opens a menu,
+`SHADESDEEP_DUMP_AIM=dx,dy` aims a torch and `SHADESDEEP_DUMP_THROW=dx,dy,frac` freezes a
+thrown torch part-way through its flight. `SHADESDEEP_DUMP_REST=N` waits N turns
+first (e.g. to let a thrown torch burn out). `SHADESDEEP_DUMP_SHADE="dx,dy;dx,dy"`
+puts shades near the player. `SHADESDEEP_DUMP_WATER=0|1|2` stands by a pool, in its
+shallows, or swimming. `SHADESDEEP_DUMP_SPOT=0..4` stands in an east-west corridor
 (with a rat and darts beside you), beside a door in a side wall, just north
 of a room's south wall, or in front of a cold sconce with a shade two steps
-away (4 also lights the sconce). It applies after `LUME_DUMP_JUMP`. `LUME_DUMP_MAP=1` opens the map and `LUME_DUMP_HELP=1` the help.
-`LUME_DUMP_MOBS="bat,2,0;ogre,0,2"` puts creatures near the player (rat,
+away (4 also lights the sconce). It applies after `SHADESDEEP_DUMP_JUMP`. `SHADESDEEP_DUMP_MAP=1` opens the map and `SHADESDEEP_DUMP_HELP=1` the help.
+`SHADESDEEP_DUMP_MOBS="bat,2,0;ogre,0,2"` puts creatures near the player (rat,
 goblin, shade, bat, slinger, ogre, eel; `eel+` is an eel above the water).
-`LUME_DUMP_FORGE=N` stands by the forge with N embers and opens it (`N,0`
-leaves it shut), and `LUME_DUMP_GEAR="spear,1;mail,0"` puts gear in the pack (`LUME_DUMP_SLOT=N`
-picks the item `LUME_DUMP_MENU=item` shows).
+`SHADESDEEP_DUMP_FORGE=N` stands by the forge with N embers and opens it (`N,0`
+leaves it shut), and `SHADESDEEP_DUMP_GEAR="spear,1;mail,0"` puts gear in the pack (`SHADESDEEP_DUMP_SLOT=N`
+picks the item `SHADESDEEP_DUMP_MENU=item` shows).
 
 The sounds are synthesized by `tools/make_sounds.py` (Python 3 with numpy and
 scipy) into `assets/sounds` (files already there are kept, so sounds you swapped in survive; `--only

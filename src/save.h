@@ -7,7 +7,7 @@
 
 #include "game.h"
 
-/* Where the save lives: $XDG_DATA_HOME/lume/save.gz, else ~/.local/share/lume/save.gz.
+/* Where the save lives: $XDG_DATA_HOME/shadesdeep/save.gz, else ~/.local/share/shadesdeep/save.gz.
  * Returns false if there's no home to put it in. */
 bool save_default_path(char *out, size_t n);
 

@@ -1,7 +1,7 @@
 #ifndef VERSION_H
 #define VERSION_H
 
-#define LUME_NAME    "lume"
-#define LUME_VERSION "0.8.1"
+#define SHADESDEEP_NAME    "shadesdeep"
+#define SHADESDEEP_VERSION "0.9.0"
 
 #endif

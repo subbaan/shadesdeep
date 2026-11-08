@@ -142,7 +142,7 @@ int snd_init(const char *asset_dir)
     if (!f) { snprintf(status, sizeof status, "no %.120s", path); return -1; }
 
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "512");
-    SDL_SetHint(SDL_HINT_APP_NAME, "Lume");
+    SDL_SetHint(SDL_HINT_APP_NAME, "Shadesdeep");
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         snprintf(status, sizeof status, "audio: %s", SDL_GetError());
         fclose(f);

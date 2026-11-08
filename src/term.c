@@ -479,7 +479,7 @@ int term_probe(TermCaps *caps, double timeout_s)
     da_seen = false;
 
     char name[64];
-    snprintf(name, sizeof name, "/%s-probe-%d", "lume", (int)getpid());
+    snprintf(name, sizeof name, "/%s-probe-%d", "shadesdeep", (int)getpid());
     bool shm_made = false;
     int fd = shm_open(name, O_CREAT | O_RDWR | O_TRUNC, 0600);
     if (fd >= 0) {

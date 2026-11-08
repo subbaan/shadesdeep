@@ -1,7 +1,7 @@
 build/
-/lume
+/shadesdeep
 *.o
 # design references stay local
 concepts/
-/lume-next
-/lume-monsters
+# release bundles
+/dist/
