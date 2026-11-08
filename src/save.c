@@ -22,7 +22,7 @@
 #include "version.h"
 
 #define SAVE_MAGIC  "SHADESDP"
-#define SAVE_FORMAT 1u
+#define SAVE_FORMAT 2u
 
 typedef struct {
     char magic[8];
@@ -178,7 +178,7 @@ Game *save_read(const char *path, bool *incompatible, char *err, size_t n)
     gzclose(f);
     /* sanity: the things the game indexes with */
     ok = ok && g->depth >= 1 && g->depth <= MAX_DEPTH && g->lv[g->depth] && g->ninv >= 0 && g->ninv <= MAX_INV
-         && in_map(g->player.x, g->player.y) && g->state <= GS_DEAD && g->nmsgs >= 0 && g->nfx >= 0 && g->nfx <= MAX_FX
+         && in_map(g->player.x, g->player.y) && g->state <= GS_WON && g->nmsgs >= 0 && g->nfx >= 0 && g->nfx <= MAX_FX
          && g->nsnd >= 0 && g->nsnd <= MAX_SND;
     if (!ok) {
         game_free(g);

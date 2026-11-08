@@ -64,7 +64,7 @@ static int find_assets(char *out, size_t n, const char *override)
 /* save the game (not a finished one); false if there was nothing to save or it failed (err says) */
 static bool save_now(Game *g, const char *path, char *err, size_t n)
 {
-    if (!path[0] || g->state == GS_DEAD) return false;
+    if (!path[0] || g->state == GS_DEAD || g->state == GS_WON) return false;
     while (g->proj.active) game_update(g, 1.0f / 60);     /* let a thrown item land first */
     if (save_write(g, path, err, n) == 0) return true;
     game_msg(g, C_BAD, "%s.", err);
@@ -102,7 +102,8 @@ static void usage(FILE *f)
         "\n"
         "In the game press ? for the controls, m for the map. Mouse: click to travel\n"
         "or attack, hover for descriptions, wheel to zoom. Esc twice saves and quits;\n"
-        "the next start picks the game up again. Dying ends it for good.\n",
+        "the next start picks the game up again. Dying ends it for good. Relight the\n"
+        "Heartflame at the bottom, on depth 26, to win.\n",
         SHADESDEEP_NAME);
 }
 
@@ -212,7 +213,7 @@ static void update_loops(Game *g)
     float fire = 0;
     for (int i = 0; i < lv->nlights; i++) {
         const Light *l = &lv->lights[i];
-        if (!l->lit || (l->kind != L_SCONCE && l->kind != L_FLOORTORCH)) continue;
+        if (!l->lit || (l->kind != L_SCONCE && l->kind != L_FLOORTORCH && l->kind != L_OILFIRE && l->kind != L_HEART)) continue;
         float dx = l->fx - p->rx, dy = l->fy - p->ry, d = sqrtf(dx * dx + dy * dy);
         float w = clampf(1 - d / 8, 0, 1);
         w *= w;
@@ -373,6 +374,9 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     if (getenv("SHADESDEEP_DUMP_WATER") && !game_debug_to_water(g, atoi(getenv("SHADESDEEP_DUMP_WATER"))))
         fprintf(stderr, "%s: no deep water on this level\n", SHADESDEEP_NAME);
     /* SHADESDEEP_DUMP_JUMP=N: jump down N chasms (developer test of level changes) */
+    /* SHADESDEEP_DUMP_DEPTH=N: go straight to depth N (26 is the Heartflame's) */
+    if (getenv("SHADESDEEP_DUMP_DEPTH") && !game_debug_depth(g, atoi(getenv("SHADESDEEP_DUMP_DEPTH"))))
+        fprintf(stderr, "%s: no such depth\n", SHADESDEEP_NAME);
     for (int j = getenv("SHADESDEEP_DUMP_JUMP") ? atoi(getenv("SHADESDEEP_DUMP_JUMP")) : 0; j > 0 && g->state == GS_PLAY; j--) {
         if (!game_debug_to_chasm(g)) break;
         game_move(g, 0, -1);
@@ -382,8 +386,8 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         g->player.hp = g->player.maxhp;
         for (int i = 0; i < 200; i++) game_update(g, 0.02f);
     }
-    /* SHADESDEEP_DUMP_SPOT=0..4: an east-west corridor, a side-wall door, a room's south wall,
-     * a cold sconce with a shade near (4: and light it). After SHADESDEEP_DUMP_JUMP */
+    /* SHADESDEEP_DUMP_SPOT=0..5: an east-west corridor, a side-wall door, a room's south wall,
+     * a cold sconce with a shade near (4: and light it), the Heartflame's hall (5). After SHADESDEEP_DUMP_JUMP */
     if (getenv("SHADESDEEP_DUMP_SPOT") && !game_debug_to_spot(g, atoi(getenv("SHADESDEEP_DUMP_SPOT"))))
         fprintf(stderr, "%s: no such spot on this level\n", SHADESDEEP_NAME);
     for (int i = 0; i < 120; i++) game_update(g, 1.0f / 60);
@@ -421,17 +425,25 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
             q = e + 1;
         }
     }
-    int adx, ady;
-    float frac = 0.5f;
-    if (getenv("SHADESDEEP_DUMP_AIM") && sscanf(getenv("SHADESDEEP_DUMP_AIM"), "%d,%d", &adx, &ady) == 2) {
-        start_aim(g, &ctl, 0, &hv);
-        ctl.tx = g->player.x + adx;
-        ctl.ty = g->player.y + ady;
-    }
-    if (getenv("SHADESDEEP_DUMP_THROW") && sscanf(getenv("SHADESDEEP_DUMP_THROW"), "%d,%d,%f", &adx, &ady, &frac) >= 2) {
-        if (game_throw(g, 0, g->player.x + adx, g->player.y + ady))
-            while (g->proj.active && g->proj.pos < g->proj.n * frac) game_update(g, 1.0f / 240);
-        if (frac >= 1) for (int i = 0; i < 60; i++) game_update(g, 1.0f / 60);
+    /* SHADESDEEP_DUMP_ITEMS="kind,count;...": put things in the pack (kinds: oil flash salt warmth potion dart torch) */
+    if (getenv("SHADESDEEP_DUMP_ITEMS")) {
+        static const struct { const char *n; ItemKind k; } N[] = {
+            { "oil", IT_OIL }, { "flash", IT_FLASH }, { "salt", IT_SALT }, { "warmth", IT_WARMTH },
+            { "potion", IT_POTION }, { "dart", IT_DART }, { "torch", IT_TORCH },
+        };
+        const char *q = getenv("SHADESDEEP_DUMP_ITEMS");
+        g->ninv = 0;
+        while (*q && g->ninv < MAX_INV) {
+            for (size_t i = 0; i < sizeof N / sizeof *N; i++)
+                if (!strncmp(q, N[i].n, strlen(N[i].n))) {
+                    const char *c = strchr(q, ',');
+                    g->inv[g->ninv++] = (Slot){ N[i].k, c ? atoi(c + 1) : 1, 0 };
+                    break;
+                }
+            const char *e = strchr(q, ';');
+            if (!e) break;
+            q = e + 1;
+        }
     }
     /* SHADESDEEP_DUMP_SHADE="dx,dy[;dx,dy...]": shades near the player */
     if (getenv("SHADESDEEP_DUMP_SHADE")) {
@@ -464,12 +476,31 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
             s++;
         }
     }
+    int adx, ady;
+    float frac = 0.5f;
+    if (getenv("SHADESDEEP_DUMP_AIM") && sscanf(getenv("SHADESDEEP_DUMP_AIM"), "%d,%d", &adx, &ady) == 2) {
+        start_aim(g, &ctl, 0, &hv);
+        ctl.tx = g->player.x + adx;
+        ctl.ty = g->player.y + ady;
+    }
+    /* SHADESDEEP_DUMP_USE=1: use the first item in the pack (after the creatures are placed) */
+    if (getenv("SHADESDEEP_DUMP_USE")) game_use(g, 0);
+    if (getenv("SHADESDEEP_DUMP_THROW") && sscanf(getenv("SHADESDEEP_DUMP_THROW"), "%d,%d,%f", &adx, &ady, &frac) >= 2) {
+        if (game_throw(g, 0, g->player.x + adx, g->player.y + ady))
+            while (g->proj.active && g->proj.pos < g->proj.n * frac) game_update(g, 1.0f / 240);
+        if (frac >= 1) for (int i = 0; i < 60; i++) game_update(g, 1.0f / 60);
+    }
+    /* SHADESDEEP_DUMP_KINDLE=N: stand at the hearth with a lit torch and kindle it N times (3 wins) */
+    if (getenv("SHADESDEEP_DUMP_KINDLE") && !game_debug_kindle(g, atoi(getenv("SHADESDEEP_DUMP_KINDLE"))))
+        fprintf(stderr, "%s: no hearth here (try SHADESDEEP_DUMP_DEPTH=26)\n", SHADESDEEP_NAME);
     /* SHADESDEEP_DUMP_REST=N: wait N turns (lets thrown torches burn out) */
     for (int n = getenv("SHADESDEEP_DUMP_REST") ? atoi(getenv("SHADESDEEP_DUMP_REST")) : 0; n > 0 && g->state == GS_PLAY; n--) {
         game_rest(g);
         for (int i = 0; i < 30 && game_busy(g); i++) game_update(g, 1.0f / 30);
     }
     render_camera(r, g, fr.world.w, fr.world.h, 0, true);
+    /* show the closing screen at once (SHADESDEEP_DUMP_NOEND=1: not yet) */
+    if ((g->state == GS_DEAD || g->state == GS_WON) && !getenv("SHADESDEEP_DUMP_NOEND")) g->end_t = g->time - 30;
     bool freeze = g->proj.active;
     /* two passes so the interface's hit areas exist for the hover test */
     draw_frame(r, ui, g, &fr, &hv, &ctl, mx, my, 1.0f / 60, 60, false);
@@ -747,18 +778,21 @@ int main(int argc, char **argv)
             if (same) click = UA_NONE;
         }
         bool busy = game_busy(g);
-        if (g->state == GS_DEAD && !save_gone) {
-            save_remove(save_path);             /* death is final */
+        bool over = g->state == GS_DEAD || g->state == GS_WON;
+        if (over && !save_gone) {
+            save_remove(save_path);             /* death is final, and so is the end */
             save_gone = true;
-        } else if (g->state != GS_DEAD && g->depth != saved_depth && !busy) {
+        } else if (!over && g->depth != saved_depth && !busy) {
             save_now(g, save_path, save_err, sizeof save_err);   /* a new level: keep the run safe */
             saved_depth = g->depth;
         }
 
-        if (g->state == GS_DEAD) {
+        if (over) {
             ctl.menu = MENU_NONE;
             ctl.targeting = false;
-            if (pr[K_ENTER] || pr[K_KPENTER] || click == UA_NEW_GAME) {
+            if (!game_end_shown(g)) {
+                /* a moment to watch it happen before the closing screen */
+            } else if (pr[K_ENTER] || pr[K_KPENTER] || click == UA_NEW_GAME) {
                 game_free(g);
                 g = game_new((uint32_t)time(NULL) ^ seed++);
                 save_gone = false;

@@ -5,7 +5,7 @@ art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.9.0 (the game formerly known as Lume) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.11.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -23,6 +23,10 @@ sound; if no audio device opens, the game runs silent.
 
 ## Playing
 
+- **The goal:** at the bottom of the dungeon, on depth 26, the Heartflame
+  has gone cold. Carry fire down to it: walk into its hearth with a lit
+  torch three times, while the Hollow (the great shade that put it
+  out) tries to smother it. Win or lose, a closing screen sums up the run.
 - **Mouse:** hover anything for a description; click to travel (the path is
   previewed), click a monster to attack it, click a cold sconce to walk over
   and light it, click yourself to rest. The wheel zooms. Descriptions fade
@@ -35,7 +39,7 @@ sound; if no audio device opens, the game runs silent.
   F2 sound on/off; `?` help; Esc twice saves and quits.
 - **Saving:** quitting (or closing the window) saves the game, and the next
   start carries on where you left off; it's also saved on every new level.
-  Death deletes the save. It lives in `~/.local/share/shadesdeep/save.gz`;
+  Death (or winning) deletes the save. It lives in `~/.local/share/shadesdeep/save.gz`;
   `--new` starts afresh, `--save=FILE` and `--no-save` change or skip it.
 - **Map:** `m` (or the Map button) shows the whole explored level, drawn
   with the game's own graphics: you, the stairs and any creatures you can make
@@ -49,6 +53,18 @@ sound; if no audio device opens, the game runs silent.
   your throwable items are listed; pick one, then aim with the mouse or the
   direction keys (Tab cycles visible monsters) and click or press Enter.
   Darts hit hard and can usually be picked up again; potions heal.
+  - *Oil flask* (you start with one): thrown, it bursts into a pool of
+    burning oil, even on water. It's a fixed fire, so shades can't bear it;
+    nothing walks into it willingly, and it sears whatever stands in it. Or
+    pour it over your torch's head for 50 more turns of light.
+  - *Flash powder*: thrown, a blinding flash dazzles everything that sees it
+    for a few turns (dazzled monsters can't act, lose track of you, and are
+    hit for sure), scorches shades, and shows you the room. Water spoils it,
+    and the bang wakes things further off.
+  - *Salt*: pour a ring around you that no shade can cross. Anything else
+    that walks through scuffs it away, you included.
+  - *Warming draught*: drives out the chill at once, and for 80 turns no
+    shade's touch can chill you.
 - **Darkness:** some rooms start unlit. Lighting a sconce shows you the room,
   but anything in the light can see you too. In the dark, monsters only notice
   you when you are close.

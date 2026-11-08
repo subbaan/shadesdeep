@@ -189,7 +189,8 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     const char *tl = g->torch_lit ? "Snuff" : "Torch";
     struct { const char *k, *l; UiAction a; bool en; } B[] = {
         { "x", "Explore", UA_EXPLORE, true }, { "Z", "Rest", UA_REST, true }, { "t", "Throw", UA_THROW, g->ninv > 0 },
-        { "i", "Items", UA_INV, true }, { "T", tl, UA_TORCH, has_torch || g->torch_lit }, { ">", "Descend", UA_STAIRS, true },
+        { "i", "Items", UA_INV, true }, { "T", tl, UA_TORCH, has_torch || g->torch_lit },
+        { ">", game_final(g) ? "Hearth" : "Descend", UA_STAIRS, true },
         { "m", "Map", UA_MAP, true }, { NULL, "?", UA_HELP, true },
     };
     int nb = 8, gap = ui->px / 2, tw_full = 0, tw_compact = 0;
@@ -210,6 +211,14 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
         snprintf(buf, sizeof buf, "EMBERS %d", g->embers);
         need += 2 * pad + font_width(hf, buf);
     }
+    if (g->warm_left > 0) {
+        snprintf(buf, sizeof buf, "WARM %d", g->warm_left);
+        need += 2 * pad + font_width(hf, buf);
+    }
+    if (game_final(g) && g->kindle > 0) {
+        snprintf(buf, sizeof buf, "FLAME %d/3", g->kindle);
+        need += 2 * pad + font_width(hf, buf);
+    }
     bool two_rows = cv->w - tw_compact - pad < need + pad;     /* too narrow: buttons go on a row of their own */
     int rows = two_rows ? 2 : 1;
     int y = cv->h - h * rows;
@@ -223,7 +232,7 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     /* left: health */
     int x = pad;
     int mhp = game_max_hp(g);
-    uint32_t hc = p->hp * 3 <= p->maxhp ? 0xff6a50 : g->chill ? 0xb8e0ff : 0xe2d4b4;
+    uint32_t hc = p->hp * 3 <= p->maxhp ? 0xff6a50 : g->chill ? 0xb8e0ff : g->warm_left > 0 ? 0xffc890 : 0xe2d4b4;
     snprintf(buf, sizeof buf, "HP %d/%d", p->hp, mhp);
     x = font_draw(hf, cv, x, base, buf, hc, 255) + pad / 2;
     int bw = ui->px * 5, hbh = ui->px / 3 + 2, byy = base - font_ascent(hf) * 6 / 10;
@@ -252,6 +261,18 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     if (g->embers > 0 || g->heart || g->lantern || g->weapon.plus || g->armour.plus) {
         snprintf(buf, sizeof buf, "EMBERS %d", g->embers);
         x = font_draw(hf, cv, x, base, buf, 0xff9a48, 255) + pad;
+        diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
+        x += pad;
+    }
+    if (g->warm_left > 0) {
+        snprintf(buf, sizeof buf, "WARM %d", g->warm_left);
+        x = font_draw(hf, cv, x, base, buf, g->warm_left <= 10 ? 0xc89070 : 0xffb070, 255) + pad;
+        diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
+        x += pad;
+    }
+    if (game_final(g) && g->kindle > 0) {
+        snprintf(buf, sizeof buf, "FLAME %d/3", g->kindle);
+        x = font_draw(hf, cv, x, base, buf, g->kindle >= 3 ? 0xfff0b0 : 0xffd060, 255) + pad;
         diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
         x += pad;
     }
@@ -317,9 +338,10 @@ static void sidebar(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         char name[48];
         bool dark = !(lv->f[m->y][m->x] & F_VIS);
         snprintf(name, sizeof name, "%s", dark ? "eyes in the dark" : MOB_INFO[m->kind].name);
-        name[0] = (char)(name[0] - 32);
+        if (name[0] >= 'a' && name[0] <= 'z') name[0] = (char)(name[0] - 32);
         font_draw(bf, cv, x + pad, yy + font_ascent(bf), name, 0xe2d4b4, 255);
         if (dark) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "watching", C_WARN, 255);
+        else if (m->daze > 0) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "dazzled", 0xfff0a0, 255);
         else if (m->asleep) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "asleep", C_INFO, 255);
         else if (m->hunting) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "hunting", C_WARN, 255);
         if (!dark) hp_bar(cv, x + pad, yy + line, w - pad * 2, ui->px / 5 + 1, m->hp, m->maxhp);
@@ -347,19 +369,44 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
             snprintf(desc, sizeof desc, "%s A shade's chill has taken %d from your max HP. Stand by a fire (a lit "
                      "sconce or a torch on the floor) to warm up%s.", MOB_INFO[MK_PLAYER].desc, g->chill,
                      g->torch_lit ? "; your torch helps, slowly" : "");
+        else if (g->warm_left > 0)
+            snprintf(desc, sizeof desc, "%s A warming draught burns in you: for %d more turns no shade's touch can chill you.",
+                     MOB_INFO[MK_PLAYER].desc, g->warm_left);
         else snprintf(desc, sizeof desc, "%s", MOB_INFO[MK_PLAYER].desc);
+        if (lv->burn[y][x]) {
+            size_t dn = strlen(desc);
+            snprintf(desc + dn, sizeof desc - dn, " You are standing in burning oil!");
+        }
         snprintf(hint, sizeof hint, t == T_STAIRS_DOWN ? "Click to descend" : t == T_STAIRS_UP ? "Click to climb" : "Click to rest a turn");
     } else if (m && vis) {
-        snprintf(title, sizeof title, "%s", MOB_INFO[m->kind].name);
-        title[0] = (char)(title[0] - 32);
+        snprintf(title, sizeof title, "%s%s", m->kind == MK_HOLLOW ? "The " : "", MOB_INFO[m->kind].name);
+        if (title[0] >= 'a' && title[0] <= 'z') title[0] = (char)(title[0] - 32);
         snprintf(desc, sizeof desc, "%s%s", MOB_INFO[m->kind].desc,
-                 m->kind == MK_SHADE && game_firelight(g, g->player.x, g->player.y) > SHADE_FEAR ? " It hangs back from your light."
+                 m->daze > 0 ? " It reels, dazzled: it can't act, and a blow will find it."
+                 : m->kind == MK_SHADE && game_firelight(g, g->player.x, g->player.y) > SHADE_FEAR ? " It hangs back from your light."
                  : m->asleep ? " It is asleep." : m->hunting ? " It is hunting you." : " It hasn't noticed you.");
         snprintf(hint, sizeof hint, "Click to attack");
     } else if (m && game_mob_noticed(g, m)) {
         snprintf(title, sizeof title, "Eyes in the dark");
         snprintf(desc, sizeof desc, "Two pale eyes watch you from beyond your light. Whatever owns them is darker than the dark.");
         snprintf(hint, sizeof hint, "Throw a torch to see what it is");
+    } else if (lv->burn[y][x] && vis) {
+        snprintf(title, sizeof title, "Burning oil");
+        snprintf(desc, sizeof desc, "Oil burning on the %s, for a few turns more. It's a fixed fire: shades can't bear it, "
+                 "nothing will willingly walk through it, and it sears whatever stands in it.",
+                 tile_water(t) ? "water" : "stone");
+        snprintf(hint, sizeof hint, "Walking in will burn you");
+    } else if (t == T_HEARTH) {
+        snprintf(title, sizeof title, g->kindle >= 3 ? "The Heartflame" : g->kindle ? "The Heartflame, kindling" : "The cold hearth");
+        if (g->kindle >= 3)
+            snprintf(desc, sizeof desc, "The Heartflame burns again, gold and white, and the deep is warm.");
+        else if (g->kindle)
+            snprintf(desc, sizeof desc, "%s A young flame flickers in the stone (%d of 3). Hold your torch to it again "
+                     "before the dark smothers it.", tile_desc(t), g->kindle);
+        else
+            snprintf(desc, sizeof desc, "%s Bring fire to it: walk into the hearth with a lit torch three times, "
+                     "and the Heartflame will burn again.", tile_desc(t));
+        if (g->kindle < 3) snprintf(hint, sizeof hint, g->torch_lit ? "Click to kindle it" : "Light a torch to kindle it");
     } else if (t == T_BRAZIER) {
         snprintf(title, sizeof title, "Forge brazier");
         snprintf(desc, sizeof desc, "%s You have %d ember%s.", tile_desc(t), g->embers, g->embers == 1 ? "" : "s");
@@ -393,14 +440,23 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
     } else if (l && l->kind == L_CRYSTAL) {
         snprintf(title, sizeof title, "Glowcrystal");
         snprintf(desc, sizeof desc, "Pale blue crystals growing from the rock, shedding a cold, steady light.");
-    } else if (lv->scorch[y][x]) {
+    } else if (lv->salt[y][x]) {
+        snprintf(title, sizeof title, "Salt");
+        snprintf(desc, sizeof desc, "A line of coarse salt on the floor. No shade can cross it, but anything else that "
+                 "walks here will scuff it away, you included.");
+        if (tile_walkable(t)) snprintf(hint, sizeof hint, "Walking here breaks the line");
+    } else if (lv->scorch[y][x] == 1) {
         snprintf(title, sizeof title, "Burnt-out torch");
         snprintf(desc, sizeof desc, "A charred stub in a smear of soot: all that is left of a torch that burned here.");
+        if (tile_walkable(t)) snprintf(hint, sizeof hint, "Click to travel here");
+    } else if (lv->scorch[y][x] == 2) {
+        snprintf(title, sizeof title, "Soot");
+        snprintf(desc, sizeof desc, "Greasy black soot where burning oil spread and died.");
         if (tile_walkable(t)) snprintf(hint, sizeof hint, "Click to travel here");
     } else {
         if (t == T_ROCK) return;
         snprintf(title, sizeof title, "%s", tile_name(t));
-        title[0] = (char)(title[0] - 32);
+        if (title[0] >= 'a' && title[0] <= 'z') title[0] = (char)(title[0] - 32);
         snprintf(desc, sizeof desc, "%s", tile_desc(t));
         if (t == T_CHASM) snprintf(hint, sizeof hint, "Click to jump down to depth %d", g->depth + 1);
         else if (t == T_DEEP) snprintf(hint, sizeof hint, g->torch_lit ? "Click to swim here (your torch will go out)" : "Click to swim here");
@@ -442,7 +498,15 @@ static void floaters(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
     }
 }
 
+static int dialog_at(UI *ui, Canvas *cv, const char *title, const char *text, int *bx, int *by, int *bh, bool high);
+
 static int dialog(UI *ui, Canvas *cv, const char *title, const char *text, int *bx, int *by, int *bh)
+{
+    return dialog_at(ui, cv, title, text, bx, by, bh, false);
+}
+
+/* high: up out of the way of the middle of the view, where you are */
+static int dialog_at(UI *ui, Canvas *cv, const char *title, const char *text, int *bx, int *by, int *bh, bool high)
 {
     Font *bf = ui->body;
     int pad = ui->px;
@@ -450,8 +514,8 @@ static int dialog(UI *ui, Canvas *cv, const char *title, const char *text, int *
     if (w > cv->w - 20) w = cv->w - 20;
     int th = font_wrap(bf, NULL, 0, 0, w - pad * 2, text, 0, 0);
     int h = pad * 3 + font_line(ui->big) + th + font_line(ui->head) * 2;
-    int x = (cv->w - w) / 2, y = (cv->h - h) / 2 - ui->px * 2;
-    cv_blend_rect(cv, 0, 0, cv->w, cv->h, 0, 90);
+    int x = (cv->w - w) / 2, y = high ? ui->px / 2 : (cv->h - h) / 2 - ui->px * 2;
+    if (!high) cv_blend_rect(cv, 0, 0, cv->w, cv->h, 0, 90);
     panel(ui, cv, x, y, w, h, 240, true);
     int tw = font_width(ui->big, title);
     font_draw(ui->big, cv, x + (w - tw) / 2, y + pad + font_ascent(ui->big), title, GOLD, 255);
@@ -480,6 +544,7 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Gear", "anything you find you can use; each weapon and armour plays differently" },
         { "Forge", "walk into a forge brazier to spend embers on your gear or yourself" },
         { "Chasms", "step in to jump down a level (it hurts; water below breaks the fall)" },
+        { "The goal", "reach depth 26 and walk into its cold hearth with a lit torch, three times" },
         { "Map", "m  the whole level; click a place on it to travel there" },
         { "Water", "shallows splash; deep water puts out a torch; goblins won't swim, eels lurk" },
         { "Zoom", "+ and -  or the mouse wheel;  text size is kitty's font zoom (ctrl+shift+= / -)" },
@@ -616,7 +681,10 @@ static void menu_panel(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int bottom
         yy += font_wrap(sf, cv, x + pad, yy, w - pad * 2, gdesc, 0xd8cbb0, 255);
         int bx = x + pad, by = y + h - pad - bh;
         if (sl->kind == IT_TORCH) bx += button(ui, cv, bx, by, bh, "a", g->torch_lit ? "Fresh" : "Light", UA_ITEM_USE, f->mx, f->my, true) + pad / 2;
-        if (sl->kind == IT_POTION) bx += button(ui, cv, bx, by, bh, "q", "Drink", UA_ITEM_USE, f->mx, f->my, true) + pad / 2;
+        if (sl->kind == IT_POTION || sl->kind == IT_WARMTH)
+            bx += button(ui, cv, bx, by, bh, "q", "Drink", UA_ITEM_USE, f->mx, f->my, true) + pad / 2;
+        if (sl->kind == IT_OIL) bx += button(ui, cv, bx, by, bh, "a", "Soak torch", UA_ITEM_USE, f->mx, f->my, g->torch_fuel > 0) + pad / 2;
+        if (sl->kind == IT_SALT) bx += button(ui, cv, bx, by, bh, "a", "Pour", UA_ITEM_USE, f->mx, f->my, true) + pad / 2;
         if (ii->gear != GEAR_NONE)
             bx += button(ui, cv, bx, by, bh, "a", ii->gear == GEAR_WEAPON ? "Wield" : "Wear", UA_ITEM_USE, f->mx, f->my, true) + pad / 2;
         if (ii->range > 0) bx += button(ui, cv, bx, by, bh, "t", "Throw", UA_ITEM_THROW, f->mx, f->my, true) + pad / 2;
@@ -672,9 +740,9 @@ static void menu_panel(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int bottom
 static void targeting_banner(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
 {
     if (!f->targeting || f->target_slot < 0 || f->target_slot >= g->ninv) return;
-    char buf[160];
-    snprintf(buf, sizeof buf, "Throw %s %s: click where, Tab cycles targets, Esc cancels",
-             g->inv[f->target_slot].kind == IT_POTION ? "a" : "a", ITEM_INFO[g->inv[f->target_slot].kind].name);
+    char buf[160], nm[64];
+    game_item_name(g->inv[f->target_slot].kind, 1, 0, nm, sizeof nm);
+    snprintf(buf, sizeof buf, "Throw %s: click where, Tab cycles targets, Esc cancels", nm);
     Font *hf = ui->head;
     int w = font_width(hf, buf) + ui->px * 2, h = font_line(hf) * 3 / 2;
     int x = (cv->w - w) / 2, y = ui->px / 2;
@@ -847,12 +915,20 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
         int x0 = bx + (w - w1 - w2 - gap) / 2;
         button(ui, cv, x0, by, bh, "y", "Jump", UA_JUMP_YES, f->mx, f->my, true);
         button(ui, cv, x0 + w1 + gap, by, bh, "n", "Stay", UA_JUMP_NO, f->mx, f->my, true);
-    } else if (g->state == GS_DEAD) {
-        char text[200];
-        snprintf(text, sizeof text, "You fell on depth %d after %d turns, having slain %d foe%s.",
-                 g->depth, g->turn, g->kills, g->kills == 1 ? "" : "s");
+    } else if (game_end_shown(g)) {
+        char text[400];
+        bool won = g->state == GS_WON;
+        int n = won ? snprintf(text, sizeof text, "You carried fire down through all %d levels and rekindled the Heartflame, in %d turns.",
+                               MAX_DEPTH, g->turn)
+                    : snprintf(text, sizeof text, "You fell on depth %d after %d turns.", g->depth, g->turn);
+        if (!won && g->deepest > g->depth && n < (int)sizeof text)
+            n += snprintf(text + n, sizeof text - n, " You had been as deep as %d.", g->deepest);
+        if (n < (int)sizeof text)
+            snprintf(text + n, sizeof text - n, " You slew %d foe%s, gathered %d ember%s and lit %d sconce%s along the way.",
+                     g->kills, g->kills == 1 ? "" : "s", g->embers_got, g->embers_got == 1 ? "" : "s",
+                     g->sconces_lit, g->sconces_lit == 1 ? "" : "s");
         int bx, by, bh;
-        int w = dialog(ui, cv, "You have perished", text, &bx, &by, &bh);
+        int w = dialog_at(ui, cv, won ? "The Heartflame burns again" : "You have perished", text, &bx, &by, &bh, won);
         int w1 = button_width(ui, "Enter", "New game"), w2 = button_width(ui, "q", "Quit");
         int gap = ui->px;
         int x0 = bx + (w - w1 - w2 - gap) / 2;

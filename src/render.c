@@ -38,6 +38,7 @@ struct Renderer {
     Ripple rip[MAX_RIPPLE];
     struct { float x0, y0, x1, y1, t; } stone[4];      /* sling stones in flight (t: seconds, <0 idle) */
     float rip_acc[MAX_MOBS + 1];        /* idle ripples around anything standing in water */
+    float flash_t, flash_x, flash_y;    /* flash powder going off: seconds left, world pixels */
     float ember_acc[MAX_LIGHTS];
     uint8_t noise[256 * 256];
     Rng rng;
@@ -440,6 +441,7 @@ static void draw_scorch(Renderer *r, Canvas *cv, const View *v, int tx, int ty, 
             uint32_t *p = &cv->px[(size_t)y * cv->w + x];
             *p = mix(*p, 0x050404, (int)(k * 0.9f * 256));
         }
+    if (v->lv->scorch[ty][tx] != 1) return;     /* burnt oil leaves only soot */
     /* the stub: the torch sprite, charred black with an ashen head */
     CF c;
     light_at_px(r, tx * TILE + 16.0f, ty * TILE + 16.0f, &c);
@@ -466,6 +468,24 @@ static void draw_scorch(Renderer *r, Canvas *cv, const View *v, int tx, int ty, 
         }
 }
 
+/* a line of salt: pale grains scattered over the tile, catching what light there is */
+static void draw_salt(Renderer *r, Canvas *cv, const View *v, int tx, int ty, int sx, int sy)
+{
+    CF c;
+    light_at_px(r, tx * TILE + 16.0f, ty * TILE + 16.0f, &c);
+    float vis = v->fog ? c.v : 1, seen = v->fog ? c.s : 1;
+    for (int k = 0; k < 46; k++) {
+        uint32_t h = hash2(tx * 53 + k, ty * 29 + k, 0x5a17);
+        int x = sx + 2 + (int)(h % 28), y = sy + 3 + (int)((h >> 8) % 27);
+        if ((unsigned)x >= (unsigned)cv->w - 1 || (unsigned)y >= (unsigned)cv->h) continue;
+        int b = 200 + (int)((h >> 16) % 56);
+        uint32_t col = RGB(b, b, b - 8);
+        uint32_t lit = lightc(col, c.r + 0.22f, c.g + 0.22f, c.b + 0.25f);
+        uint32_t *px = &cv->px[(size_t)y * cv->w + x];
+        *px = v->fog ? fogmix(lit, memtone(col), vis, seen) : lit;
+        if ((h >> 24) & 1) px[1] = mix(px[1], *px, 140);
+    }
+}
 
 /* ---------------------------------------------------------------- water */
 
@@ -694,7 +714,7 @@ static void draw_ripples(Renderer *r, Canvas *cv, const View *v, float dt)
     /* anything standing in water sends out slow rings */
     for (int i = 0; i <= MAX_MOBS; i++) {
         const Mob *m = i < MAX_MOBS ? &v->mobs[i] : v->player;
-        if (!m || !m->alive || m->kind == MK_SHADE || m->kind == MK_BAT) continue;
+        if (!m || !m->alive || m->kind == MK_SHADE || m->kind == MK_HOLLOW || m->kind == MK_BAT) continue;
         int tx = (int)lroundf(m->rx), ty = (int)lroundf(m->ry);
         if (!tile_water(tile_at(v->lv, tx, ty))) { r->rip_acc[i] = 0; continue; }
         if (v->fog && !(v->lv->f[ty][tx] & F_VIS)) continue;
@@ -744,6 +764,7 @@ static void draw_ground(Renderer *r, Canvas *cv, const View *v)
             draw_lit(cv, sx, sy, im, TILE, TILE, &r->corner[ty][tx], &r->corner[ty][tx + 1],
                      &r->corner[ty + 1][tx], &r->corner[ty + 1][tx + 1], 1, 1, ao, v->fog, over, edge);
             if (lv->scorch[ty][tx]) draw_scorch(r, cv, v, tx, ty, sx, sy);
+            if (lv->salt[ty][tx]) draw_salt(r, cv, v, tx, ty, sx, sy);
         }
 }
 
@@ -833,6 +854,75 @@ static void light_at_px(const Renderer *r, float wx, float wy, CF *o)
     cf_lerp(o, &a, &b, v);
 }
 
+/* how far the Heartflame has come back: its light grows with each kindling (see hearth_light in game.c) */
+static int heart_stage(const Light *l) { return !l->lit ? 0 : l->radius < 4.5f ? 1 : l->radius < 7.5f ? 2 : 3; }
+
+/* the great hearth: a round stone plinth wider than its tile, its pit of ash around a dark heart-stone
+ * that glows hotter as the flame comes back */
+static void draw_hearth(Canvas *cv, const View *v, const Light *l, int sx, int sy, const CF *c, float vis, float seen)
+{
+    int st = heart_stage(l);
+    float cx = sx + 16.0f, cy = sy + 18.0f;
+    const float rx = 31, ry = 14, pr = 20, pry = 8.0f, rim = 10;
+    float heat = st == 0 ? 0 : st == 1 ? 0.45f : st == 2 ? 0.75f : 1.0f;
+    float pulse = 0.85f + 0.15f * sinf(v->time * 3.1f + l->phase);
+    float lr = c->r < 1.2f ? c->r : 1.2f, lg = c->g < 1.0f ? c->g : 1.0f, lb = c->b < 0.9f ? c->b : 0.9f;
+    if (lr < 0.34f) lr = 0.34f;
+    if (lg < 0.33f) lg = 0.33f;
+    if (lb < 0.36f) lb = 0.36f;
+    for (int y = (int)(cy - ry - 1); y <= (int)(cy + ry + rim + 1); y++) {
+        if ((unsigned)y >= (unsigned)cv->h) continue;
+        for (int x = (int)(cx - rx - 1); x <= (int)(cx + rx + 1); x++) {
+            if ((unsigned)x >= (unsigned)cv->w) continue;
+            float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
+            float top = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
+            float pit = (dx * dx) / (pr * pr) + (dy * dy) / (pry * pry);
+            uint32_t base, glow = 0;
+            int ga = 0;
+            uint32_t h = hash2(x - (int)cx + 64, y - (int)cy + 64, 4242);
+            if (pit <= 1) {
+                /* the pit: ash, and the heart-stone at its middle */
+                float lump = (dx * dx) / 90.0f + ((dy + 2.0f) * (dy + 2.0f)) / 22.0f;
+                if (lump <= 1) {
+                    base = (h & 15) == 0 && st == 0 ? 0xb0c8e0                      /* frost on the dead stone */
+                         : (h & 7) == 0 ? 0x6a7484 : lump < 0.4f && dy < -2 ? 0x5e6878 : 0x404856;
+                    /* cracks through the stone that glow as it wakes */
+                    bool crack = fabsf(sinf(dx * 0.9f + dy * 1.7f) + 0.6f * sinf(dx * 1.9f - dy * 0.7f)) < 0.22f;
+                    if (crack && st > 0) { glow = st >= 2 ? 0xffd070 : 0xff7a28; ga = (int)(255 * pulse); }
+                    else if (crack) base = 0x262c36;
+                } else {
+                    base = (h & 3) == 0 ? 0x3a3634 : (h & 3) == 1 ? 0x2c2a2a : 0x242222;
+                    if (st > 0) {
+                        /* the ash lights up from beneath */
+                        float k = heat * (1 - pit * 0.7f) * pulse;
+                        glow = mix(0x601808, 0xff8a30, (int)(clampf(k, 0, 1) * 255));
+                        ga = (int)(clampf(k * 1.4f, 0, 1) * (h & 1 ? 255 : 180));
+                    }
+                }
+                if (pit > 0.8f) base = mix(base, 0x141212, 140);     /* the inner lip throws a shadow */
+            } else if (top <= 1) {
+                /* the rim: dressed blocks set in a ring */
+                float ang = atan2f(dy * rx / ry, dx);
+                float seg = fmodf((ang + 3.14159f) * 12 / 6.28318f, 1.0f);
+                base = seg < 0.07f ? 0x3e3a36 : (h & 7) == 0 ? 0x7a746a : (h & 7) == 1 ? 0x5e5850 : 0x6c665c;
+                if (top > 0.86f) base = mix(base, 0x8a8478, 90);            /* the worn outer edge catches light */
+            } else {
+                /* the side of the plinth, below the rim */
+                if (fabsf(dx) > rx) continue;
+                float edge = cy + ry * sqrtf(1 - (dx * dx) / (rx * rx));
+                if (dy < 0 || y + 0.5f > edge + rim) continue;
+                bool seam = fmodf(dx + 40 + ((int)((y + 0.5f - edge) / 5.0f) & 1) * 5.5f, 11.0f) < 1 || fabsf(y + 0.5f - edge - rim / 2) < 0.5f;
+                base = seam ? 0x2c2824 : (h & 3) == 0 ? 0x4c4640 : 0x423c36;
+                if (y + 0.5f > edge + rim - 1.5f) base = 0x24201c;
+            }
+            uint32_t lit = lightc(base, lr, lg, lb);
+            if (ga) lit = mix(lit, glow, ga);
+            uint32_t *px = &cv->px[(size_t)y * cv->w + x];
+            *px = v->fog ? fogmix(lit, memtone(base), vis, seen) : lit;
+        }
+    }
+}
+
 static void draw_fixture(Renderer *r, Canvas *cv, const View *v, const Light *l)
 {
     const Level *lv = v->lv;
@@ -875,6 +965,10 @@ static void draw_fixture(Renderer *r, Canvas *cv, const View *v, const Light *l)
                 uint32_t lit = CA(gc) ? (gc & 0xffffff) : lightc(a & 0xffffff, lr, lg, lb);
                 cv->px[(size_t)y * cv->w + x] = v->fog ? fogmix(lit, memtone(a), vis, seen) : lit;
             }
+    } else if (l->kind == L_HEART) {
+        CF hc;
+        light_at_px(r, l->fx * TILE + 16.0f, l->fy * TILE + 30.0f, &hc);   /* lit from the floor in front of it */
+        draw_hearth(cv, v, l, sx, sy, &hc, v->fog ? hc.v : 1, v->fog ? hc.s : 1);
     } else if (l->kind == L_FLOORTORCH) {
         const Image *im = &r->t.item[IT_TORCH];
         for (int j = 0; j < im->h; j++)
@@ -915,13 +1009,15 @@ static void draw_fixture(Renderer *r, Canvas *cv, const View *v, const Light *l)
 }
 
 /* a shade: a hooded knot of darkness with pale eyes. In the dark only the
- * eyes show; in light it is a hole in the light. */
+ * eyes show; in light it is a hole in the light. The Hollow is the same, vast. */
 static void draw_shade(Canvas *cv, const View *v, const Mob *m, float ox, float oy, float alpha, bool body)
 {
-    float t = v->time + m->idle * 3;
-    float bob = sinf(t * 1.7f) * 2.0f;
-    float cx = m->rx * TILE + ox + 16 - v->camx, cy = m->ry * TILE + oy + 16 + bob - v->camy;
-    float sway = sinf(t * 1.1f) * 2.5f;
+    bool big = m->kind == MK_HOLLOW;
+    float sc = big ? 2.2f : 1.0f;
+    float t = v->time * (big ? 0.7f : 1.0f) + m->idle * 3;
+    float bob = sinf(t * 1.7f) * 2.0f * sc;
+    float cx = m->rx * TILE + ox + 16 - v->camx, cy = m->ry * TILE + oy + 16 + bob - (sc - 1) * 13 - v->camy;
+    float sway = sinf(t * 1.1f) * 2.5f * sc;
     bool burn = m->flash > 0;
     if (body) {
         /* blobs: hood, shoulders, a body that thins into a swaying tail */
@@ -929,25 +1025,26 @@ static void draw_shade(Canvas *cv, const View *v, const Mob *m, float ox, float 
         static const float BY[7] = { -10, -4, -4, 2, 7, 11, 14 }, BR[7] = { 8.5f, 7, 7, 7.5f, 5.8f, 4.2f, 2.8f };
         static const float BX[7] = { 0, -5.5f, 5.5f, 0, 0, 0, 0 };
         /* it drinks the light around it */
-        for (int j = -22; j <= 22; j++)
-            for (int i = -22; i <= 22; i++) {
+        int dr = (int)(22 * sc);
+        for (int j = -dr; j <= dr; j++)
+            for (int i = -dr; i <= dr; i++) {
                 int x = (int)cx + i, y = (int)cy + j;
                 if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
-                float d = (i * i + j * j) / 484.0f;
+                float d = (i * i + j * j) / (float)(dr * dr);
                 if (d >= 1) continue;
-                blend_px(&cv->px[(size_t)y * cv->w + x], 0x020104, (int)(95 * (1 - d) * (1 - d) * alpha));
+                blend_px(&cv->px[(size_t)y * cv->w + x], 0x020104, (int)((big ? 140 : 95) * (1 - d) * (1 - d) * alpha));
             }
         for (int k = 0; k < 7; k++) {
             float w = k >= 3 ? (k - 2) / 4.0f : 0;
-            bx[k] = BX[k] + sway * w * w * 1.6f + sinf(t * 2.3f + k * 1.7f) * 0.8f;
-            by[k] = BY[k] + cosf(t * 1.9f + k) * 0.6f;
-            br[k] = BR[k] * (1 + 0.08f * sinf(t * 3.1f + k * 2.1f));
+            bx[k] = BX[k] * sc + sway * w * w * 1.6f + sinf(t * 2.3f + k * 1.7f) * 0.8f * sc;
+            by[k] = BY[k] * sc + cosf(t * 1.9f + k) * 0.6f * sc;
+            br[k] = BR[k] * sc * (1 + 0.08f * sinf(t * 3.1f + k * 2.1f));
         }
-        int x0 = (int)cx - 16, y0 = (int)cy - 20;
-        for (int j = 0; j < 38; j++) {
+        int x0 = (int)(cx - 16 * sc), y0 = (int)(cy - 20 * sc), bw = (int)(32 * sc), bh = (int)(38 * sc);
+        for (int j = 0; j < bh; j++) {
             int y = y0 + j;
             if ((unsigned)y >= (unsigned)cv->h) continue;
-            for (int i = 0; i < 32; i++) {
+            for (int i = 0; i < bw; i++) {
                 int x = x0 + i;
                 if ((unsigned)x >= (unsigned)cv->w) continue;
                 float fx = x - cx + 0.5f, fy = y - cy + 0.5f, dens = 0;
@@ -958,35 +1055,37 @@ static void draw_shade(Canvas *cv, const View *v, const Mob *m, float ox, float 
                 }
                 if (dens <= 0.02f) continue;
                 /* churning edge */
-                float n = sinf(fx * 0.9f + t * 2.7f) * sinf(fy * 0.8f - t * 2.1f);
+                float n = sinf(fx * 0.9f / sc + t * 2.7f) * sinf(fy * 0.8f / sc - t * 2.1f);
                 dens = dens * (0.85f + 0.3f * n) - 0.05f;
                 if (dens <= 0) continue;
                 float a = clampf(dens * 1.6f, 0, 0.94f) * alpha;
-                uint32_t rim = burn ? mix(0x401c30, 0xff7020, (int)(m->flash * 256)) : 0x2c2140;
+                uint32_t rim = burn ? mix(0x401c30, 0xff7020, (int)(m->flash * 256)) : big ? 0x1e2a44 : 0x2c2140;
                 uint32_t col = mix(rim, 0x040306, (int)(clampf(dens * 1.3f, 0, 1) * 256));
                 blend_px(&cv->px[(size_t)y * cv->w + x], col, (int)(a * 255));
             }
         }
         /* wisps curling off the hood */
-        for (int k = 0; k < 6; k++) {
-            float ph = fmodf(t * 0.6f + k / 6.0f, 1.0f);
-            float wx = cx + sinf(k * 2.4f + t * 1.3f) * (3 + ph * 6), wy = cy - 15 - ph * 14;
+        int nw = big ? 14 : 6;
+        for (int k = 0; k < nw; k++) {
+            float ph = fmodf(t * 0.6f + k / (float)nw, 1.0f);
+            float wx = cx + sinf(k * 2.4f + t * 1.3f) * (3 + ph * 6) * sc, wy = cy - (15 + ph * 14) * sc;
             float a = (1 - ph) * 0.7f * alpha;
-            cv_disc(cv, wx, wy, 1.6f * (1 - ph * 0.5f), burn ? 0x60301c : 0x0a0710, (int)(a * 255));
+            cv_disc(cv, wx, wy, 1.6f * sc * (1 - ph * 0.5f), burn ? 0x60301c : 0x0a0710, (int)(a * 255));
         }
     }
     /* eyes, blinking now and then */
     if (fmodf(t * 0.7f, 4.3f) < 0.12f) return;
-    float look = m->flip ? -1.5f : 1.5f;
-    float ex = cx + look, ey = cy - 10;
-    uint32_t ec = burn ? 0xffd090 : 0xd4ecff;
-    cv_glow(cv, (int)ex, (int)ey, 9, burn ? 0xff8040 : 0x6aa8ff, 0.28f);
+    float look = m->flip ? -1.5f * sc : 1.5f * sc;
+    float ex = cx + look, ey = cy - 10 * sc;
+    uint32_t ec = burn ? 0xffd090 : big ? 0xf0f8ff : 0xd4ecff;
+    cv_glow(cv, (int)ex, (int)ey, (int)(9 * sc * (big ? 1.4f : 1)), burn ? 0xff8040 : 0x6aa8ff, big ? 0.36f : 0.28f);
+    int es = big ? 3 : 2;
     for (int e = -1; e <= 1; e += 2) {
-        int x = (int)(ex + e * 3.0f), y = (int)ey;
-        for (int j = 0; j < 2; j++)
-            for (int i = 0; i < 2; i++)
+        int x = (int)(ex + e * 3.0f * sc) - (es - 2), y = (int)ey;
+        for (int j = 0; j < es; j++)
+            for (int i = 0; i < es; i++)
                 if ((unsigned)(x + i) < (unsigned)cv->w && (unsigned)(y + j) < (unsigned)cv->h)
-                    cv->px[(size_t)(y + j) * cv->w + x + i] = j ? mix(ec, 0x405870, 90) : ec;
+                    cv->px[(size_t)(y + j) * cv->w + x + i] = j == es - 1 ? mix(ec, 0x405870, 90) : ec;
     }
 }
 
@@ -994,7 +1093,7 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
 {
     const Level *lv = v->lv;
     float alpha = 1.0f;
-    if (m->kind == MK_SHADE) {
+    if (m->kind == MK_SHADE || m->kind == MK_HOLLOW) {
         bool body = !v->fog || (lv->f[m->y][m->x] & F_VIS);
         if (v->fog && !body && !(lv->f[m->y][m->x] & F_LOS)) return;
         float ox = 0, oy = 0;
@@ -1081,6 +1180,14 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
             blend_px(&cv->px[(size_t)y * cv->w + x], lightc(0xb8e0e8, lr, lg, lb), (int)(150 * e * alpha * lum));
         }
     }
+    if (m->daze > 0 && !is_player) {
+        /* dazzled: little lights circling its head */
+        float hx = px + (W > TILE ? (W - TILE) / 2.0f : 0) + 16, hy = (float)py - 2;
+        for (int k = 0; k < 3; k++) {
+            float a = v->time * 4.5f + k * 2.094f;
+            cv_disc(cv, hx + cosf(a) * 7, hy + sinf(a) * 2.5f, 1.4f, 0xfff0a0, (int)(230 * alpha));
+        }
+    }
     if (is_player && v->torch) {
         /* a torch raised in the off hand */
         int hx = px + (m->flip ? TILE - 8 : 7), hy = py + 21;
@@ -1120,6 +1227,17 @@ static void flame(Canvas *cv, float x, float y, float size, float t, float phase
     cv_disc(cv, x + wob * 0.4f, y - 2.0f * size, 1.3f * size, 0xfff4d0, (int)(255 * vis));
 }
 
+/* a flame's body without its halo, for fires made of many flames (their halos would stack up white) */
+static void flame_body(Canvas *cv, float x, float y, float size, float t, float phase, float vis)
+{
+    float wob = sinf(t * 9 + phase) * 0.8f * size;
+    float f = 0.9f + 0.1f * sinf(t * 13 + phase);
+    cv_disc(cv, x + wob * 0.5f, y - 1.5f * size, 3.2f * size * f, 0xff8a28, (int)(220 * vis));
+    cv_disc(cv, x + wob, y - 4.0f * size, 2.4f * size * f, 0xffb848, (int)(230 * vis));
+    cv_disc(cv, x + wob * 1.3f, y - 6.5f * size, 1.3f * size * f, 0xffe090, (int)(210 * vis));
+    cv_disc(cv, x + wob * 0.4f, y - 2.0f * size, 1.2f * size, 0xfff0c8, (int)(240 * vis));
+}
+
 static void spawn_g(Renderer *r, float x, float y, float vx, float vy, float life, uint32_t c, float size, float grav)
 {
     for (int i = 0; i < MAX_PART; i++) {
@@ -1140,7 +1258,7 @@ static void draw_effects(Renderer *r, Canvas *cv, const View *v, float dt)
     Level *lv = v->lv;
     for (int i = 0; i < lv->nlights; i++) {
         const Light *l = &lv->lights[i];
-        if (!l->lit) continue;
+        if (!l->lit && l->kind != L_HEART) continue;
         float vis = v->fog ? v->visf[l->y][l->x] : 1.0f;
         if (v->fog && (lv->f[l->fy][l->fx] & F_VIS)) vis = vis > 0.6f ? vis : 0.6f;
         if (vis <= 0.02f) continue;
@@ -1192,6 +1310,50 @@ static void draw_effects(Renderer *r, Canvas *cv, const View *v, float dt)
                           rng_chance(&r->rng, 50) ? 0xffa040 : 0xffd080, 0.9f);
                 }
             }
+        } else if (l->kind == L_HEART) {
+            int st = heart_stage(l);
+            float hx = sx + 16.0f, hy = sy + 18.0f;      /* the heart-stone */
+            float rate = 0;
+            if (st == 0) {
+                /* cold: a breath of frost rises off the dead stone now and then */
+                if (v->fog && dt > 0 && rng_f(&r->rng) < dt * 1.2f)
+                    spawn(r, l->fx * TILE + 10.0f + rng_f(&r->rng) * 12, l->fy * TILE + 16.0f, (rng_f(&r->rng) - 0.5f) * 4,
+                          -5 - rng_f(&r->rng) * 4, 1.8f, 0x8ea8c8, 0.8f);
+            } else if (st == 1) {
+                cv_glow(cv, (int)hx, (int)hy - 2, 40, 0xff5a18, 0.20f * f * vis);
+                cv_glow(cv, (int)hx, (int)hy - 1, 14, 0xff9a40, 0.35f * f * vis);
+                flame(cv, hx - 1, hy, 0.55f, v->time, l->phase, vis);
+                rate = 2.0f;
+            } else if (st == 2) {
+                cv_glow(cv, (int)hx, (int)hy - 6, 70, 0xff8a30, 0.18f * f * vis);
+                flame(cv, hx - 6, hy + 1, 0.8f, v->time, l->phase + 1.1f, vis);
+                flame(cv, hx + 6, hy + 1, 0.75f, v->time, l->phase + 2.6f, vis);
+                flame(cv, hx, hy, 1.25f, v->time, l->phase, vis);
+                rate = 5.0f;
+            } else {
+                /* the Heartflame itself: a column of gold with a white heart */
+                cv_glow(cv, (int)hx, (int)hy - 14, 110, 0xffa850, 0.16f * f * vis);
+                cv_glow(cv, (int)hx, (int)hy - 10, 30, 0xffd890, 0.22f * f * vis);
+                static const float FX[9] = { -14, 14, -9, 9, -4, 4, 0, -2, 2 }, FY[9] = { 4, 4, 2, 2, 0, 0, -6, -14, -21 };
+                static const float FS[9] = { 0.9f, 0.95f, 1.3f, 1.25f, 1.6f, 1.55f, 1.8f, 1.35f, 0.9f };
+                for (int k = 0; k < 9; k++) {
+                    float sway = sinf(v->time * 2.3f + k * 0.9f) * (FY[k] < 0 ? -FY[k] * 0.12f : 0.5f);
+                    flame_body(cv, hx + FX[k] + sway, hy + FY[k], FS[k], v->time, l->phase + k * 1.37f, vis);
+                }
+                float wob = sinf(v->time * 7 + l->phase) * 1.4f;
+                cv_disc(cv, hx + wob * 0.5f, hy - 6, 2.6f, 0xfffff0, (int)(235 * vis));
+                cv_disc(cv, hx + wob, hy - 15, 1.6f, 0xfff8d8, (int)(210 * vis));
+                rate = 11.0f;
+            }
+            if (rate > 0 && v->fog && dt > 0) {
+                r->ember_acc[i] += dt * rate;
+                while (r->ember_acc[i] >= 1) {
+                    r->ember_acc[i] -= 1;
+                    spawn(r, l->fx * TILE + 16.0f + (rng_f(&r->rng) - 0.5f) * 8 * st, l->fy * TILE + 14.0f,
+                          (rng_f(&r->rng) - 0.5f) * 14, -22 - rng_f(&r->rng) * 14 * st, 0.8f + rng_f(&r->rng) * 0.6f * st,
+                          rng_chance(&r->rng, 40) ? 0xffa040 : st == 3 && rng_chance(&r->rng, 40) ? 0xfff4d0 : 0xffd080, 0.9f + 0.2f * st);
+                }
+            }
         } else if (l->kind == L_MOSS) {
             cv_glow(cv, sx + 16, sy + 16, 26, 0x40e0b0, 0.16f * f * vis);
         } else if (l->kind == L_CRYSTAL) {
@@ -1201,6 +1363,34 @@ static void draw_effects(Renderer *r, Canvas *cv, const View *v, float dt)
                 spawn(r, l->fx * TILE + 6.0f + rng_f(&r->rng) * 20, l->fy * TILE + TILE - 6.0f - rng_f(&r->rng) * 16,
                       0, -4, 1.4f, 0xa8e0ff, 0.8f);
         }
+    }
+    /* burning oil: a carpet of small flames */
+    {
+        int tx0 = v->camx / TILE - 1, ty0 = v->camy / TILE - 1;
+        int tx1 = (v->camx + cv->w) / TILE + 1, ty1 = (v->camy + cv->h) / TILE + 2;
+        for (int ty = ty0 < 0 ? 0 : ty0; ty <= ty1 && ty < MAP_H; ty++)
+            for (int tx = tx0 < 0 ? 0 : tx0; tx <= tx1 && tx < MAP_W; tx++) {
+                int b = lv->burn[ty][tx];
+                if (!b) continue;
+                float vis = v->fog ? v->visf[ty][tx] : 1.0f;
+                if (vis < 0.05f) continue;
+                int sx = tx * TILE - v->camx, sy = ty * TILE - v->camy;
+                float size = b >= 5 ? 1.0f : 0.45f + 0.11f * b;
+                /* the oil itself glows where it burns */
+                cv_glow(cv, sx + 16, sy + 20, 22, 0xff7a20, 0.13f * size * vis);
+                for (int k = 0; k < 5; k++) {
+                    uint32_t hk = hash2(tx * 7 + k, ty * 13 + k, 0xf1e);
+                    float ph = (float)(hk % 628) / 100.0f;
+                    /* each tongue of flame leaps and sinks on its own */
+                    float leap = 0.55f + 0.45f * sinf(v->time * (2.3f + (hk >> 12) % 5 * 0.4f) + ph);
+                    float fx = sx + 4 + (float)(hk % 24), fy = sy + 14 + (float)((hk >> 5) % 16);
+                    flame(cv, fx, fy, size * (0.45f + 0.45f * leap), v->time, ph, vis);
+                }
+                if (v->fog && dt > 0 && rng_f(&r->rng) < dt * 2.0f)
+                    spawn(r, tx * TILE + 6.0f + rng_f(&r->rng) * 20, ty * TILE + 10.0f + rng_f(&r->rng) * 10,
+                          (rng_f(&r->rng) - 0.5f) * 14, -18 - rng_f(&r->rng) * 22, 0.5f + rng_f(&r->rng) * 0.7f,
+                          rng_chance(&r->rng, 50) ? 0xffa040 : 0xffd080, 0.9f);
+            }
     }
     /* sling stones: a short arc from the slinger to you */
     for (int k = 0; k < 4; k++) {
@@ -1454,10 +1644,8 @@ static void draw_projectile(Renderer *r, Canvas *cv, const View *v, const Projec
                       (rng_f(&r->rng) - 0.5f) * 20, 0.35f + rng_f(&r->rng) * 0.3f, 0xffb050, 0.9f);
         break;
     }
-    case IT_POTION:
-        cv_image(cv, &r->t.item[IT_POTION], 0, 0, TILE, TILE, (int)px - 16, (int)py - 20, 0);
-        break;
     default:
+        cv_image(cv, &r->t.item[pr->kind], 0, 0, TILE, TILE, (int)px - 16, (int)py - 20, 0);
         break;
     }
 }
@@ -1502,6 +1690,20 @@ static void draw_throw_preview(Canvas *cv, const View *v, const Overlay *ov, con
     float pr = 11 + sinf(t * 5) * 1.5f;
     cv_ring(cv, lx, ly + 2, pr, 2.0f, rc, 220);
     cv_ring(cv, lx, ly + 2, pr * 0.45f, 1.5f, rc, 160);
+    if (chasm) return;
+    int cx = c % MAP_W, cy = c / MAP_W;
+    if (ov->tkind == IT_OIL) {
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++) {
+                Tile tt = tile_at(v->lv, cx + dx, cy + dy);
+                if ((!dx && !dy) || !tile_walkable(tt) || tt == T_DOOR) continue;
+                float x = lx + dx * TILE, y = ly + dy * TILE;
+                cv_blend_rect(cv, (int)x - 12, (int)y - 12, 24, 24, 0xff7a30, 40);
+                cv_ring(cv, x, y + 2, 6, 1.2f, 0xffa050, 150);
+            }
+    } else if (ov->tkind == IT_FLASH && !tile_water(tile_at(v->lv, cx, cy))) {
+        cv_ring(cv, lx, ly + 2, 5.5f * TILE, 1.5f, 0xfff0c0, (int)(90 + 40 * sinf(t * 4)));
+    }
 }
 
 void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
@@ -1549,7 +1751,13 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
                 }
             continue;
         }
-        int n = f->kind == FX_SHATTER ? 26 : f->kind == FX_FALL ? 18 : f->kind == FX_DISSOLVE ? 40 : 16;
+        if (f->kind == FX_FLASH) {
+            r->flash_t = 0.5f;
+            r->flash_x = x;
+            r->flash_y = y;
+        }
+        int n = f->kind == FX_SHATTER ? 26 : f->kind == FX_FALL ? 18 : f->kind == FX_DISSOLVE ? 40
+              : f->kind == FX_FLASH ? 48 : f->kind == FX_OIL ? 30 : f->kind == FX_SALT ? 40 : 16;
         for (int k = 0; k < n; k++) {
             float a = rng_f(&r->rng) * 6.283f, sp = 20 + rng_f(&r->rng) * 70;
             switch (f->kind) {
@@ -1591,6 +1799,20 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
                 spawn_g(r, x + (rng_f(&r->rng) - 0.5f) * 14, y, (rng_f(&r->rng) - 0.5f) * 10, 10 + rng_f(&r->rng) * 30,
                         0.6f + rng_f(&r->rng) * 0.8f, 0xffa040, 0.9f, 40);
                 break;
+            case FX_FLASH:
+                spawn_g(r, x, y, cosf(a) * sp * 2.2f, sinf(a) * sp * 2.2f - 30, 0.35f + rng_f(&r->rng) * 0.5f,
+                        k % 3 ? 0xfff8e0 : 0xffe090, 0.9f, 60);
+                break;
+            case FX_OIL:
+                spawn_g(r, x, y, cosf(a) * sp, sinf(a) * sp - 40, 0.4f + rng_f(&r->rng) * 0.5f,
+                        k % 4 == 0 ? 0xc8d8c0 : k % 2 ? 0xffa030 : 0xd07018, k % 4 == 0 ? 0.5f : 0.9f, 220);
+                break;
+            case FX_SALT: {
+                float rr = 14 + rng_f(&r->rng) * 26;
+                spawn_g(r, x + cosf(a) * rr, y + sinf(a) * rr * 0.7f - 14, cosf(a) * 6, 10 + rng_f(&r->rng) * 10,
+                        0.4f + rng_f(&r->rng) * 0.4f, 0xe8e8e0, 0.5f, 90);
+                break;
+            }
             default:
                 break;
             }
@@ -1610,6 +1832,14 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
     if (g->proj.active) draw_projectile(r, cv, &v, &g->proj, dt);
     draw_throw_preview(cv, &v, ov, &g->player);
     if (ov->hx >= 0) draw_path(cv, &v, NULL, 0, ov->hx, ov->hy, g->time);
+    if (r->flash_t > 0) {
+        float k = r->flash_t / 0.5f;
+        k *= k;
+        int fx = (int)(r->flash_x - camx), fy = (int)(r->flash_y - camy);
+        cv_glow(cv, fx, fy, 6 * TILE, 0xfff4e0, 1.1f * k);
+        cv_glow(cv, fx, fy, 2 * TILE, 0xffffff, 1.4f * k);
+        r->flash_t -= dt;
+    }
 }
 
 int render_dump_lower(const Renderer *r, const char *path)

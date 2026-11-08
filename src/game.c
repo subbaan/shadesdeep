@@ -24,6 +24,11 @@ const MobInfo MOB_INFO[MK_COUNT] = {
                     "is far too heavy to knock back.", 18, 70, 3, 8, 5, 6 },
     [MK_EEL]    = { "eel", "A long, pale-eyed eel that lurks unseen in deep water and lunges at anything in it or beside "
                     "it. It never leaves the water.", 12, 80, 2, 5, 10, 7 },
+    [MK_HOLLOW] = { "Hollow", "The thing that put out the Heartflame: a shade grown vast on the warmth of everyone who ever "
+                    "came down here. Your torch doesn't frighten it and salt won't stop it. A fixed fire burns it but can't "
+                    "drive it off, a flash of powder dazzles it, darts pass through it, and its touch is bitterly cold. "
+                    "While you kindle the Heartflame, every blow it lands smothers the young flame.",
+                    50, 95, 5, 10, 30, 10 },
 };
 
 const ItemInfo ITEM_INFO[IT_COUNT] = {
@@ -63,6 +68,20 @@ const ItemInfo ITEM_INFO[IT_COUNT] = {
                     "Riveted iron rings: strong protection, but it rings with every step, waking what sleeps "
                     "nearby, and in deep water it drags you under.",
                     0, true, GEAR_ARMOUR, 0, 0, 0, 22 },
+    [IT_OIL]    = { "oil flask", "oil flasks",
+                    "A stoppered flask of lamp oil. Thrown, it bursts into a pool of burning oil: a fixed fire that "
+                    "burns shades, sears anything standing in it, and that nothing will willingly walk through. It "
+                    "even burns on water. Or pour it over your torch's head for 50 more turns of light.", 7, true },
+    [IT_FLASH]  = { "twist of flash powder", "twists of flash powder",
+                    "A paper twist of white powder. Thrown, it goes off in a blinding flash: everything that sees it "
+                    "reels, dazzled, for a few turns and loses track of you, and shades are scorched. The flash also "
+                    "shows you the room it lights. Water spoils it, and the bang carries.", 7, false },
+    [IT_SALT]   = { "pouch of salt", "pouches of salt",
+                    "Coarse grey salt. Pour it in a ring around you and no shade can cross it, though anything else "
+                    "that walks through scuffs it away (you too, when you step out).", 0, true },
+    [IT_WARMTH] = { "warming draught", "warming draughts",
+                    "A peppery amber cordial that burns all the way down. It drives out a shade's chill at once, and "
+                    "for 80 turns after, no shade's touch can chill you.", 0, true },
 };
 
 static bool stacks(ItemKind k) { return ITEM_INFO[k].gear == GEAR_NONE; }
@@ -138,9 +157,13 @@ static void vocal(Game *g, const Mob *m)
     static const SoundKind V[MK_COUNT] = {
         [MK_PLAYER] = SND_COUNT, [MK_RAT] = SND_RAT, [MK_GOBLIN] = SND_GOBLIN, [MK_SHADE] = SND_SHADE,
         [MK_BAT] = SND_BAT, [MK_SLINGER] = SND_GOBLIN, [MK_OGRE] = SND_OGRE, [MK_EEL] = SND_EEL,
+        [MK_HOLLOW] = SND_SHADE,
     };
     if (V[m->kind] != SND_COUNT) sfx(g, V[m->kind], m->x, m->y);
 }
+
+/* a shade, or the great one: things of the dark that hunt by warmth, chill with a touch and burn in fire */
+static bool shadeish(MobKind k) { return k == MK_SHADE || k == MK_HOLLOW; }
 
 /* ---------------------------------------------------------------- levels */
 
@@ -216,6 +239,8 @@ static MobKind pick_kind(Rng *r, int d)
     return MK_RAT;
 }
 
+static int cheb(int ax, int ay, int bx, int by);
+
 static void spawn_mobs(Game *g, int d)
 {
     Level *lv = g->lv[d];
@@ -225,6 +250,7 @@ static void spawn_mobs(Game *g, int d)
         int x = rng_range(&r, 1, MAP_W - 2), y = rng_range(&r, 1, MAP_H - 2);
         if (lv->t[y][x] != T_FLOOR || lv->room[y][x] < 0) continue;
         if (abs(x - lv->upx) + abs(y - lv->upy) < 9) continue;
+        if (lv->room[y][x] == lv->hall && lv->hall >= 0) continue;     /* the hall has its own (below) */
         bool taken = false;
         for (int i = 0; i < placed; i++)
             if (g->mobs[d][i].x == x && g->mobs[d][i].y == y) taken = true;
@@ -260,6 +286,33 @@ static void spawn_mobs(Game *g, int d)
         m->hp = m->maxhp = MOB_INFO[MK_EEL].hp + MOB_INFO[MK_EEL].hp * (d - 1) / 8;
         eels--;
     }
+    /* the last level: the Hollow broods by the cold hearth, its brood about the hall */
+    if (d == MAX_DEPTH && lv->hall >= 0) {
+        Room *hl = &lv->rooms[lv->hall];
+        int want = 6;           /* the Hollow, then five shades */
+        for (int tries = 0; tries < 4000 && want > 0 && placed < MAX_MOBS; tries++) {
+            int x, y;
+            if (want == 6 && tries < 40) { x = lv->downx + rng_range(&r, -1, 1); y = lv->downy + 2; }
+            else { x = rng_range(&r, hl->x, hl->x + hl->w - 1); y = rng_range(&r, hl->y, hl->y + hl->h - 1); }
+            if (!in_map(x, y) || lv->t[y][x] != T_FLOOR || lv->room[y][x] != lv->hall) continue;
+            if (want < 6 && cheb(x, y, lv->downx, lv->downy) < 2) continue;
+            bool taken = false;
+            for (int i = 0; i < placed; i++)
+                if (g->mobs[d][i].alive && g->mobs[d][i].x == x && g->mobs[d][i].y == y) taken = true;
+            if (taken) continue;
+            Mob *m = &g->mobs[d][placed++];
+            if (want == 6) {
+                mob_init(m, MK_HOLLOW, x, y);
+                m->lvl = 1;                     /* its strength is its own, not the depth's */
+            } else {
+                mob_init(m, MK_SHADE, x, y);
+                m->lvl = d;
+                m->hp = m->maxhp = MOB_INFO[MK_SHADE].hp + MOB_INFO[MK_SHADE].hp * (d - 1) / 8;
+            }
+            m->flip = rng_chance(&r, 50);
+            want--;
+        }
+    }
 }
 
 static void spawn_items(Game *g, int d)
@@ -275,7 +328,9 @@ static void spawn_items(Game *g, int d)
             if (g->items[d][i].x == x && g->items[d][i].y == y) taken = true;
         if (taken) continue;
         int roll = rng_range(&r, 0, 99);
-        ItemKind k = roll < 22 ? IT_TORCH : roll < 62 ? IT_DART : IT_POTION;
+        ItemKind k = roll < 22 ? IT_TORCH : roll < 54 ? IT_DART : roll < 75 ? IT_POTION : roll < 85 ? IT_OIL
+                   : roll < 92 ? IT_FLASH : roll < 96 ? IT_SALT : IT_WARMTH;
+        if ((k == IT_SALT || k == IT_WARMTH) && d < 2) k = IT_POTION;      /* no shades up there yet */
         /* torches are the clock: don't let luck run far ahead of the pace */
         if (k == IT_TORCH && g->torches_made + 1 > d * TORCHES_PER_LEVEL + 1.5f) k = IT_DART;
         if (k == IT_TORCH) g->torches_made++;
@@ -354,13 +409,17 @@ static void view_mark(void *vc, int x, int y, float d)
 
 bool game_mob_hidden(const Mob *m) { return m->kind == MK_EEL && m->surfaced <= 0; }
 
+bool game_burning(Game *g, int x, int y) { return in_map(x, y) && game_level(g)->burn[y][x] > 0; }
+
+bool game_final(const Game *g) { return g->depth == MAX_DEPTH; }
+
 /* a monster you can make out: in view, or a shade's eyes in the dark */
 bool game_mob_noticed(Game *g, const Mob *m)
 {
     Level *lv = game_level(g);
     if (!m->alive || game_mob_hidden(m)) return false;
     uint8_t f = lv->f[m->y][m->x];
-    return (f & F_VIS) || (m->kind == MK_SHADE && (f & F_LOS));
+    return (f & F_VIS) || (shadeish(m->kind) && (f & F_LOS));
 }
 
 static int count_visible_mobs(Game *g)
@@ -386,14 +445,20 @@ static void compute_view(Game *g)
     bool fresh = false;
     Mob *all = g->mobs[g->depth];
     for (int i = 0; i < MAX_MOBS; i++)
-        if (game_mob_noticed(g, &all[i]) && !all[i].known) { all[i].known = true; fresh = true; }
+        if (game_mob_noticed(g, &all[i]) && !all[i].known) {
+            all[i].known = true;
+            fresh = true;
+            if (all[i].kind == MK_HOLLOW)
+                game_msg(g, C_BAD, "something vast uncoils in the dark by the hearth: the Hollow, that put out the Heartflame.");
+        }
     if (fresh) sfx_ex(g, SND_ALERT, 0, 0, true, 0, 1);     /* something new is here */
     if (n > g->seen_mobs && g->autom != AUTO_NONE) {
         Mob *m = g->mobs[g->depth];
         for (int i = 0; i < MAX_MOBS; i++)
             if (game_mob_noticed(g, &m[i])) {
                 if (!(lv->f[m[i].y][m[i].x] & F_VIS)) game_msg(g, C_WARN, "two pale eyes watch you from the dark.");
-                else game_msg(g, C_WARN, "you see a %s%s.", MOB_INFO[m[i].kind].name, m[i].asleep ? " (asleep)" : "");
+                else game_msg(g, C_WARN, "you see %s %s%s.", m[i].kind == MK_HOLLOW ? "the" : "a", MOB_INFO[m[i].kind].name,
+                              m[i].asleep ? " (asleep)" : "");
                 break;
             }
         game_stop(g);
@@ -431,9 +496,12 @@ Game *game_new(uint32_t seed)
     g->inv[0] = (Slot){ IT_TORCH, 2, 0 };
     g->inv[1] = (Slot){ IT_DART, 5, 0 };
     g->inv[2] = (Slot){ IT_POTION, 1, 0 };
-    g->ninv = 3;
+    g->inv[3] = (Slot){ IT_OIL, 1, 0 };
+    g->ninv = 4;
     g->weapon = (Slot){ IT_SWORD, 1, 0 };
     g->armour = (Slot){ IT_LEATHER, 1, 0 };
+    g->deepest = 1;
+    game_msg(g, C_INFO, "far below, at depth %d, the Heartflame has gone cold. Carry fire down to it.", MAX_DEPTH);
     game_msg(g, C_INFO, "you descend into the dark. Light is precious down here.");
     game_msg(g, C_DIM, "click to travel, x explores, ? for help.");
     return g;
@@ -502,6 +570,10 @@ static void kill_mob(Game *g, Mob *m)
     m->alive = false;
     g->kills++;
     if (m->kind == MK_SHADE) ember(g, 1, "the shade leaves a cold ember behind as it goes");
+    if (m->kind == MK_HOLLOW) {
+        game_msg(g, C_GOOD, "the Hollow comes apart like smoke in a wind, with a sound like a long sigh.");
+        ember(g, 5, "at its heart lies a knot of cold embers");
+    }
 }
 
 static void mob_stats(Game *g, const Mob *m, int *acc, int *dmin, int *dmax, int *def)
@@ -522,9 +594,12 @@ static void mob_stats(Game *g, const Mob *m, int *acc, int *dmin, int *dmax, int
 static void ember(Game *g, int n, const char *why)
 {
     g->embers += n;
+    g->embers_got += n;
     game_msg(g, C_GOOD, "%s (+%d ember%s, %d now).", why, n, n == 1 ? "" : "s", g->embers);
     floater(g, g->player.x, g->player.y, 0xffa040, "+ember");
 }
+
+static void hearth_light(Game *g);
 
 /* returns true if it hit */
 static bool attack(Game *g, Mob *a, Mob *d)
@@ -534,17 +609,17 @@ static bool attack(Game *g, Mob *a, Mob *d)
     int acc, dmin, dmax, def, x0, x1, x2;
     mob_stats(g, a, &acc, &dmin, &dmax, &x0);
     mob_stats(g, d, &x0, &x1, &x2, &def);
-    bool unaware = !pl_def && (d->asleep || !d->hunting);
+    bool unaware = !pl_def && (d->asleep || !d->hunting || d->daze > 0);
     a->bump = 1.0f;
     a->bdx = d->x - a->x;
     a->bdy = d->y - a->y;
-    if (a->kind != MK_SHADE && a->kind != MK_EEL && a->kind != MK_BAT)
+    if (!shadeish(a->kind) && a->kind != MK_EEL && a->kind != MK_BAT)
         sfx_ex(g, SND_SWING, a->x, a->y, false, 0, pl_att ? 1.0f : a->kind == MK_OGRE ? 1.0f : 0.7f);
     if (!pl_att && a->kind != MK_EEL && rng_chance(&g->rng, 30)) vocal(g, a);
     if (d->kind == MK_EEL && d->surfaced < 2) d->surfaced = 2;      /* struck: it shows itself */
     if (a->bdx) a->flip = a->bdx < 0;
     int chance = acc - def;
-    if (d->asleep) chance = 100;
+    if (d->asleep || d->daze > 0) chance = 100;
     d->asleep = false;
     if (!pl_def) { d->hunting = true; d->tx = a->x; d->ty = a->y; }
     if ((int)(rng_u32(&g->rng) % 100) >= chance) {
@@ -557,9 +632,12 @@ static bool attack(Game *g, Mob *a, Mob *d)
     bool sneak = pl_att && g->weapon.kind == IT_DAGGER && unaware;
     if (sneak) dmg *= 3;
     int chill = 0;
-    if (a->kind == MK_SHADE && pl_def) {
+    bool warded = false;
+    if (shadeish(a->kind) && pl_def && g->warm_left > 0) {
+        warded = true;                  /* the draught's warmth: the cold finds no hold */
+    } else if (shadeish(a->kind) && pl_def) {
         /* the cold of its touch takes from your max HP until a fire warms you */
-        chill = rng_range(&g->rng, 1, 2);
+        chill = a->kind == MK_HOLLOW ? rng_range(&g->rng, 2, 3) : rng_range(&g->rng, 1, 2);
         if (g->chill + chill > d->maxhp / 2) chill = d->maxhp / 2 - g->chill;     /* it can take half, no more */
         if (chill < 0) chill = 0;
         g->chill += chill;
@@ -579,19 +657,29 @@ static bool attack(Game *g, Mob *a, Mob *d)
         if (d->hp <= 0) {
             game_msg(g, C_BAD, "the %s kills you...", ai->name);
             g->state = GS_DEAD;
+            g->end_t = g->time;
             sfx_ex(g, SND_DIE, d->x, d->y, true, 0.25f, 1);
         } else if (chill) {
-            game_msg(g, C_BAD, "the shade's touch chills you to the bone (max HP -%d until a fire warms you).", chill);
+            game_msg(g, C_BAD, "the %s's touch chills you to the bone (max HP -%d until a fire warms you).", ai->name, chill);
             floater(g, d->x, d->y, 0x9ad8ff, "chill");
+        } else if (warded) {
+            game_msg(g, C_BAD, "the %s's touch stings, but its cold finds no hold in you.", ai->name);
         } else {
             game_msg(g, C_BAD, "the %s hits you.", ai->name);
+        }
+        if (a->kind == MK_HOLLOW && d->hp > 0 && game_final(g) && g->kindle > 0 && g->kindle < 3) {
+            /* its cold breath falls on the young flame */
+            g->kindle--;
+            hearth_light(g);
+            game_msg(g, C_BAD, g->kindle ? "the Hollow's breath gusts over the hearth, and the young flame shrinks."
+                                         : "the Hollow's breath gusts over the hearth, and the flame dies back to embers.");
         }
         return true;
     }
     if (d->hp <= 0) {
         kill_mob(g, d);
         game_msg(g, C_GOOD, sneak ? "you strike the unaware %s dead!" : "you slay the %s!", di->name);
-        if (d->kind == MK_SHADE) { push_fx(g, FX_DISSOLVE, d->x, d->y); sfx(g, SND_DISSOLVE, d->x, d->y); }
+        if (shadeish(d->kind)) { push_fx(g, FX_DISSOLVE, d->x, d->y); sfx(g, SND_DISSOLVE, d->x, d->y); }
         else sfx_ex(g, SND_KILL, d->x, d->y, false, 0.1f, 1);
     } else {
         game_msg(g, C_TEXT, sneak ? "you strike the unaware %s!" : "you hit the %s.", di->name);
@@ -639,10 +727,12 @@ static bool mob_can_enter(Game *g, const Mob *m, int nx, int ny)
     if (!in_map(nx, ny) || !diag_ok(lv, m->x, m->y, nx - m->x, ny - m->y)) return false;
     if ((g->player.x == nx && g->player.y == ny) || game_mob_at(g, nx, ny)) return false;
     Tile t = lv->t[ny][nx];
+    if (lv->burn[ny][nx]) return false;                                         /* nothing walks into burning oil */
     switch (m->kind) {
     case MK_BAT:    return t == T_CHASM || (tile_walkable(t) && t != T_DOOR);  /* flies, but can't open doors */
     case MK_EEL:    return t == T_DEEP;                                         /* never leaves the water */
-    case MK_SHADE:  return tile_walkable(t) && game_firelight(g, nx, ny) <= SHADE_FEAR;
+    case MK_SHADE:  return tile_walkable(t) && !lv->salt[ny][nx] && game_firelight(g, nx, ny) <= SHADE_FEAR;
+    case MK_HOLLOW: return tile_walkable(t);                                    /* nothing but burning oil holds it back */
     case MK_GOBLIN: case MK_SLINGER: case MK_OGRE:
                     return tile_walkable(t) && t != T_DEEP;                     /* they won't swim */
     default:        return tile_walkable(t);
@@ -689,10 +779,15 @@ static void make_noise(Game *g, int x, int y, int radius);
 static void mob_go(Game *g, Mob *m, int nx, int ny)
 {
     start_tween(m, nx, ny);
-    Tile t = tile_at(game_level(g), nx, ny);
+    Level *lv = game_level(g);
+    Tile t = tile_at(lv, nx, ny);
     if (m->kind == MK_BAT || m->kind == MK_EEL) return;   /* on the wing, or under the surface: silent */
+    if (lv->salt[ny][nx] && m->kind != MK_SHADE) {
+        lv->salt[ny][nx] = 0;                               /* scuffed away */
+        if (lv->f[ny][nx] & F_VIS) game_msg(g, C_DIM, "the %s scuffs through the salt.", MOB_INFO[m->kind].name);
+    }
     if (tile_water(t)) push_fx(g, FX_SPLASH, nx, ny);
-    if (m->kind == MK_SHADE) return;        /* it makes no sound as it moves */
+    if (shadeish(m->kind)) return;          /* it makes no sound as it moves */
     float v = m->kind == MK_RAT ? 0.3f : m->kind == MK_OGRE ? 1.0f : 0.55f;
     sfx_ex(g, t == T_DEEP ? SND_SWIM : t == T_SHALLOW ? SND_WADE : SND_STEP, nx, ny, false, 0, v);
 }
@@ -705,6 +800,26 @@ static bool shade_burns(Game *g, Mob *m)
     Level *lv = game_level(g);
     if (game_firelight(g, m->x, m->y) <= SHADE_FEAR) return false;
     bool seen = lv->f[m->y][m->x] & (F_VIS | F_LOS);
+    if (m->kind == MK_HOLLOW) {
+        /* the great one: a torch means nothing to it, and a fixed fire only burns it as it comes on */
+        if (level_fire(lv, m->x, m->y) <= SHADE_FEAR) return false;
+        int dmg = rng_range(&g->rng, 3, 5);
+        m->hp -= dmg;
+        m->flash = 1;
+        char t[16];
+        snprintf(t, sizeof t, "%d", dmg);
+        floater(g, m->x, m->y, 0xffa040, t);
+        push_fx(g, FX_BURN, m->x, m->y);
+        sfx(g, SND_BURN, m->x, m->y);
+        if (m->hp <= 0) {
+            push_fx(g, FX_DISSOLVE, m->x, m->y);
+            sfx(g, SND_DISSOLVE, m->x, m->y);
+            kill_mob(g, m);
+            return true;
+        }
+        if (seen && rng_chance(&g->rng, 35)) game_msg(g, C_TEXT, "the Hollow smoulders in the firelight, and comes on regardless.");
+        return false;
+    }
     if (level_fire(lv, m->x, m->y) <= SHADE_FEAR) {
         /* only your torch's light: it can't hurt the shade, but it can't stay in it either */
         if (seen && rng_chance(&g->rng, 40)) game_msg(g, C_DIM, "the shade recoils from your torch.");
@@ -756,6 +871,7 @@ static void shade_flee(Game *g, Mob *m)
     for (int d = 0; d < 8; d++) {
         int nx = m->x + DX8[d], ny = m->y + DY8[d];
         if (!mob_free(g, nx, ny) || !diag_ok(lv, m->x, m->y, DX8[d], DY8[d]) || lv->t[ny][nx] == T_DOOR) continue;
+        if (lv->salt[ny][nx]) continue;
         float f = game_firelight(g, nx, ny);
         if (f < bf) { bf = f; best = d; }
     }
@@ -827,6 +943,7 @@ static void sling(Game *g, Mob *m)
     if (p->hp <= 0) {
         game_msg(g, C_BAD, "a sling stone fells you...");
         g->state = GS_DEAD;
+        g->end_t = g->time;
         sfx_ex(g, SND_DIE, p->x, p->y, true, 0.45f, 1);
     } else {
         game_msg(g, C_BAD, "a sling stone hits you.");
@@ -865,15 +982,23 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
     Mob *p = &g->player;
     const MobInfo *mi = &MOB_INFO[m->kind];
     if (m->kind == MK_EEL) { eel_turn(g, m); return; }
+    if (m->kind != MK_SHADE && lv->burn[m->y][m->x]) {
+        /* caught in burning oil: get out of it, whatever else is going on */
+        int start = rng_range(&g->rng, 0, 7);
+        for (int k = 0; k < 8; k++) {
+            int d = (start + k) % 8, nx = m->x + DX8[d], ny = m->y + DY8[d];
+            if (mob_can_enter(g, m, nx, ny) && lv->t[ny][nx] != T_DOOR) { mob_go(g, m, nx, ny); return; }
+        }
+    }
     int dist = cheb(m->x, m->y, p->x, p->y);
     bool cloak = g->armour.kind == IT_CLOAK;
     bool lit = pb > 0.30f;
     float range = lit ? (float)mi->perception : cloak ? 1.5f : 2.5f;
-    bool shade = m->kind == MK_SHADE, bat = m->kind == MK_BAT;
+    bool shade = shadeish(m->kind), bat = m->kind == MK_BAT;
     if (shade) {
-        /* a shade within your torch's glow gnaws at the flame */
-        if (g->torch_lit && g->plight[m->y][m->x] > 0 && dist <= 8) (*gnaw)++;
-        if (shade_burns(g, m)) return;
+        /* a shade within your torch's glow gnaws at the flame (the Hollow, greedily) */
+        if (g->torch_lit && g->plight[m->y][m->x] > 0 && dist <= 8) *gnaw += m->kind == MK_HOLLOW ? 2 : 1;
+        if (shade_burns(g, m) || !m->alive) return;
         range = (float)mi->perception * (cloak ? 0.5f : 1.0f);   /* it feels your warmth, lit or not */
     }
     bool sees = dist <= range && los(lv, m->x, m->y, p->x, p->y);
@@ -901,7 +1026,7 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
         return;                                 /* or fits another stone */
     }
     if (dist == 1 && diag_ok(lv, m->x, m->y, p->x - m->x, p->y - m->y) && (sees || m->hunting)
-        && !(shade && game_firelight(g, p->x, p->y) > SHADE_FEAR)) {
+        && !(m->kind == MK_SHADE && game_firelight(g, p->x, p->y) > SHADE_FEAR)) {
         if (bat && rng_chance(&g->rng, 35)) mob_wander(g, m);     /* flits off instead */
         else attack(g, m, p);
         return;
@@ -927,9 +1052,14 @@ static void monsters_act(Game *g)
     for (int i = 0; i < MAX_MOBS && g->state != GS_DEAD; i++) {
         Mob *m = &ms[i];
         if (!m->alive) continue;
+        if (m->daze > 0) {                                                  /* reeling from a flash */
+            m->daze--;
+            if (shadeish(m->kind)) shade_burns(g, m);
+            continue;
+        }
         if (m->kind == MK_OGRE && (m->rest = !m->rest)) continue;          /* slow: every other turn */
         mob_turn(g, m, pb, &gnaw);
-        if (m->kind == MK_BAT && m->alive && !m->asleep && g->state != GS_DEAD)
+        if (m->kind == MK_BAT && m->alive && !m->asleep && !m->daze && g->state != GS_DEAD)
             mob_turn(g, m, pb, &gnaw);                                    /* quick: twice a turn */
     }
     if (gnaw && g->torch_lit && g->state != GS_DEAD) {
@@ -949,6 +1079,13 @@ static void burn_floor_torches(Game *g, int d)
     if (!lv) return;
     for (int i = lv->nlights - 1; i >= 0; i--) {
         Light *l = &lv->lights[i];
+        if (l->kind == L_OILFIRE) {
+            if (--l->fuel <= 0) {
+                level_remove_light(lv, i);
+                if (d == g->depth + 1) g->lower_dirty = true;
+            }
+            continue;
+        }
         if (l->kind != L_FLOORTORCH || l->fuel < 0) continue;
         if (--l->fuel > 0) continue;
         if (d == g->depth && (lv->f[l->y][l->x] & F_VIS))
@@ -957,6 +1094,68 @@ static void burn_floor_torches(Game *g, int d)
         if (d == g->depth) sfx_ex(g, SND_SNUFF, l->x, l->y, false, 0, 0.7f);
         level_remove_light(lv, i);
         if (d == g->depth + 1) g->lower_dirty = true;
+    }
+}
+
+/* burning oil on a level dies down a turn; where it burned out on stone, soot is left */
+static void burn_tick(Game *g, int d)
+{
+    Level *lv = g->lv[d];
+    if (!lv) return;
+    bool out = false;
+    for (int y = 0; y < MAP_H; y++)
+        for (int x = 0; x < MAP_W; x++) {
+            if (!lv->burn[y][x] || --lv->burn[y][x]) continue;
+            out = true;
+            if (!tile_water((Tile)lv->t[y][x]) && !lv->scorch[y][x]) lv->scorch[y][x] = 2;
+        }
+    if (out && d == g->depth + 1) g->lower_dirty = true;
+}
+
+/* burning oil sears whatever stands in it (shades have the firelight to fear instead) */
+static void fire_harm(Game *g)
+{
+    Level *lv = game_level(g);
+    Mob *ms = g->mobs[g->depth];
+    char t[16];
+    for (int i = 0; i < MAX_MOBS; i++) {
+        Mob *m = &ms[i];
+        if (!m->alive || shadeish(m->kind) || game_mob_hidden(m) || !lv->burn[m->y][m->x]) continue;
+        int dmg = rng_range(&g->rng, 2, 4);
+        bool seen = lv->f[m->y][m->x] & F_VIS;
+        m->hp -= dmg;
+        m->flash = 1;
+        m->asleep = false;
+        snprintf(t, sizeof t, "%d", dmg);
+        floater(g, m->x, m->y, 0xffa040, t);
+        push_fx(g, FX_BURN, m->x, m->y);
+        if (m->hp <= 0) {
+            kill_mob(g, m);
+            sfx(g, SND_KILL, m->x, m->y);
+            if (seen) game_msg(g, C_GOOD, "the %s burns to death in the oil!", MOB_INFO[m->kind].name);
+        } else if (seen) {
+            game_msg(g, C_TEXT, "the %s burns!", MOB_INFO[m->kind].name);
+            vocal(g, m);
+        }
+    }
+    Mob *p = &g->player;
+    if (g->state == GS_DEAD || !lv->burn[p->y][p->x]) return;
+    int dmg = rng_range(&g->rng, 2, 4);
+    p->hp -= dmg;
+    p->flash = 1;
+    g->shake = 0.25f;
+    snprintf(t, sizeof t, "%d", dmg);
+    floater(g, p->x, p->y, 0xff5a4a, t);
+    push_fx(g, FX_BURN, p->x, p->y);
+    sfx_ex(g, SND_HURT, p->x, p->y, false, 0.05f, 1);
+    game_stop(g);
+    if (p->hp <= 0) {
+        game_msg(g, C_BAD, "you burn to death in the oil...");
+        g->state = GS_DEAD;
+        g->end_t = g->time;
+        sfx_ex(g, SND_DIE, p->x, p->y, true, 0.25f, 1);
+    } else {
+        game_msg(g, C_BAD, "the burning oil sears you!");
     }
 }
 
@@ -977,6 +1176,11 @@ static void end_turn(Game *g)
     burn_floor_torches(g, g->depth);
     burn_floor_torches(g, g->depth + 1);
     monsters_act(g);
+    if (g->state != GS_DEAD) fire_harm(g);
+    burn_tick(g, g->depth);
+    burn_tick(g, g->depth + 1);
+    if (g->warm_left > 0 && --g->warm_left == 0) game_msg(g, C_WARN, "the warming draught's glow fades; the cold can find you again.");
+    else if (g->warm_left == 10) game_msg(g, C_DIM, "the warmth of the draught is fading.");
     Mob *p = &g->player;
     if (g->chill > 0 && g->state != GS_DEAD) {
         /* a fixed fire warms you quickly, a torch in hand slowly, the dark not at all */
@@ -1027,6 +1231,107 @@ static void change_level(Game *g, int depth, int x, int y)
 static void pickup(Game *g);
 static void nearest_floor(Level *lv, int *x, int *y);
 
+/* ------------------------------------------------------- the Heartflame */
+
+/* the hearth's light follows the kindling: a glow, a flame, then the Heartflame itself */
+static void hearth_light(Game *g)
+{
+    Level *lv = game_level(g);
+    Light *l = game_final(g) ? level_light_on(lv, lv->downx, lv->downy) : NULL;
+    if (!l || l->kind != L_HEART) return;
+    static const float R[4] = { 0, 3.5f, 6.0f, 9.0f }, K[4] = { 0, 0.7f, 0.9f, 1.0f };
+    int k = g->kindle < 0 ? 0 : g->kindle > 3 ? 3 : g->kindle;
+    l->lit = k > 0;
+    l->radius = R[k];
+    l->r = 1.50f * K[k];
+    l->g = 0.95f * K[k];
+    l->b = 0.46f * K[k];
+    lv->light_dirty = true;
+}
+
+/* the Heartflame burns again: light floods the last level and the dark comes apart */
+static void heartflame_lit(Game *g)
+{
+    Level *lv = game_level(g);
+    g->kindle = 3;
+    hearth_light(g);
+    int lit = 0;
+    for (int i = 0; i < lv->nlights; i++)
+        if (lv->lights[i].kind == L_SCONCE && !lv->lights[i].lit) { lv->lights[i].lit = true; lit++; }
+    for (int r = 0; r < lv->nrooms; r++) lv->rooms[r].dark = false;
+    lv->light_dirty = true;
+    int gone = 0;
+    bool hollow = false;
+    Mob *ms = g->mobs[g->depth];
+    for (int i = 0; i < MAX_MOBS; i++) {
+        Mob *m = &ms[i];
+        if (!m->alive || !shadeish(m->kind)) continue;
+        if (m->kind == MK_HOLLOW) hollow = true;
+        m->alive = false;
+        push_fx(g, FX_DISSOLVE, m->x, m->y);
+        gone++;
+    }
+    g->chill = 0;
+    g->shake = 0.8f;
+    g->state = GS_WON;
+    g->end_t = g->time;
+    game_stop(g);
+    sfx_ex(g, SND_IGNITE, 0, 0, true, 0, 1.2f);
+    sfx_ex(g, SND_SCONCE, 0, 0, true, 0.15f, 1.2f);
+    if (gone) sfx_ex(g, SND_DISSOLVE, 0, 0, true, 0.4f, 1.2f);
+    game_msg(g, C_WARN, "the Heartflame roars up out of the stone, gold and then white!");
+    if (hollow) game_msg(g, C_GOOD, "the Hollow shrieks once and comes apart, and every shade with it, like mist in the sun.");
+    else if (gone) game_msg(g, C_GOOD, "the shades come apart like mist in the sun.");
+    if (lit) game_msg(g, C_GOOD, "one by one the cold sconces of the deep catch, and light runs up the walls.");
+    game_msg(g, C_GOOD, "you have rekindled the Heartflame. The deep is warm again.");
+    compute_view(g);
+}
+
+/* walking into the hearth with fire in hand: three turns to bring the Heartflame back */
+static bool kindle(Game *g)
+{
+    if (g->kindle >= 3) return false;
+    if (!g->torch_lit) {
+        game_msg(g, C_WARN, g->kindle ? "the young flame needs feeding: light a torch and hold it to the hearth again."
+                                      : "the hearth is cold and dead. It needs fire: light a torch and bring it here.");
+        return false;
+    }
+    Level *lv = game_level(g);
+    Mob *p = &g->player;
+    p->bump = 1.0f;
+    p->bdx = lv->downx - p->x;
+    p->bdy = lv->downy - p->y;
+    if (p->bdx) p->flip = p->bdx < 0;
+    g->kindle++;
+    if (g->kindle >= 3) { heartflame_lit(g); return true; }
+    hearth_light(g);
+    sfx(g, SND_IGNITE, lv->downx, lv->downy);
+    push_fx(g, FX_SPARKS, lv->downx, lv->downy);
+    if (g->kindle == 1)
+        game_msg(g, C_WARN, "you thrust your torch into the hearth. Deep in the cold stone something catches, and glows.");
+    else
+        game_msg(g, C_WARN, "a flame climbs out of the stone, small and blue, then gold. Once more!");
+    /* everything of the dark on the level feels it, and comes */
+    Mob *ms = g->mobs[g->depth];
+    for (int i = 0; i < MAX_MOBS; i++)
+        if (ms[i].alive && shadeish(ms[i].kind)) { ms[i].hunting = true; ms[i].tx = p->x; ms[i].ty = p->y; }
+    if (g->kindle == 1) game_msg(g, C_BAD, "a cold wind rises in the hall. The dark has felt the flame.");
+    flare(g);
+    return true;
+}
+
+/* a level reached for the first time, perhaps the last one */
+static void arrive(Game *g)
+{
+    if (g->depth <= g->deepest) return;
+    g->deepest = g->depth;
+    if (game_final(g)) {
+        game_msg(g, C_WARN, "the cold here bites to the bone. This is the bottom of the world: somewhere on this level "
+                 "lies the Heartflame's hearth.");
+        game_msg(g, C_DIM, "light a torch and walk into the hearth to kindle it. It takes three turns.");
+    }
+}
+
 /* the mace's knockback: a step back, a wall, deep water or a fall */
 static void knock_back(Game *g, Mob *m, int dx, int dy)
 {
@@ -1071,7 +1376,8 @@ static void knock_back(Game *g, Mob *m, int dx, int dy)
         }
         return;
     }
-    if (tile_solid(t) || t == T_DOOR || t == T_BRAZIER || !in_map(nx, ny)) {
+    bool salt_wall = m->kind == MK_SHADE && in_map(nx, ny) && lv->salt[ny][nx];   /* it can't cross, even flung */
+    if (tile_solid(t) || t == T_DOOR || t == T_BRAZIER || t == T_HEARTH || !in_map(nx, ny) || salt_wall) {
         int dmg = rng_range(&g->rng, 1, 3);
         m->hp -= dmg;
         m->flash = 1;
@@ -1081,10 +1387,11 @@ static void knock_back(Game *g, Mob *m, int dx, int dy)
         sfx_ex(g, SND_THUD, m->x, m->y, false, 0.1f, 0.8f);
         if (m->hp <= 0) {
             kill_mob(g, m);
-            if (seen) game_msg(g, C_GOOD, "the blow smashes the %s against the %s!", nm, t == T_DOOR ? "door" : "wall");
-            if (m->kind == MK_SHADE) push_fx(g, FX_DISSOLVE, m->x, m->y);
+            if (seen) game_msg(g, C_GOOD, "the blow smashes the %s against the %s!", nm, salt_wall ? "salt" : t == T_DOOR ? "door" : "wall");
+            if (shadeish(m->kind)) push_fx(g, FX_DISSOLVE, m->x, m->y);
         } else if (seen) {
-            game_msg(g, C_TEXT, "the %s slams into the %s.", nm, t == T_DOOR ? "door" : "wall");
+            if (salt_wall) game_msg(g, C_TEXT, "the %s is flung against the salt and recoils.", nm);
+            else game_msg(g, C_TEXT, "the %s slams into the %s.", nm, t == T_DOOR ? "door" : "wall");
         }
         return;
     }
@@ -1128,8 +1435,9 @@ static void player_strike(Game *g, Mob *m)
     }
     case IT_MACE:
         if (attack(g, p, m) && m->alive) {
-            if (m->kind == MK_OGRE) {
-                if (lv->f[m->y][m->x] & F_VIS) game_msg(g, C_DIM, "the ogre barely rocks back.");
+            if (m->kind == MK_OGRE || m->kind == MK_HOLLOW) {
+                if (lv->f[m->y][m->x] & F_VIS)
+                    game_msg(g, C_DIM, m->kind == MK_OGRE ? "the ogre barely rocks back." : "the Hollow only billows back, and closes again.");
             } else {
                 knock_back(g, m, dx, dy);
             }
@@ -1160,6 +1468,12 @@ bool game_move(Game *g, int dx, int dy)
         game_stop(g);
         return false;
     }
+    if (t == T_HEARTH) {
+        game_stop(g);
+        if (!kindle(g)) return false;
+        if (g->state == GS_PLAY) end_turn(g);
+        return true;
+    }
     if (tile_solid(t)) {
         Light *l = level_light_on(lv, nx, ny);
         if (l && !l->lit && l->kind == L_SCONCE && l->x == p->x && l->y == p->y) {
@@ -1167,6 +1481,7 @@ bool game_move(Game *g, int dx, int dy)
             lv->light_dirty = true;
             if (l->room >= 0) lv->rooms[l->room].dark = false;
             game_msg(g, C_WARN, "you light the sconce. Warm light spills across the room.");
+            g->sconces_lit++;
             ember(g, 1, "you take an ember from the new flame");
             flare(g);
             sfx(g, SND_SCONCE, l->fx, l->fy);
@@ -1205,7 +1520,19 @@ bool game_move(Game *g, int dx, int dy)
         return false;
     }
     g->wade_x = g->wade_y = -1;
+    if (lv->burn[ny][nx] && !lv->burn[p->y][p->x] && (g->fire_x != nx || g->fire_y != ny)) {
+        g->fire_x = nx;
+        g->fire_y = ny;
+        game_stop(g);
+        game_msg(g, C_WARN, "that oil is burning, and it will sear you. Move again to walk through the flames.");
+        return false;
+    }
+    g->fire_x = g->fire_y = -1;
     start_tween(p, nx, ny);
+    if (lv->salt[ny][nx]) {
+        lv->salt[ny][nx] = 0;
+        game_msg(g, C_DIM, "you scuff through the salt, breaking the line there.");
+    }
     sfx(g, t == T_DEEP ? SND_SWIM : t == T_SHALLOW ? SND_WADE : SND_STEP, nx, ny);
     if (tile_water(t)) {
         push_fx(g, FX_SPLASH, nx, ny);
@@ -1229,6 +1556,7 @@ bool game_move(Game *g, int dx, int dy)
                 if (p->hp <= 0) {
                     game_msg(g, C_BAD, "your mail drags you down into the dark water, and you do not come up.");
                     g->state = GS_DEAD;
+                    g->end_t = g->time;
                     sfx_ex(g, SND_DIE, nx, ny, true, 0.25f, 1);
                     return true;
                 }
@@ -1267,6 +1595,7 @@ bool game_descend(Game *g)
     compute_view(g);
     game_msg(g, C_INFO, "you descend to depth %d.", g->depth);
     sfx_ex(g, SND_STAIRS, 0, 0, true, 0, 1);
+    arrive(g);
     return true;
 }
 
@@ -1322,8 +1651,10 @@ void game_jump_answer(Game *g, bool yes)
     if (p->hp <= 0) {
         game_msg(g, C_BAD, "you hit the ground at depth %d and do not get up.", g->depth);
         g->state = GS_DEAD;
+        g->end_t = g->time;
     } else {
         game_msg(g, C_BAD, wet ? "you surface, gasping, on depth %d (%d damage)." : "you land hard on depth %d (%d damage).", g->depth, dmg);
+        arrive(g);
     }
 }
 
@@ -1371,7 +1702,7 @@ static int find_path(Game *g, int gx, int gy, int *out, int max)
             int X = x + DX8[d], Y = y + DY8[d];
             if (!in_map(X, Y) || par[Y][X] != -2) continue;
             if (!path_ok(g, X, Y, gx, gy) || !diag_ok(lv, x, y, DX8[d], DY8[d])) continue;
-            if ((lv->t[Y][X] == T_CHASM || lv->t[Y][X] == T_DEEP) && !(X == gx && Y == gy)) continue;
+            if ((lv->t[Y][X] == T_CHASM || lv->t[Y][X] == T_DEEP || lv->burn[Y][X]) && !(X == gx && Y == gy)) continue;
             par[Y][X] = (int16_t)d;
             q[t++] = Y * MAP_W + X;
         }
@@ -1462,7 +1793,11 @@ void game_to_stairs(Game *g)
     Level *lv = game_level(g);
     if (lv->t[g->player.y][g->player.x] == T_STAIRS_DOWN) { game_descend(g); return; }
     if (!(lv->f[lv->downy][lv->downx] & F_SEEN)) {
-        game_msg(g, C_DIM, "you haven't found the way down yet.");
+        game_msg(g, C_DIM, game_final(g) ? "you haven't found the Heartflame's hearth yet." : "you haven't found the way down yet.");
+        return;
+    }
+    if (game_final(g) && cheb(g->player.x, g->player.y, lv->downx, lv->downy) == 1) {
+        game_move(g, lv->downx - g->player.x, lv->downy - g->player.y);    /* right there: kindle it */
         return;
     }
     g->goalx = lv->downx;
@@ -1488,7 +1823,8 @@ static void auto_step(Game *g)
     case AUTO_EXPLORE: {
         int n = find_path(g, -1, -1, path, MAX_PATH);
         if (!n) {
-            game_msg(g, C_INFO, "you have explored everything you can reach. Press > to head for the stairs.");
+            game_msg(g, C_INFO, game_final(g) ? "you have explored everything you can reach. Press > to go to the hearth."
+                                              : "you have explored everything you can reach. Press > to head for the stairs.");
             game_stop(g);
             return;
         }
@@ -1583,6 +1919,24 @@ static bool place_item(Game *g, int depth, ItemKind k, int count, int x, int y, 
 bool game_debug_to_spot(Game *g, int kind)
 {
     Level *lv = game_level(g);
+    if (kind == 5) {
+        /* in the Heartflame's hall, a few steps from the hearth, the hall revealed */
+        if (!game_final(g) || lv->hall < 0) return false;
+        Room *hl = &lv->rooms[lv->hall];
+        int bx = -1, by = -1;
+        for (int j = 2; j <= 4 && bx < 0; j++)
+            for (int i = -1; i <= 1; i++) {
+                int x = lv->downx + i * 2, y = lv->downy + j;
+                if (in_map(x, y) && tile_walkable((Tile)lv->t[y][x]) && mob_free(g, x, y)) { bx = x; by = y; break; }
+            }
+        if (bx < 0) return false;
+        place_player(g, bx, by);
+        for (int y = hl->y - 1; y <= hl->y + hl->h; y++)
+            for (int x = hl->x - 1; x <= hl->x + hl->w; x++)
+                if (in_map(x, y)) lv->f[y][x] |= F_SEEN;
+        compute_view(g);
+        return true;
+    }
     if (kind == 3 || kind == 4) {
         /* in front of a cold sconce, a shade two steps away; 4 also lights the sconce */
         for (int i = 0; i < lv->nlights; i++) {
@@ -1711,7 +2065,7 @@ const char *game_item_name(ItemKind k, int count, int plus, char *buf, size_t n)
 {
     const ItemInfo *ii = &ITEM_INFO[k];
     if (plus > 0) snprintf(buf, n, "a +%d %s", plus, ii->name);
-    else if (count == 1) snprintf(buf, n, "%s %s", ii->name[0] == 'a' ? "an" : "a", ii->name);
+    else if (count == 1) snprintf(buf, n, "%s %s", strchr("aeiou", ii->name[0]) ? "an" : "a", ii->name);
     else snprintf(buf, n, "%d %s", count, ii->plural);
     return buf;
 }
@@ -1901,6 +2255,94 @@ static void make_noise(Game *g, int x, int y, int radius)
     }
 }
 
+/* An oil flask bursts at (x, y) of `depth`: burning oil on it and most of the
+ * ground around it (on water too; not past a wall's corner, not down a chasm). */
+static void ignite_oil(Game *g, int depth, int x, int y)
+{
+    Level *lv = g->lv[depth];
+    if (!lv) return;
+    int centre = 0;
+    for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++) {
+            int X = x + dx, Y = y + dy;
+            Tile t = tile_at(lv, X, Y);
+            if (!tile_walkable(t) || t == T_DOOR) continue;
+            if ((dx || dy) && (!diag_ok(lv, x, y, dx, dy) || rng_chance(&g->rng, 25))) continue;   /* a ragged splash */
+            int turns = dx || dy ? rng_range(&g->rng, 9, 13) : rng_range(&g->rng, 13, 16);
+            if (!dx && !dy) centre = turns;
+            if (lv->burn[Y][X] < turns) lv->burn[Y][X] = (uint8_t)turns;
+        }
+    if (!centre) return;
+    Light *l = NULL;
+    for (int i = 0; i < lv->nlights; i++)
+        if (lv->lights[i].kind == L_OILFIRE && lv->lights[i].x == x && lv->lights[i].y == y) l = &lv->lights[i];
+    if (!l) {
+        int i = level_add_light(lv, L_OILFIRE, x, y, x, y, true, lv->room[y][x]);
+        if (i >= 0) l = &lv->lights[i];
+    }
+    if (l && l->fuel < centre) l->fuel = centre;
+    level_relight(lv);
+    if (depth == g->depth) flare(g);
+}
+
+static void flash_mark(void *ctx, int x, int y, float d)
+{
+    (void)d;
+    ((Level *)ctx)->f[y][x] |= F_SEEN;
+}
+
+/* flash powder goes off at (x, y): everything that sees it reels; shades scorch */
+static void flash_burst(Game *g, int x, int y)
+{
+    Level *lv = game_level(g);
+    push_fx(g, FX_FLASH, x, y);
+    sfx_ex(g, SND_IGNITE, x, y, false, 0, 1.0f);
+    sfx_ex(g, SND_THUD, x, y, false, 0.02f, 1.0f);
+    g->shake = 0.25f;
+    make_noise(g, x, y, 8);                     /* the bang carries */
+    fov_cast(lv, x, y, 6, flash_mark, lv);      /* for an instant you see it all */
+    int dazed = 0, burnt = 0;
+    Mob *ms = g->mobs[g->depth];
+    char t[16];
+    for (int i = 0; i < MAX_MOBS; i++) {
+        Mob *m = &ms[i];
+        if (!m->alive || game_mob_hidden(m) || cheb(m->x, m->y, x, y) > 5 || !los(lv, x, y, m->x, m->y)) continue;
+        if (shadeish(m->kind)) {
+            int dmg = rng_range(&g->rng, 4, 8);
+            m->hp -= dmg;
+            m->flash = 1;
+            m->hunting = false;
+            snprintf(t, sizeof t, "%d", dmg);
+            floater(g, m->x, m->y, 0xfff0c0, t);
+            push_fx(g, FX_BURN, m->x, m->y);
+            burnt++;
+            if (m->hp <= 0) {
+                push_fx(g, FX_DISSOLVE, m->x, m->y);
+                sfx(g, SND_DISSOLVE, m->x, m->y);
+                kill_mob(g, m);
+            } else {
+                sfx(g, SND_BURN, m->x, m->y);
+                if (m->kind == MK_HOLLOW) {
+                    m->daze = 2;        /* too vast to burn away in an instant: it reels instead, briefly */
+                    dazed++;
+                }
+            }
+            continue;
+        }
+        m->asleep = false;
+        m->hunting = false;             /* it has lost sight of everything */
+        m->daze = m->kind == MK_OGRE ? 2 : rng_range(&g->rng, 3, 4);
+        floater(g, m->x, m->y, 0xfff0c0, "dazed");
+        dazed++;
+    }
+    if (dazed && burnt) game_msg(g, C_GOOD, "a blinding white flash! %d creature%s reel%s, dazzled, and the light scorches the shades.",
+                                 dazed, dazed == 1 ? "" : "s", dazed == 1 ? "s" : "");
+    else if (dazed) game_msg(g, C_GOOD, "a blinding white flash! %d creature%s reel%s, dazzled.", dazed, dazed == 1 ? "" : "s",
+                             dazed == 1 ? "s" : "");
+    else if (burnt) game_msg(g, C_GOOD, "a blinding white flash scorches the dark, and the shades writhe in it!");
+    else game_msg(g, C_TEXT, "a blinding white flash lights up every corner, just for an instant.");
+}
+
 static void resolve_throw(Game *g)
 {
     Projectile *pr = &g->proj;
@@ -1912,13 +2354,13 @@ static void resolve_throw(Game *g)
     char t[16];
     switch (pr->kind) {
     case IT_DART:
-        if (m && m->kind == MK_SHADE) {
-            game_msg(g, C_DIM, "the dart passes straight through the shade.");
+        if (m && shadeish(m->kind)) {
+            game_msg(g, C_DIM, "the dart passes straight through the %s.", mn);
             m->hunting = true;
             m = NULL;
         }
         if (m) {
-            int chance = m->asleep ? 100 : 88 - MOB_INFO[m->kind].def;
+            int chance = m->asleep || m->daze > 0 ? 100 : 88 - MOB_INFO[m->kind].def;
             m->asleep = false;
             if ((int)(rng_u32(&g->rng) % 100) < chance) {
                 int dmg = rng_range(&g->rng, 2, 4);
@@ -1958,7 +2400,7 @@ static void resolve_throw(Game *g)
         make_noise(g, x, y, 5);
         break;
     case IT_TORCH:
-        if (m && m->kind == MK_SHADE) {
+        if (m && shadeish(m->kind)) {
             int dmg = rng_range(&g->rng, 4, 8);
             m->hp -= dmg;
             m->flash = 1;
@@ -1966,8 +2408,14 @@ static void resolve_throw(Game *g)
             floater(g, x, y, 0xffa040, t);
             push_fx(g, FX_BURN, x, y);
             sfx(g, SND_BURN, x, y);
-            if (m->hp <= 0) { kill_mob(g, m); push_fx(g, FX_DISSOLVE, x, y); sfx(g, SND_DISSOLVE, x, y); game_msg(g, C_GOOD, "the torch sears the shade and it burns away to nothing!"); }
-            else game_msg(g, C_TEXT, "the torch sears the shade!");
+            if (m->hp <= 0) {
+                push_fx(g, FX_DISSOLVE, x, y);
+                sfx(g, SND_DISSOLVE, x, y);
+                if (m->kind == MK_SHADE) game_msg(g, C_GOOD, "the torch sears the shade and it burns away to nothing!");
+                kill_mob(g, m);
+            } else {
+                game_msg(g, C_TEXT, "the torch sears the %s!", mn);
+            }
         } else if (m) {
             int dmg = rng_range(&g->rng, 1, 3);
             m->hp -= dmg;
@@ -2002,6 +2450,52 @@ static void resolve_throw(Game *g)
             if (!m) game_msg(g, C_TEXT, "the torch lands and burns on the floor.");
         }
         make_noise(g, x, y, 3);
+        break;
+    case IT_OIL: {
+        push_fx(g, FX_OIL, x, y);
+        sfx_ex(g, SND_SHATTER, x, y, false, into_chasm ? 0.8f : 0, into_chasm ? 0.4f : 1);
+        if (into_chasm) {
+            int bx = x, by = y;
+            if (g->lv[g->depth + 1]) {
+                nearest_floor(g->lv[g->depth + 1], &bx, &by);
+                ignite_oil(g, g->depth + 1, bx, by);
+                g->lower_dirty = true;
+            }
+            push_fx(g, FX_FALL, x, y);
+            game_msg(g, C_INFO, "the flask tumbles into the chasm, and far below a pool of fire blooms.");
+            break;
+        }
+        sfx_ex(g, SND_IGNITE, x, y, false, 0.05f, 1.0f);
+        bool wet = tile_water((Tile)lv->t[y][x]);
+        if (m && !shadeish(m->kind)) {
+            int dmg = rng_range(&g->rng, 1, 2);
+            m->hp -= dmg;
+            m->flash = 1;
+            m->asleep = false;
+            snprintf(t, sizeof t, "%d", dmg);
+            floater(g, x, y, 0xffa040, t);
+            if (m->hp <= 0) { kill_mob(g, m); sfx(g, SND_KILL, x, y); game_msg(g, C_GOOD, "the flask bursts over the %s and it dies in the flames!", mn); m = NULL; }
+            else game_msg(g, C_TEXT, "the flask bursts over the %s and it is engulfed in burning oil!", mn);
+        } else {
+            game_msg(g, C_TEXT, wet ? "the flask bursts, and burning oil spreads across the water." : "the flask bursts into a pool of burning oil.");
+        }
+        ignite_oil(g, g->depth, x, y);
+        make_noise(g, x, y, 4);
+        break;
+    }
+    case IT_FLASH:
+        if (into_chasm) {
+            push_fx(g, FX_FALL, x, y);
+            game_msg(g, C_DIM, "the powder drops into the chasm and goes off far below, a white flicker in the dark.");
+            sfx_ex(g, SND_THUD, x, y, false, 0.8f, 0.3f);
+        } else if (tile_water((Tile)lv->t[y][x])) {
+            push_fx(g, FX_STEAM, x, y);
+            sfx(g, SND_HISS, x, y);
+            game_msg(g, C_DIM, "the powder lands in the water and fizzles, spoilt.");
+        } else {
+            flash_burst(g, x, y);
+        }
+        m = NULL;      /* nobody is hunting you because of it */
         break;
     case IT_POTION:
         push_fx(g, FX_SHATTER, x, y);
@@ -2062,6 +2556,54 @@ bool game_use(Game *g, int slot)
         } else {
             game_torch_toggle(g);
         }
+        return true;
+    case IT_OIL:
+        if (g->torch_fuel <= 0) {
+            game_msg(g, C_DIM, "you have no torch going to soak in it. Light one first, or throw the flask.");
+            return false;
+        }
+        take_one(g, slot);
+        g->torch_fuel += 50;
+        game_msg(g, C_GOOD, "you pour the oil over your torch's head (%d turns of light in it now).", g->torch_fuel);
+        sfx(g, g->torch_lit ? SND_IGNITE : SND_PICKUP, p->x, p->y);
+        end_turn(g);
+        return true;
+    case IT_SALT: {
+        Level *lv = game_level(g);
+        int n = 0;
+        bool gap = false;
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++) {
+                int X = p->x + dx, Y = p->y + dy;
+                Tile t = tile_at(lv, X, Y);
+                if (!tile_walkable(t) || tile_water(t) || t == T_DOOR) continue;    /* it won't lie on water */
+                Mob *o = game_mob_at(g, X, Y);
+                if (o && o->kind == MK_SHADE) { gap = true; continue; }
+                lv->salt[Y][X] = 1;
+                n++;
+            }
+        take_one(g, slot);
+        push_fx(g, FX_SALT, p->x, p->y);
+        sfx_ex(g, SND_PICKUP, p->x, p->y, false, 0, 0.6f);
+        game_msg(g, C_GOOD, gap ? "you pour a ring of salt around you, but it breaks where a shade stands."
+                                : n >= 9 ? "you pour a ring of salt around you. No shade can cross it."
+                                         : "you pour salt around you where it will lie. No shade can cross it.");
+        end_turn(g);
+        return true;
+    }
+    case IT_WARMTH:
+        take_one(g, slot);
+        g->warm_left = 80;
+        g->warm_t = 0;
+        if (g->chill) {
+            game_msg(g, C_GOOD, "you drink the draught. Fire runs through your veins and the chill is gone.");
+            g->chill = 0;
+        } else {
+            game_msg(g, C_GOOD, "you drink the draught. Fire runs through your veins.");
+        }
+        floater(g, p->x, p->y, 0xffa040, "warm");
+        sfx(g, SND_DRINK, p->x, p->y);
+        end_turn(g);
         return true;
     case IT_POTION: {
         take_one(g, slot);
@@ -2213,6 +2755,41 @@ bool game_forge_buy(Game *g, ForgeOffer o)
 }
 
 /* developer: stand next to this level's forge */
+bool game_debug_depth(Game *g, int depth)
+{
+    if (depth < 1 || depth > MAX_DEPTH) return false;
+    for (int d = 1; d < depth; d++) ensure_level(g, d);
+    change_level(g, depth, 0, 0);
+    Level *lv = game_level(g);
+    place_player(g, lv->upx, lv->upy);
+    compute_view(g);
+    arrive(g);
+    return true;
+}
+
+bool game_debug_kindle(Game *g, int times)
+{
+    Level *lv = game_level(g);
+    if (!game_final(g) || tile_at(lv, lv->downx, lv->downy) != T_HEARTH) return false;
+    int bx = -1, by = -1;
+    for (int d = 0; d < 8 && bx < 0; d++) {
+        int x = lv->downx + DX8[(d + 2) % 8], y = lv->downy + DY8[(d + 2) % 8];
+        if (tile_walkable(tile_at(lv, x, y)) && mob_free(g, x, y)) { bx = x; by = y; }
+    }
+    if (bx < 0) return false;
+    place_player(g, bx, by);
+    if (!g->torch_lit) game_torch_toggle(g);
+    compute_view(g);
+    Mob *ms = g->mobs[g->depth];
+    for (int i = 0; i < times && g->state == GS_PLAY; i++) {
+        for (int k = 0; k < MAX_MOBS; k++) if (ms[k].alive) ms[k].daze = 2;    /* hold everything still for the picture */
+        game_move(g, lv->downx - bx, lv->downy - by);
+        g->player.hp = game_max_hp(g);
+        for (int k = 0; k < 30; k++) game_update(g, 1.0f / 30);
+    }
+    return true;
+}
+
 bool game_debug_to_forge(Game *g)
 {
     Level *lv = game_level(g);

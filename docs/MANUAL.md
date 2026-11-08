@@ -1,12 +1,16 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.9.0. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.11.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
-You go down into a dungeon with a dim lantern, a short sword, two torches and
-a pack. Down there, light is the thing that matters most. It shows you the way
+You go down into a dungeon with a dim lantern, a short sword, two torches, a
+flask of oil and a pack. Down there, light is the thing that matters most. It shows you the way
 and holds back the things that live in the dark, but it also shows you to
 everything else.
+
+At the bottom, on depth 26, the **Heartflame** has gone cold, and the dark has
+been creeping up from it ever since. Your task is to carry fire all the way
+down and [kindle it again](#the-heartflame).
 
 ---
 
@@ -24,7 +28,8 @@ everything else.
 10. [Embers and the forge](#embers-and-the-forge)
 11. [Health and resting](#health-and-resting)
 12. [The dungeon](#the-dungeon)
-13. [Tips](#tips)
+13. [The Heartflame](#the-heartflame)
+14. [Tips](#tips)
 
 ---
 
@@ -41,7 +46,7 @@ Every action also has a button on screen.
 | Rest until healed | `Z` | **Rest** button |
 | Pack | `i` | **Items** button |
 | Throw | `t`, then aim | **Throw** button |
-| Use (light, drink, wield, wear) | `a` | from the item card |
+| Use (light, drink, pour, wield, wear) | `a` | from the item card |
 | Drop | `d` | from the item card |
 | Light / snuff your torch | `T` | **Torch** / **Snuff** button |
 | Go down / up stairs | `>` (travels there first) / `<` | click the stairs |
@@ -68,7 +73,7 @@ There's one game at a time, and it's always kept. Quitting (`Esc` twice, or
 just closing the window) saves it, and the next time you start Shadesdeep you carry
 on exactly where you left off. The game is also saved each time you reach a
 new level, in case something goes wrong. **Dying ends the game for good:** the
-save is deleted and the next start is a new dungeon.
+save is deleted and the next start is a new dungeon. So does winning.
 
 The save lives in `~/.local/share/shadesdeep/save.gz`. Starting with `--new`
 begins a fresh game (your saved one is replaced when you quit), `--save=FILE`
@@ -82,7 +87,8 @@ rather than deleted.
 
 - **Bottom bar:** HP and its bar, the current depth, your torch's fuel (when
   you have one going), your embers (once you've earned any), the turn count,
-  and the action buttons.
+  and the action buttons. On the last level, **FLAME n/3** shows how far
+  you've kindled the Heartflame, and the Descend button becomes **Hearth**.
 - **Top left:** the monsters you can see, with their health and whether they
   are asleep, hunting you, or only *watching* (eyes in the dark).
 - **Bottom left:** the message log.
@@ -189,6 +195,7 @@ you warm up:
 | **Bat** | From depth 2. Quick (it moves twice a turn) and erratic: it flits in, bites, and flits off again, so it's hard to pin down. Light draws it from a long way off; in the dark it only finds you up close. It flies, so chasms and deep water don't stop it, but it can't open doors. Silent on the wing. |
 | **Goblin slinger** | From depth 3. If it can see you clearly **in the light**, it stays back and slings stones at you from up to 7 tiles away (a little less accurate than a blow). In the dark, or with something in the way, it has to come close and fight with a knife. Snuff your torch, or step out of the lamplight, and it loses its aim. Won't swim. |
 | **Ogre** | From depth 4. Big, tough and hits very hard, but **slow**: it moves and swings only every other turn, so you can always outrun it, and you get two blows for each of its. Far too heavy for a mace to knock back. Won't swim. |
+| **The Hollow** | Only on depth 26, by the cold hearth. See [the Heartflame](#the-hollow). |
 | **Eel** | From depth 2, in pools of deep water. It lurks **unseen** under the surface (now and then a ripple gives it away) and lunges at anything swimming near it or standing **on the bank beside it**. Once it has bitten it stays up for a turn or two, long enough to hit back, then slips under again. It never leaves the water. |
 
 Monsters may be asleep. Noise (splashing, a thrown torch or dart landing, mail
@@ -204,11 +211,62 @@ tougher: more health and a bit more accuracy and damage per depth.
 | **Torch** | Light it to carry, or throw it to light a place from afar. See [Torches](#torches). |
 | **Dart** | Throw it for 2–4 damage at range. It can usually be picked up again, though it sometimes snaps. Passes through shades. |
 | **Healing potion** | Drink it to heal 15 HP (not past your chilled maximum). |
+| **Oil flask** | Throw it and it bursts into a pool of [burning oil](#burning-oil). Or **soak your torch** with it (from the item card): +50 turns of fuel on the torch you have going. You start with one. |
+| **Flash powder** | Throw it for a [blinding flash](#flash-powder). Lands in water and it fizzles, spoilt. |
+| **Salt** | **Pour** it to lay a [ring of salt](#salt) around you that shades can't cross. From depth 2. |
+| **Warming draught** | Drink it to clear the chill at once, and for **80 turns** no shade's touch can chill you (a shade can still hurt you). The bottom bar shows **WARM** and the turns left. From depth 2. |
 | **Weapons and armour** | See [Gear](#gear-weapons-and-armour). |
 
 **The pack:** press `i` or the **Items** button. It shows what you wield and
 wear at the top, then everything you carry. Pick an item to see its card and
 the actions it allows.
+
+**Aiming oil and flash powder:** while you aim, the preview marks the tiles
+the oil will spread to, or draws the reach of the flash.
+
+### Burning oil
+
+A thrown oil flask bursts where it lands and spreads burning oil over that
+tile and most of the tiles around it (not round a wall's corner, not through
+a door). It burns for about 13–16 turns in the middle and 9–13 at the edges,
+and leaves soot.
+
+- **It's a fixed fire**, like a lit sconce: shades can't enter it, a shade
+  caught in it burns, and its sudden blaze holds them the way a sconce lit
+  beside them does. Its warmth also clears the chill.
+- **Nothing walks into it willingly.** Goblins, rats, ogres and bats all go
+  round, so a burning doorway or corridor holds a chase off for a while.
+- **It sears whatever stands in it** for 2–4 a turn. A monster caught in it
+  steps out on its next turn (unless it's dazzled). Walking into it yourself
+  asks first: move again to go through.
+- **It burns on water too**, shallow or deep.
+- **Into a chasm**, it lands and burns on the level below.
+- The landing makes a little noise.
+
+### Flash powder
+
+A thrown twist of flash powder goes off where it lands in a blinding flash.
+
+- **Everything within 5 tiles that has a clear line to the flash is dazzled**
+  for 3–4 turns (2 for an ogre): it can't act, it loses track of you, and it
+  wakes up if it was asleep. While a monster is dazzled your blows and darts
+  **always hit**, and a dagger does its triple damage.
+- **Shades are scorched** by it for 4–8. They still feel your warmth, though.
+- **You see the room** it lights, as if you'd explored it.
+- **The bang carries**: things up to 8 tiles away come to look.
+- **Water spoils it**, and down a chasm it's wasted.
+
+### Salt
+
+Pour a pouch of salt to lay salt on your tile and every tile around you
+(not on water or a door).
+
+- **No shade can cross salt**, or be knocked onto it.
+- **Anything else scuffs it away** by walking through it, and so do you: the
+  tile you step out onto loses its salt, and the rest of the ring stays.
+- Salt across a corridor shuts the shades out of it until something else
+  walks through.
+- A tile with a shade on it gets no salt, and the ring has a gap there.
 
 ---
 
@@ -284,6 +342,7 @@ less likely.
 - You heal **1 HP every 9 turns**, or every 5 turns beside a fixed fire.
 - **Rest** (`z`) passes a turn. **Rest until healed** (`Z`) keeps going until
   you're full or something turns up.
+- **Burning oil** sears you for 2–4 a turn while you stand in it.
 - **Healing potions** restore 15 HP.
 - **Chill** lowers your maximum until you warm up by a fire (see
   [the chill](#shades-and-the-chill)).
@@ -308,7 +367,51 @@ less likely.
   see, but it doesn't count as fire, so shades don't mind it.
 - **The map** (`m`) shows the whole of the level you've seen, drawn with the
   real graphics. Click a place on it to travel there.
-- **Depths** go down to 26.
+- **Depths** go down to 26, the last level. It has no stairs down and no
+  chasms; it's where the [Heartflame](#the-heartflame) is.
+
+---
+
+## The Heartflame
+
+Depth 26 is the bottom of the world. Somewhere on it is a great pillared hall,
+dark, with its sconces cold, and at its heart a round stone hearth where the
+Heartflame used to burn. Lighting it again wins the game.
+
+- **Bring fire.** You kindle the hearth by walking into it (or clicking it)
+  with a **lit torch**. Your lantern won't do. Make sure you still have a
+  torch when you get there; the shades in the hall will be gnawing at it.
+- **It takes three turns.** The first turn wakes a glow in the stone, the
+  second a small flame, and the third brings the Heartflame roaring back.
+  You don't have to do the three turns in a row: progress stays unless
+  something undoes it. `>` (the **Hearth** button) travels to the hearth and
+  kindles it.
+- **The dark notices.** The moment you start, every shade on the level, and the
+  Hollow, comes for you.
+- **When it catches,** every shade on the level, the Hollow included, comes
+  apart, and every cold sconce lights at once. The closing screen tells the
+  story of your run: the turns it took, foes slain, embers gathered and
+  sconces lit.
+
+### The Hollow
+
+The thing that put the Heartflame out. It's a shade grown huge, and it waits
+by the hearth.
+
+- It hunts by your warmth, like any shade, from up to 10 tiles away.
+- Your **torch doesn't frighten it**, and **salt doesn't stop it** (it sweeps
+  the salt aside). It eats your torch's fuel twice as fast as a shade does.
+- A **fixed fire burns it** (3–5 a turn: a lit sconce, a torch on the floor,
+  burning oil, the hearth itself once it's kindled), but doesn't drive it off.
+  It comes on through the flames.
+- **Burning oil** is the one thing it won't walk into.
+- **Flash powder** scorches it and dazzles it, but only for **2 turns**.
+- Darts pass through it, as they do through any shade. Its touch hits hard
+  (5–10) and chills you by 2–3 at a time. It's far too big for a mace to
+  knock back. It has 50 HP, and killing it leaves **5 embers**.
+- **While you're kindling, every blow it lands smothers the flame** back a
+  step. You can't kindle with the Hollow at your side: dazzle it, wall it off
+  with fire, or kill it first.
 
 ---
 
@@ -342,3 +445,18 @@ less likely.
   Fight them in a corridor, where they have less room to flit about.
 - **Mail and deep water don't mix.** Swap to leather before a long swim, or go
   around.
+- **Flash, then strike.** A dazzled monster can't fight back, and every blow
+  lands. With a dagger, a flash turns a fight into an ambush.
+- **Burn the doorway behind you.** Oil thrown into a doorway or corridor
+  you've just come through stops anything following you, shades included,
+  for a dozen turns or so.
+- **Oil stretches the clock.** When torches are short, an oil flask poured on
+  your torch is 50 turns of light. Thrown, it's a weapon and a wall. You
+  have to choose.
+- **Salt is a safe night's sleep** against shades, but not against anything
+  else. Pour it in a dead end where goblins won't wander.
+- **Save something for the bottom.** Two twists of flash powder, or a flask
+  of oil between you and the Hollow, buy the three turns the Heartflame needs.
+  Keep a spare torch, too.
+- **Light the hall's sconces first** if you can reach them. The Hollow burns
+  in their light, and the other shades can't follow you into it.

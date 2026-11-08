@@ -8,6 +8,7 @@
 #define MAP_W 72
 #define MAP_H 48
 #define TILE  32
+#define FINAL_DEPTH 26    /* the Heartflame's level: the bottom of the dungeon */
 #define MAX_ROOMS  40
 #define MAX_LIGHTS 96
 #define LIGHT_MAXR 9
@@ -47,6 +48,7 @@ typedef enum {
     T_SHALLOW,          /* wade through: splashes */
     T_DEEP,             /* swim: puts out a torch, swallows what falls in */
     T_BRAZIER,          /* a forge brazier standing on the floor: blocks the way, lights the room */
+    T_HEARTH,           /* the Heartflame's great hearth, on the last level: blocks the way */
     T_COUNT
 } Tile;
 
@@ -57,7 +59,7 @@ enum {
     F_LOS     = 8,      /* in line of sight this turn, lit or not (eyes in the dark) */
 };
 
-typedef enum { L_SCONCE, L_BRAZIER, L_CRYSTAL, L_MOSS, L_FLOORTORCH, L_PLAYER } LightKind;
+typedef enum { L_SCONCE, L_BRAZIER, L_CRYSTAL, L_MOSS, L_FLOORTORCH, L_PLAYER, L_OILFIRE, L_HEART } LightKind;
 
 typedef struct {
     int x, y;           /* tile the light shines from (for a sconce: the floor in front of it) */
@@ -83,9 +85,12 @@ typedef struct {
     uint8_t t[MAP_H][MAP_W];
     uint8_t f[MAP_H][MAP_W];
     int8_t  room[MAP_H][MAP_W];     /* room index or -1 */
-    uint8_t scorch[MAP_H][MAP_W];   /* a torch burned out here: soot and a charred stub */
+    uint8_t scorch[MAP_H][MAP_W];   /* 1: a torch burned out here (soot and a charred stub); 2: oil burned here (soot) */
+    uint8_t burn[MAP_H][MAP_W];     /* burning oil: turns left */
+    uint8_t salt[MAP_H][MAP_W];     /* a line of salt that shades can't cross */
     Room rooms[MAX_ROOMS];
     int nrooms;
+    int hall;           /* the Heartflame's hall (room index), or -1 */
     Light lights[MAX_LIGHTS];
     int nlights;
     int upx, upy, downx, downy;

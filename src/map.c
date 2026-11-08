@@ -16,7 +16,7 @@ const char *tile_name(Tile t)
 {
     static const char *n[T_COUNT] = {
         "solid rock", "stone wall", "stone floor", "wooden door", "open door",
-        "chasm", "stairs down", "stairs up", "rubble", "shallow water", "deep water", "forge brazier",
+        "chasm", "stairs down", "stairs up", "rubble", "shallow water", "deep water", "forge brazier", "Heartflame",
     };
     return t < T_COUNT ? n[t] : "?";
 }
@@ -37,6 +37,8 @@ const char *tile_desc(Tile t)
                                "Goblins won't follow you in.";
     case T_BRAZIER:     return "An old forge's brazier, still burning on something that never runs out. Feed it embers "
                                "to temper your weapon or armour, or to strengthen yourself. No shade comes near it.";
+    case T_HEARTH:      return "The great hearth at the bottom of the world. The Heartflame burned here once, and the "
+                               "dark has crept up from it ever since it went out.";
     default:            return "";
     }
 }
@@ -140,6 +142,11 @@ float level_brightness(const Level *lv, int x, int y)
 float light_flicker(const Light *l, float t)
 {
     if (l->kind == L_CRYSTAL || l->kind == L_MOSS) return 0.9f + 0.1f * sinf(t * 1.3f + l->phase);
+    if (l->kind == L_OILFIRE && l->fuel >= 0 && l->fuel < 6) {
+        /* the last of the oil */
+        float k = 0.3f + 0.7f * (l->fuel / 6.0f);
+        return k * (0.82f + 0.1f * sinf(t * 11.0f + l->phase) + 0.08f * sinf(t * 19.0f + l->phase * 2));
+    }
     if (l->kind == L_FLOORTORCH && l->fuel >= 0 && l->fuel < 25) {
         /* guttering out */
         float k = 0.35f + 0.65f * (l->fuel / 25.0f);
@@ -169,6 +176,8 @@ int level_add_light(Level *lv, LightKind k, int x, int y, int fx, int fy, bool l
     case L_MOSS:    l->r = 0.30f; l->g = 0.95f; l->b = 0.80f; l->radius = 4.5f; break;
     case L_FLOORTORCH: l->r = 1.30f; l->g = 0.74f; l->b = 0.36f; l->radius = 6.5f; break;
     case L_PLAYER:  l->r = 0.85f; l->g = 0.62f; l->b = 0.38f; l->radius = 3.5f; break;
+    case L_OILFIRE: l->r = 1.45f; l->g = 0.72f; l->b = 0.30f; l->radius = 6.0f; break;
+    case L_HEART:   l->r = 1.50f; l->g = 0.95f; l->b = 0.46f; l->radius = 9.0f; break;   /* the game sets its size as it kindles */
     }
     lv->light_dirty = true;
     return lv->nlights++;
@@ -343,6 +352,21 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
         if (any) make_cave(lv, &rng, below);
     }
 
+    /* the last level: the Heartflame's hall, a great pillared room, before anything else takes the space */
+    bool final = depth == FINAL_DEPTH;
+    lv->hall = -1;
+    for (int tries = 0; final && tries < 600; tries++) {
+        int w = 17, h = 11;
+        int x = rng_range(&rng, 2, MAP_W - w - 3), y = rng_range(&rng, 2, MAP_H - h - 3);
+        if (!rect_clear(lv, x, y, w, h, 3)) continue;
+        int r = lv->nrooms++;
+        lv->rooms[r] = (Room){ x, y, w, h, true, false };
+        for (int j = y; j < y + h; j++)
+            for (int i = x; i < x + w; i++) carve(lv, i, j, r);
+        lv->hall = r;
+        break;
+    }
+
     int want = rng_range(&rng, 10, 14);
     for (int tries = 0; tries < 600 && lv->nrooms < want && lv->nrooms < MAX_ROOMS; tries++) {
         int w = rng_range(&rng, 5, 12), h = rng_range(&rng, 4, 8);
@@ -406,30 +430,81 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
 
     /* the start room: the first ordinary room */
     int start = 0;
-    while (start < lv->nrooms - 1 && lv->rooms[start].cave) start++;
+    while (start < lv->nrooms - 1 && (lv->rooms[start].cave || start == lv->hall)) start++;
+    if (final) {
+        /* no hall made (it never fails in practice): the biggest room will do */
+        if (lv->hall < 0) {
+            int best = 0;
+            for (int r = 0; r < lv->nrooms; r++) {
+                Room *rm = &lv->rooms[r];
+                if (rm->cave || r == start || rm->w < 5 || rm->h < 5) continue;
+                if (rm->w * rm->h > best) { best = rm->w * rm->h; lv->hall = r; }
+            }
+            if (lv->hall >= 0) lv->rooms[lv->hall].dark = true;
+        }
+        /* and the way in is as far from it as can be */
+        if (lv->hall >= 0) {
+            Room *hl = &lv->rooms[lv->hall];
+            int hx = hl->x + hl->w / 2, hy = hl->y + hl->h / 2, bd = -1;
+            for (int r = 0; r < lv->nrooms; r++) {
+                if (lv->rooms[r].cave || r == lv->hall) continue;
+                int d = (cx[r] - hx) * (cx[r] - hx) + (cy[r] - hy) * (cy[r] - hy);
+                if (d > bd) { bd = d; start = r; }
+            }
+        }
+    }
     pick_floor_in_room(lv, &rng, start, &lv->upx, &lv->upy);
     lv->t[lv->upy][lv->upx] = T_STAIRS_UP;
 
-    /* down stairs: the farthest room */
-    static int16_t dist[MAP_H][MAP_W];
-    bfs(lv, lv->upx, lv->upy, dist);
-    int far = start, fd = -1;
-    for (int r = 0; r < lv->nrooms; r++) {
-        if (lv->rooms[r].cave) continue;
-        int d = dist[cy[r]][cx[r]];
-        if (d > fd) { fd = d; far = r; }
+    if (final && lv->hall >= 0) {
+        /* no way further down: the hearth stands at the heart of its hall, with room all round it */
+        Room *hl = &lv->rooms[lv->hall];
+        int bx = -1, by = -1, bd = 1 << 30;
+        for (int y = hl->y + 1; y < hl->y + hl->h - 1; y++)
+            for (int x = hl->x + 1; x < hl->x + hl->w - 1; x++) {
+                bool ok = true;
+                for (int j = -1; j <= 1 && ok; j++)
+                    for (int i = -1; i <= 1; i++)
+                        if (lv->t[y + j][x + i] != T_FLOOR || lv->room[y + j][x + i] != lv->hall) { ok = false; break; }
+                int d = (2 * x - 2 * hl->x - hl->w + 1) * (2 * x - 2 * hl->x - hl->w + 1)
+                      + (2 * y - 2 * hl->y - hl->h + 1) * (2 * y - 2 * hl->y - hl->h + 1);
+                if (ok && d < bd) { bd = d; bx = x; by = y; }
+            }
+        if (bx < 0) { bx = hl->x + hl->w / 2; by = hl->y + hl->h / 2; }
+        lv->t[by][bx] = T_HEARTH;
+        lv->downx = bx;
+        lv->downy = by;
+        level_add_light(lv, L_HEART, bx, by, bx, by, false, lv->hall);
+        /* two rows of pillars down the long sides */
+        if (hl->w >= 15 && hl->h >= 9) {
+            for (int k = 0; k < 3; k++)
+                for (int s = 0; s < 2; s++) {
+                    int px = s ? hl->x + hl->w - 4 : hl->x + 3, py = hl->y + 2 + k * (hl->h - 5) / 2;
+                    if (lv->t[py][px] == T_FLOOR && abs(px - bx) > 2) lv->t[py][px] = T_WALL;
+                }
+        }
+    } else {
+        /* down stairs: the farthest room */
+        static int16_t dist[MAP_H][MAP_W];
+        bfs(lv, lv->upx, lv->upy, dist);
+        int far = start, fd = -1;
+        for (int r = 0; r < lv->nrooms; r++) {
+            if (lv->rooms[r].cave) continue;
+            int d = dist[cy[r]][cx[r]];
+            if (d > fd) { fd = d; far = r; }
+        }
+        pick_floor_in_room(lv, &rng, far, &lv->downx, &lv->downy);
+        lv->t[lv->downy][lv->downx] = T_STAIRS_DOWN;
     }
-    pick_floor_in_room(lv, &rng, far, &lv->downx, &lv->downy);
-    lv->t[lv->downy][lv->downx] = T_STAIRS_DOWN;
 
-    /* chasms: open the middle of a big room onto the level below */
+    /* chasms: open the middle of a big room onto the level below (none on the last level: there is no below) */
     if (holes) memset(holes, 0, sizeof(uint8_t) * MAP_W * MAP_H);
-    int nch = depth >= 2 ? rng_range(&rng, 1, 2) : 1;
+    int nch = final ? 0 : depth >= 2 ? rng_range(&rng, 1, 2) : 1;
     for (int k = 0; k < nch; k++) {
         int pick = -1, area = 0;
         for (int r = 0; r < lv->nrooms; r++) {
             Room *rm = &lv->rooms[r];
-            if (rm->cave || r == start || rm->w < 7 || rm->h < 6) continue;
+            if (rm->cave || r == start || r == lv->hall || rm->w < 7 || rm->h < 6) continue;
             if (lv->room[lv->downy][lv->downx] == r) continue;
             bool has = false;
             for (int y = rm->y; y < rm->y + rm->h && !has; y++)
@@ -462,7 +537,7 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
     for (int k = 0, tries = 0; k < npool && tries < 60; tries++) {
         int r = rng_range(&prng, 0, lv->nrooms - 1);
         Room *rm = &lv->rooms[r];
-        if (r == start || rm->w < 6 || rm->h < 5) continue;
+        if (r == start || r == lv->hall || rm->w < 6 || rm->h < 5) continue;
         if (rm->w * rm->h < 48 && tries < 30) continue;        /* prefer the bigger rooms */
         if (lv->room[lv->downy][lv->downx] == r) continue;
         bool busy = false;
@@ -540,9 +615,9 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
             }
             continue;
         }
-        rm->dark = r != start && rng_chance(&rng, 30 + depth * 4);
-        int want_s = rm->w >= 9 ? 2 : 1, placed = 0;
-        for (int tries = 0; tries < 60 && placed < want_s; tries++) {
+        rm->dark = r == lv->hall || (r != start && rng_chance(&rng, 30 + depth * 4));
+        int want_s = r == lv->hall ? 4 : rm->w >= 9 ? 2 : 1, placed = 0;
+        for (int tries = 0; tries < (r == lv->hall ? 300 : 60) && placed < want_s; tries++) {
             int x = rng_range(&rng, rm->x, rm->x + rm->w - 1), y = rm->y - 1;
             if (tile_at(lv, x, y) != T_WALL || !tile_walkable(tile_at(lv, x, y + 1))) continue;
             if (!tile_solid(tile_at(lv, x, y - 1))) continue;      /* a cut-down front wall has no face to hang it on */
@@ -558,7 +633,7 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
     for (int tries = 0; tries < 200; tries++) {
         int r = rng_range(&rng, 0, lv->nrooms - 1);
         Room *rm = &lv->rooms[r];
-        if (r == start || rm->cave || rm->w < 5 || rm->h < 5 || (rm->dark && tries < 150)) continue;
+        if (r == start || r == lv->hall || rm->cave || rm->w < 5 || rm->h < 5 || (rm->dark && tries < 150)) continue;
         int x = rm->x + rm->w / 2, y = rm->y + rm->h / 2;
         bool ok = true;
         for (int j = -1; j <= 1 && ok; j++)

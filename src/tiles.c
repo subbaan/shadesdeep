@@ -828,6 +828,96 @@ static const Pal I_MAIL_PAL[] = {
     { 'k', 0x16110e, 0 }, { 'm', 0xb8bcc4, 0 }, { 'M', 0x6a6e78, 0 },
 };
 
+static const char *const I_OIL[16] = {
+    "................",
+    "................",
+    "................",
+    "......kkkk......",
+    "......kCCk......",
+    ".......kk.......",
+    "......kGGk......",
+    ".....kGGGGk.....",
+    "....kGooooGk....",
+    "...kGoOooooGk...",
+    "...kGOooooooGk..",
+    "...kGooooooGk...",
+    "...kGooooodGk...",
+    "....kGddddGk....",
+    ".....kkkkkk.....",
+    "................",
+};
+static const Pal I_OIL_PAL[] = {
+    { 'k', 0x1a1612, 0 }, { 'C', 0x8a6a40, 0 }, { 'G', 0x5e6e58, 0 }, { 'o', 0xc89028, 0 },
+    { 'O', 0xffe0a0, 0 }, { 'd', 0x8a5a14, 0 },
+};
+
+static const char *const I_FLASH[16] = {
+    "................",
+    "................",
+    "................",
+    "................",
+    ".......kk.......",
+    "......kWWk......",
+    ".......kk.......",
+    "......kWWk......",
+    ".....kWWWWk.....",
+    "....kWWsWWWk....",
+    "....kWWWWWwk....",
+    "...kWwWWWsWWk...",
+    "...kWWWWWwWWk...",
+    "....kWwwWWWk....",
+    ".....kkkkkk.....",
+    "................",
+};
+static const Pal I_FLASH_PAL[] = {
+    { 'k', 0x2a2420, 0 }, { 'W', 0xe8e4d8, 0 }, { 'w', 0xa8a498, 0 }, { 's', 0xfffbe8, 1 },
+};
+
+static const char *const I_SALT[16] = {
+    "................",
+    "................",
+    "................",
+    "................",
+    ".......kk.......",
+    "......kttk......",
+    ".......kk.......",
+    "......kbbk......",
+    ".....kbbbbk.....",
+    "....kbBbbbbk....",
+    "...kbBbbbbbbk...",
+    "...kbBbbbbbbk...",
+    "...kbbbbbbbbk...",
+    "....kbbbbbbk....",
+    ".....kkkkkk.ss..",
+    "..........s.s.s.",
+};
+static const Pal I_SALT_PAL[] = {
+    { 'k', 0x1a1612, 0 }, { 't', 0x7a5a30, 0 }, { 'b', 0x7e7868, 0 }, { 'B', 0xa8a294, 0 }, { 's', 0xf0f0ea, 0 },
+};
+
+static const char *const I_WARMTH[16] = {
+    "................",
+    "................",
+    "......kkkk......",
+    "......kcck......",
+    "......kggk......",
+    "......kggk......",
+    ".....kgaagk.....",
+    "....kgaAaagk....",
+    "....kgAaaagk....",
+    "....kgaaaagk....",
+    "....kgaaaagk....",
+    "....kgaaadgk....",
+    "....kgaaddgk....",
+    "....kgadddgk....",
+    ".....kkkkkk.....",
+    "................",
+};
+static const Pal I_WARMTH_PAL[] = {
+    { 'k', 0x1a1416, 0 }, { 'c', 0x8a6040, 0 }, { 'g', 0xb0a890, 0 }, { 'a', 0xe88a20, 1 },
+    { 'A', 0xffd070, 1 }, { 'd', 0xa04a10, 1 },
+};
+
 void tiles_build(Tiles *t)
 {
     memset(t, 0, sizeof *t);
@@ -853,6 +943,8 @@ void tiles_build(Tiles *t)
     build_sprite(&t->mob[MK_GOBLIN], &t->mob_glow[MK_GOBLIN], GOBLIN, GOBLIN_PAL, sizeof GOBLIN_PAL / sizeof *GOBLIN_PAL);
     image_alloc(&t->mob[MK_SHADE], TILE, TILE);        /* drawn procedurally by the renderer */
     image_alloc(&t->mob_glow[MK_SHADE], TILE, TILE);
+    image_alloc(&t->mob[MK_HOLLOW], TILE, TILE);       /* the Hollow too */
+    image_alloc(&t->mob_glow[MK_HOLLOW], TILE, TILE);
     build_sprite(&t->mob[MK_BAT], &t->mob_glow[MK_BAT], BAT, BAT_PAL, sizeof BAT_PAL / sizeof *BAT_PAL);
     build_sprite(&t->mob[MK_SLINGER], &t->mob_glow[MK_SLINGER], SLINGER, SLINGER_PAL, sizeof SLINGER_PAL / sizeof *SLINGER_PAL);
     build_sprite(&t->mob[MK_OGRE], &t->mob_glow[MK_OGRE], OGRE, OGRE_PAL, sizeof OGRE_PAL / sizeof *OGRE_PAL);
@@ -869,6 +961,10 @@ void tiles_build(Tiles *t)
     GEAR_SPRITE(IT_LEATHER, I_LEATHER);
     GEAR_SPRITE(IT_CLOAK, I_CLOAK);
     GEAR_SPRITE(IT_MAIL, I_MAIL);
+    GEAR_SPRITE(IT_OIL, I_OIL);
+    GEAR_SPRITE(IT_FLASH, I_FLASH);
+    GEAR_SPRITE(IT_SALT, I_SALT);
+    GEAR_SPRITE(IT_WARMTH, I_WARMTH);
 #undef GEAR_SPRITE
 }
 

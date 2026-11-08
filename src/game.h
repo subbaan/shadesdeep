@@ -8,7 +8,7 @@
 
 #include "map.h"
 
-#define MAX_DEPTH 26
+#define MAX_DEPTH FINAL_DEPTH
 #define MAX_MOBS  48
 #define MAX_MSGS  64
 #define MAX_FLOAT 32
@@ -16,7 +16,7 @@
 
 /* Saves store these enums as numbers: add new values at the end, and bump
  * SAVE_FORMAT in save.c if existing values ever change meaning. */
-typedef enum { MK_PLAYER, MK_RAT, MK_GOBLIN, MK_SHADE, MK_BAT, MK_SLINGER, MK_OGRE, MK_EEL, MK_COUNT } MobKind;
+typedef enum { MK_PLAYER, MK_RAT, MK_GOBLIN, MK_SHADE, MK_BAT, MK_SLINGER, MK_OGRE, MK_EEL, MK_HOLLOW, MK_COUNT } MobKind;
 
 #define SHADE_FEAR 0.30f   /* firelight a shade cannot bear: it won't enter it, and a fixed fire
                               * (sconce, torch on the floor) burns it; a carried torch only drives it off */
@@ -52,6 +52,7 @@ typedef struct {
     int lvl;            /* depth it was born on: deeper monsters hit harder */
     int surfaced;       /* an eel: turns it stays above the water after a lunge (0: hidden) */
     bool rest;          /* an ogre: sits out this turn (it acts every other turn) */
+    int daze;           /* turns it reels, dazzled by flash powder: it can't act, and can't see you */
 } Mob;
 
 /* ---------------------------------------------------------------- items */
@@ -60,6 +61,7 @@ typedef enum {
     IT_TORCH, IT_DART, IT_POTION,
     IT_SWORD, IT_DAGGER, IT_SPEAR, IT_AXE, IT_MACE,         /* weapons */
     IT_LEATHER, IT_CLOAK, IT_MAIL,                          /* armour */
+    IT_OIL, IT_FLASH, IT_SALT, IT_WARMTH,                   /* light and dark */
     IT_COUNT
 } ItemKind;
 
@@ -107,7 +109,8 @@ typedef struct {
 } Projectile;
 
 /* one-shot visual events for the renderer (sparks, splashes) */
-typedef enum { FX_SPARKS, FX_SHATTER, FX_THUD, FX_FALL, FX_BURN, FX_DISSOLVE, FX_SPLASH, FX_STEAM, FX_STONE } FxKind;
+typedef enum { FX_SPARKS, FX_SHATTER, FX_THUD, FX_FALL, FX_BURN, FX_DISSOLVE, FX_SPLASH, FX_STEAM, FX_STONE,
+               FX_FLASH, FX_OIL, FX_SALT } FxKind;
 typedef struct { FxKind kind; int x, y; int sx, sy; } Fx;    /* sx, sy: where a sling stone came from */
 #define MAX_FX 16
 
@@ -145,7 +148,7 @@ typedef struct {
     float t;
 } Floater;
 
-typedef enum { GS_PLAY, GS_JUMP_PROMPT, GS_DEAD } GameState;
+typedef enum { GS_PLAY, GS_JUMP_PROMPT, GS_DEAD, GS_WON } GameState;
 typedef enum { AUTO_NONE, AUTO_TRAVEL, AUTO_EXPLORE, AUTO_REST, AUTO_STAIRS } AutoMode;
 
 typedef struct {
@@ -197,6 +200,13 @@ typedef struct {
     int heart;                          /* times you've fed the forge for max HP */
     int lantern;                        /* times you've trimmed your lantern */
     bool forge_req;                     /* bumped a forge: the front end opens its menu */
+    int warm_left;                      /* turns a warming draught keeps the chill off */
+    int fire_x, fire_y;                 /* burning oil the player was warned about (move again to walk in) */
+    int kindle;                         /* the Heartflame: 0 cold, 1-2 kindling, 3 burning again (the game is won) */
+    float end_t;                        /* g->time when the run ended (won or lost), for the closing screen */
+    int deepest;                        /* the deepest level reached */
+    int embers_got;                     /* embers gathered over the whole run */
+    int sconces_lit;                    /* sconces lit by hand */
     FloorItem items[MAX_DEPTH + 2][MAX_ITEMS];
     Projectile proj;
     Fx fx[MAX_FX];
@@ -221,6 +231,13 @@ int   game_max_hp(const Game *g);                 /* max HP less the chill */
 bool  game_by_fire(Game *g);                      /* standing in a fixed fire's warmth */
 bool  game_mob_noticed(Game *g, const Mob *m);    /* in view, or a shade's eyes in the dark */
 bool  game_mob_hidden(const Mob *m);              /* an eel under the water: not there, as far as you know */
+bool  game_burning(Game *g, int x, int y);        /* burning oil on that tile of the current level */
+bool  game_final(const Game *g);                  /* on the last level, the Heartflame's */
+/* the run is over and its closing screen is up (a moment after the end, to see it happen) */
+static inline bool game_end_shown(const Game *g)
+{
+    return (g->state == GS_DEAD && g->time - g->end_t > 1.0f) || (g->state == GS_WON && g->time - g->end_t > 3.0f);
+}
 
 /* Player commands. Each returns true if a turn passed. */
 bool game_move(Game *g, int dx, int dy);
@@ -240,8 +257,11 @@ bool game_debug_to_chasm(Game *g);
 bool game_debug_to_water(Game *g, int wade);   /* developer: 0 shore, 1 shallows, 2 deep */
 bool game_debug_spawn(Game *g, MobKind k, int x, int y);
 bool game_debug_to_forge(Game *g);     /* developer: stand by the forge */
+bool game_debug_depth(Game *g, int depth);     /* developer: go straight to that depth */
+bool game_debug_kindle(Game *g, int times);    /* developer: at the hearth with a lit torch, kindle it */
 bool game_debug_to_spot(Game *g, int kind);   /* developer: 0 corridor, 1 side door, 2 south wall,
-                                                 * 3 by a cold sconce with a shade near, 4 and light it */   /* developer: put a monster there */
+                                                 * 3 by a cold sconce with a shade near, 4 and light it,
+                                                 * 5 in the Heartflame's hall, near the hearth */
 
 /* the forge: feed it embers to temper gear or strengthen yourself */
 typedef enum { FORGE_WEAPON, FORGE_ARMOUR, FORGE_HEART, FORGE_LANTERN, FORGE_COUNT } ForgeOffer;
