@@ -192,10 +192,10 @@ static void build_stairs(Image *im, bool down)
     for (int x = x0 - 2; x < x1 + 2; x++) put(im, x, y0 - 1, A(down ? 0xa89a82 : 0x2a241e));
 }
 
-static void build_door(Image *im)
+static void build_door(Image *im, int raise)
 {
-    image_alloc(im, TILE, TILE + WALL_R);
-    int H = TILE + WALL_R;
+    image_alloc(im, TILE, TILE + raise);
+    int H = TILE + raise;
     for (int y = 0; y < H; y++)
         for (int x = 0; x < TILE; x++) {
             uint32_t c;
@@ -217,14 +217,58 @@ static void build_door(Image *im)
     put(im, 22, H / 2 + 1, A(0x504830));
 }
 
-static void build_door_open(Image *im)
+/* A door in a north-south wall, seen edge on: a thick oak slab standing across the
+ * doorway, its top running up the tile and its end facing us, the floor of the
+ * doorway showing either side. Drawn raised like a wall (top at y 0..TILE-1,
+ * end face below). */
+static void build_door_side(Image *im)
+{
+    const int H = TILE + WALL_R, x0 = 10, x1 = 22;      /* slab spans x0..x1-1 */
+    image_alloc(im, TILE, H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < TILE; x++) {
+            bool face = y >= TILE;
+            /* contact shadow on the doorway floor beside the slab */
+            if (x < x0 || x >= x1) {
+                int d = x < x0 ? x0 - x : x - x1 + 1;
+                if (y >= WALL_R && d <= 4) put(im, x, y, (uint32_t)(150 - d * 30) << 24 | 0x000000);
+                continue;
+            }
+            uint32_t c;
+            int e = x - x0;                                     /* 0..11 across the slab */
+            if (!face) {
+                /* the top edge of the door: planks running north-south */
+                float g = fbm(x * 0.5f, y * 0.12f, 17);
+                c = jitter(0x8a5a30, (int)((g - 0.5f) * 44));
+                if (e == 6) c = 0x3a2414;                        /* seam between planks */
+                if (e == 0 || e == 11) c = jitter(c, -46);       /* rounded edges */
+                else if (e == 1) c = jitter(c, 28);              /* catch the light */
+                if (y == 6 || y == 7 || y == TILE - 8 || y == TILE - 7)   /* iron straps over the top */
+                    c = y & 1 ? 0x4a4846 : 0x7a7874;
+                if (y == 0) c = jitter(c, 30);
+            } else {
+                /* the end of the slab, facing us */
+                int fy = y - TILE;
+                float g = fbm(x * 0.3f, fy * 0.3f, 18);
+                c = jitter(0x5a3a20, (int)((g - 0.5f) * 36));
+                if (fy == 0) c = 0xa87444;                       /* lit arris */
+                if (e == 0 || e == 11) c = jitter(c, -40);
+                if (fy == 5 || fy == WALL_R - 6) c = 0x3a3836;   /* strap ends */
+                if (fy >= WALL_R - 2) c = jitter(c, -30);
+            }
+            put(im, x, y, A(c));
+        }
+}
+
+static void build_door_open(Image *im, bool side)
 {
     build_floor(im, 2);
     for (int y = 0; y < TILE; y++)
         for (int x = 0; x < TILE; x++) {
             uint32_t c = get(im, x, y) & 0xffffff;
-            if (x < 3 || x >= TILE - 3) c = jitter(0x7a6d5d, (int)((fbm(x * 0.4f, y * 0.4f, 5) - 0.5f) * 30));
-            else if (y > 12 && y < 16) c = jitter(c, -30);              /* threshold */
+            int across = side ? y : x, along = side ? x : y;
+            if (across < 3 || across >= TILE - 3) c = jitter(0x7a6d5d, (int)((fbm(x * 0.4f, y * 0.4f, 5) - 0.5f) * 30));
+            else if (along > 12 && along < 16) c = jitter(c, -30);              /* threshold */
             put(im, x, y, A(c));
         }
 }
@@ -467,8 +511,11 @@ void tiles_build(Tiles *t)
     build_cliff(&t->cliff);
     build_stairs(&t->stairs_dn, true);
     build_stairs(&t->stairs_up, false);
-    build_door(&t->door);
-    build_door_open(&t->door_open);
+    build_door(&t->door, WALL_R);
+    build_door(&t->door_low, LOW_R);
+    build_door_side(&t->door_side);
+    build_door_open(&t->door_open, false);
+    build_door_open(&t->door_open_side, true);
     build_sconce(&t->sconce);
     build_crystal(&t->crystal);
     for (int i = 0; i < 3; i++) build_rubble(&t->rubble[i], i);

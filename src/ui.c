@@ -296,7 +296,7 @@ static void sidebar(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
 
 static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
 {
-    if (f->hover_x < 0 || f->mx < 0) return;
+    if (f->hover_x < 0 || (!f->targeting && (f->mx < 0 || !f->tip))) return;
     Level *lv = game_level(g);
     int x = f->hover_x, y = f->hover_y;
     if (!(lv->f[y][x] & F_SEEN) && !(game_mob_at(g, x, y) && game_mob_noticed(g, game_mob_at(g, x, y)))) return;

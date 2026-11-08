@@ -720,7 +720,9 @@ static void draw_ground(Renderer *r, Canvas *cv, const View *v)
             const Image *over = NULL;
             if (t == T_STAIRS_DOWN) im = &r->t.stairs_dn;
             else if (t == T_STAIRS_UP) im = &r->t.stairs_up;
-            else if (t == T_DOOR_OPEN) im = &r->t.door_open;
+            else if (t == T_DOOR_OPEN)
+                im = tile_solid(tile_at(lv, tx, ty - 1)) && tile_solid(tile_at(lv, tx, ty + 1)) ? &r->t.door_open_side
+                                                                                              : &r->t.door_open;
             else if (t == T_RUBBLE) over = &r->t.rubble[(h >> 8) % 3];
             int ao = 0;
             if (tile_solid(tile_at(lv, tx, ty - 1)) || tile_at(lv, tx, ty - 1) == T_DOOR) ao |= AO_N;
@@ -739,6 +741,21 @@ static void draw_ground(Renderer *r, Canvas *cv, const View *v)
         }
 }
 
+/* How far a wall or door is raised. A "front" wall, with open ground to its north,
+ * is cut down to a low lip so it never hides that row (people, rats, items). */
+static int wall_raise(const Level *lv, int tx, int ty)
+{
+    return tile_solid(tile_at(lv, tx, ty - 1)) ? WALL_R : LOW_R;
+}
+
+static bool is_wall_at(const Level *lv, int tx, int ty) { return tile_at(lv, tx, ty) == T_WALL; }
+
+/* rows y0.. of an image, as an image of its own */
+static Image image_rows(const Image *im, int y0, int h)
+{
+    return (Image){ im->w, h, im->px + (size_t)y0 * im->w };
+}
+
 static void draw_wall(Renderer *r, Canvas *cv, const View *v, int tx, int ty)
 {
     const Level *lv = v->lv;
@@ -746,6 +763,12 @@ static void draw_wall(Renderer *r, Canvas *cv, const View *v, int tx, int ty)
     uint32_t h = hash2(tx, ty, lv->seed + 1);
     bool nN = !tile_solid(tile_at(lv, tx, ty - 1)), nS = !tile_solid(tile_at(lv, tx, ty + 1));
     bool nW = !tile_solid(tile_at(lv, tx - 1, ty)), nE = !tile_solid(tile_at(lv, tx + 1, ty));
+    int rz = wall_raise(lv, tx, ty);
+    /* a step down to a cut-down neighbour reads as an edge; a step up as a shadow */
+    int rW = is_wall_at(lv, tx - 1, ty) ? wall_raise(lv, tx - 1, ty) : rz;
+    int rE = is_wall_at(lv, tx + 1, ty) ? wall_raise(lv, tx + 1, ty) : rz;
+    bool eW = nW || rW < rz, eE = nE || rE < rz;
+    bool shW = rW > rz, shE = rE > rz;
     const CF *c00 = &r->corner[ty][tx], *c10 = &r->corner[ty][tx + 1];
     const CF *c01 = &r->corner[ty + 1][tx], *c11 = &r->corner[ty + 1][tx + 1];
 
@@ -759,26 +782,38 @@ static void draw_wall(Renderer *r, Canvas *cv, const View *v, int tx, int ty)
             int d = 0;
             if (nN) d = j == 0 ? -40 : j < 3 ? 30 : d;
             if (nS && j >= TILE - 3) d = j == TILE - 1 ? 40 : 30;
-            if (nW) d = i == 0 ? -40 : i < 3 && d >= 0 ? 26 : d;
-            if (nE) d = i == TILE - 1 ? -40 : i > TILE - 4 && d >= 0 ? 22 : d;
+            if (eW) d = i == 0 ? -40 : i < 3 && d >= 0 ? 26 : d;
+            if (eE) d = i == TILE - 1 ? -40 : i > TILE - 4 && d >= 0 ? 22 : d;
+            if (shW && i < 4) d -= (4 - i) * 12;
+            if (shE && i > TILE - 5) d -= (i - (TILE - 5)) * 12;
             top.px[j * TILE + i] = d ? (0xff000000u | add_sat(c, d, d, d * 9 / 10)) : c;
         }
-    draw_lit(cv, sx, sy - WALL_R, &top, TILE, TILE, c00, c10, c01, c11, 0.62f, 0.78f, 0, v->fog, NULL, 0);
+    draw_lit(cv, sx, sy - rz, &top, TILE, TILE, c00, c10, c01, c11, 0.62f, 0.78f, 0, v->fog, NULL, 0);
 
     if (nS) {
-        /* the front face takes the light of the floor in front of it */
+        /* the front face takes the light of the floor in front of it; a cut-down
+         * wall shows only the foot of it */
         CF a = *c01, b = *c11;
-        draw_lit(cv, sx, sy + TILE - WALL_R, &r->t.wface[(h >> 4) % N_WALL], TILE, WALL_R, &a, &b, &a, &b,
-                 0.7f, 1.0f, 0, v->fog, NULL, 0);
+        Image face = image_rows(&r->t.wface[(h >> 4) % N_WALL], WALL_R - rz, rz);
+        draw_lit(cv, sx, sy + TILE - rz, &face, TILE, rz, &a, &b, &a, &b, 0.7f, 1.0f, 0, v->fog, NULL, 0);
     }
 }
 
 static void draw_door(Renderer *r, Canvas *cv, const View *v, int tx, int ty)
 {
+    const Level *lv = v->lv;
     int sx = tx * TILE - v->camx, sy = ty * TILE - v->camy;
     const CF *c00 = &r->corner[ty][tx], *c10 = &r->corner[ty][tx + 1];
     const CF *c01 = &r->corner[ty + 1][tx], *c11 = &r->corner[ty + 1][tx + 1];
-    draw_lit(cv, sx, sy - WALL_R, &r->t.door, TILE, TILE + WALL_R, c00, c10, c01, c11, 0.8f, 1.0f, 0, v->fog, NULL, 0);
+    if (tile_solid(tile_at(lv, tx, ty - 1)) && tile_solid(tile_at(lv, tx, ty + 1))) {
+        /* in a north-south wall: seen edge on, a little brighter so it stands out of the stone */
+        draw_lit(cv, sx, sy - WALL_R, &r->t.door_side, TILE, TILE + WALL_R, c00, c10, c01, c11, 0.95f, 1.1f, 0,
+                 v->fog, NULL, 0);
+        return;
+    }
+    int rz = wall_raise(lv, tx, ty);
+    const Image *im = rz == WALL_R ? &r->t.door : &r->t.door_low;
+    draw_lit(cv, sx, sy - rz, im, TILE, TILE + rz, c00, c10, c01, c11, 0.8f, 1.0f, 0, v->fog, NULL, 0);
 }
 
 static void light_at_px(const Renderer *r, float wx, float wy, CF *o)

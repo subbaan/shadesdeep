@@ -135,7 +135,16 @@ typedef struct {
     int plen;
     int hx, hy;
     int tpath[32];
+    /* The mouse "sleeps" once you play with the keys, so the tile highlight, path and
+     * card stop following things that scroll under a resting pointer. A card shows only
+     * for the tile the mouse last moved onto, and only for TIP_SECS after that. */
+    bool awake;
+    bool tip_live;          /* still within TIP_SECS of the last mouse movement */
+    bool tip_arm;           /* the mouse just moved: remember the tile under it */
+    int tipx, tipy;
 } Hover;
+
+#define TIP_SECS 4.0
 
 /* interface state: open menus, aiming */
 typedef struct {
@@ -258,8 +267,15 @@ static void draw_frame(Renderer *r, UI *ui, Game *g, Frame *fr, Hover *hv, Ctl *
         if (hv->hx >= 0 && g->autom == AUTO_NONE && !ctl->targeting && ctl->menu == MENU_NONE && !g->proj.active)
             hv->plen = game_path_preview(g, hv->hx, hv->hy, hv->path, MAX_PATH);
     }
-    Overlay ov = { hv->hx, hv->hy, hv->path, hv->plen, NULL, 0, false, IT_DART };
-    int ux = hv->hx, uy = hv->hy;
+    if (hv->tip_arm) {
+        hv->tip_arm = false;
+        hv->tipx = hv->hx;
+        hv->tipy = hv->hy;
+    }
+    bool show = hv->awake;
+    bool tip = show && hv->tip_live && hv->hx == hv->tipx && hv->hy == hv->tipy;
+    Overlay ov = { show ? hv->hx : -1, show ? hv->hy : -1, hv->path, show ? hv->plen : 0, NULL, 0, false, IT_DART };
+    int ux = show ? hv->hx : -1, uy = show ? hv->hy : -1;
     if (ctl->targeting && ctl->tslot >= 0 && ctl->tslot < g->ninv && !g->proj.active) {
         ov.tkind = g->inv[ctl->tslot].kind;
         ov.tpath = hv->tpath;
@@ -273,7 +289,7 @@ static void draw_frame(Renderer *r, UI *ui, Game *g, Frame *fr, Hover *hv, Ctl *
     render_cam_pos(r, &cx, &cy);
     bool map = ctl->map && g->state == GS_PLAY;
     if (map) map_update(r, ui, g, &fr->screen, ctl);
-    UiFrame uf = { (float)lroundf(cx), (float)lroundf(cy), fr->zoom, mx, my, ux, uy, ctl->help, ctl->quit_armed,
+    UiFrame uf = { (float)lroundf(cx), (float)lroundf(cy), fr->zoom, mx, my, ux, uy, tip, ctl->help, ctl->quit_armed,
                    fps, show_fps, ctl->menu, ctl->menu_slot, ctl->targeting, ctl->tslot, map, &g_mini, g_ml };
     ui_draw(ui, g, &fr->screen, &uf);
 }
@@ -339,6 +355,9 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     /* LUME_DUMP_WATER=0|1|2: stand by a pool, in its shallows, or swimming in it */
     if (getenv("LUME_DUMP_WATER") && !game_debug_to_water(g, atoi(getenv("LUME_DUMP_WATER"))))
         fprintf(stderr, "%s: no deep water on this level\n", LUME_NAME);
+    /* LUME_DUMP_SPOT=0|1|2: an east-west corridor, a side-wall door, a room's south wall */
+    if (getenv("LUME_DUMP_SPOT") && !game_debug_to_spot(g, atoi(getenv("LUME_DUMP_SPOT"))))
+        fprintf(stderr, "%s: no such spot on this level\n", LUME_NAME);
     /* LUME_DUMP_JUMP=N: jump down N chasms (developer test of level changes) */
     for (int j = getenv("LUME_DUMP_JUMP") ? atoi(getenv("LUME_DUMP_JUMP")) : 0; j > 0 && g->state == GS_PLAY; j--) {
         if (!game_debug_to_chasm(g)) break;
@@ -351,6 +370,7 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     }
     for (int i = 0; i < 120; i++) game_update(g, 1.0f / 60);
     static Hover hv;
+    hv.awake = hv.tip_live = hv.tip_arm = mx >= 0;
     Ctl ctl = { .menu_slot = 0, .tslot = -1 };
     ui_set_icons(ui, render_item_icons(r));
     /* developer views: LUME_DUMP_TORCH=1 lights a torch, LUME_DUMP_MENU=inv|throw|use|item,
@@ -595,6 +615,17 @@ int main(int argc, char **argv)
             quit_t = -10;
         }
         ctl.quit_armed = t - quit_t < 1.5;
+
+        /* wake the mouse on movement, clicks and the wheel; keys put it to sleep */
+        static double mouse_t = -100;
+        if (g_input.moved || g_input.mclick[0] || g_input.mclick[1] || g_input.mclick[2] || g_input.wheel) {
+            mouse_t = t;
+            hv.awake = true;
+            hv.tip_arm = true;
+        } else if (any_key) {
+            hv.awake = false;
+        }
+        hv.tip_live = t - mouse_t < TIP_SECS;
 
         UiAction click = UA_NONE;
         int carg = 0;

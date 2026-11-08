@@ -203,7 +203,8 @@ int  game_path_preview(Game *g, int x, int y, int *out, int max);
 
 bool game_debug_to_chasm(Game *g);
 bool game_debug_to_water(Game *g, int wade);   /* developer: 0 shore, 1 shallows, 2 deep */
-bool game_debug_spawn(Game *g, MobKind k, int x, int y);   /* developer: put a monster there */
+bool game_debug_spawn(Game *g, MobKind k, int x, int y);
+bool game_debug_to_spot(Game *g, int kind);   /* developer: 0 corridor, 1 side door, 2 south wall */   /* developer: put a monster there */
 
 /* items */
 FloorItem *game_item_at(Game *g, int x, int y);

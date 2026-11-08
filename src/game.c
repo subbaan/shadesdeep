@@ -1011,6 +1011,48 @@ bool game_debug_to_water(Game *g, int wade)
     return false;
 }
 
+static bool place_item(Game *g, int depth, ItemKind k, int count, int x, int y, bool dropped);
+/* developer: 0 stand in an east-west corridor with a rat and a dart beside you,
+ * 1 stand beside a door in a side (north-south) wall, 2 stand just north of a room's south wall */
+bool game_debug_to_spot(Game *g, int kind)
+{
+    Level *lv = game_level(g);
+    for (int y = 2; y < MAP_H - 3; y++)
+        for (int x = 3; x < MAP_W - 3; x++) {
+            Tile t = (Tile)lv->t[y][x];
+            int px = x, py = y;
+            if (kind == 0) {
+                if (t != T_FLOOR || !tile_solid((Tile)lv->t[y - 1][x]) || !tile_solid((Tile)lv->t[y + 1][x])) continue;
+                bool run = true;
+                for (int k = -2; k <= 2 && run; k++)
+                    run = lv->t[y][x + k] == T_FLOOR && tile_solid((Tile)lv->t[y + 1][x + k]);
+                if (!run) continue;
+            } else if (kind == 1) {
+                if (t != T_DOOR || !tile_solid((Tile)lv->t[y - 1][x]) || !tile_solid((Tile)lv->t[y + 1][x])) continue;
+                if (!tile_walkable((Tile)lv->t[y][x - 1])) continue;
+                px = x - 1;
+            } else {
+                if (t != T_FLOOR || !tile_solid((Tile)lv->t[y + 1][x]) || !tile_walkable((Tile)lv->t[y - 1][x])) continue;
+                if (lv->t[y][x - 1] != T_FLOOR || lv->t[y][x + 1] != T_FLOOR || !tile_solid((Tile)lv->t[y + 1][x + 2]))
+                    continue;
+            }
+            Mob *ms = g->mobs[g->depth];
+            for (int i = 0; i < MAX_MOBS; i++)
+                if (ms[i].alive && abs(ms[i].x - px) < 4 && abs(ms[i].y - py) < 4) ms[i].alive = false;
+            place_player(g, px, py);
+            if (kind != 1) {
+                place_item(g, g->depth, IT_DART, 2, px - 1, py, true);
+                for (int i = 0; i < MAX_MOBS; i++)
+                    if (!ms[i].alive) { mob_init(&ms[i], MK_RAT, px + 2, py); break; }
+            }
+            for (int j = 0; j < MAP_H; j++)
+                for (int i = 0; i < MAP_W; i++) lv->f[j][i] |= F_SEEN;
+            compute_view(g);
+            return true;
+        }
+    return false;
+}
+
 bool game_busy(const Game *g) { return g->player.at < 0.7f || g->proj.active; }
 
 static void resolve_throw(Game *g);

@@ -44,6 +44,7 @@ typedef struct {
     int zoom;
     int mx, my;             /* mouse, or -1 */
     int hover_x, hover_y;   /* map tile under the mouse, or -1 */
+    bool tip;               /* show the hover card for it (the mouse moved there lately) */
     bool help;
     bool quit_armed;        /* Esc pressed once */
     float fps;

@@ -5,7 +5,7 @@ art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.5.0 (map and sound) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.5.1 (cut-down front walls, side doors, quieter drips, sleepy tooltips) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 ## Build and run
 
@@ -23,7 +23,9 @@ sound; if no audio device opens, the game runs silent.
 
 - **Mouse:** hover anything for a description; click to travel (the path is
   previewed), click a monster to attack it, click a cold sconce to walk over
-  and light it, click yourself to rest. The wheel zooms.
+  and light it, click yourself to rest. The wheel zooms. Descriptions fade
+  after a few seconds, and pressing a key hides the hover marker until the
+  mouse moves again.
 - **Keys:** arrows / numpad / `h j k l y u b n` move and attack; `x` explore;
   `z` or `.` rest a turn, `Z` rest until healed; `>` travel to the stairs
   down and descend, `<` climb; `i` items, `t` throw, `a` / `q` use,
@@ -80,10 +82,13 @@ lights a torch, `LUME_DUMP_MENU=inv|throw|use|item` opens a menu,
 thrown torch part-way through its flight. `LUME_DUMP_REST=N` waits N turns
 first (e.g. to let a thrown torch burn out). `LUME_DUMP_SHADE="dx,dy;dx,dy"`
 puts shades near the player. `LUME_DUMP_WATER=0|1|2` stands by a pool, in its
-shallows, or swimming. `LUME_DUMP_MAP=1` opens the map.
+shallows, or swimming. `LUME_DUMP_SPOT=0|1|2` stands in an east-west corridor
+(with a rat and darts beside you), beside a door in a side wall, or just north
+of a room's south wall. `LUME_DUMP_MAP=1` opens the map.
 
 The sounds are synthesized by `tools/make_sounds.py` (Python 3 with numpy and
-scipy) into `assets/sounds`; `assets/sounds/sounds.txt` says which file(s)
+scipy) into `assets/sounds` (files already there are kept, so sounds you swapped in survive; `--only
+NAME...` re-renders just those, `--force` re-renders everything); `assets/sounds/sounds.txt` says which file(s)
 each event plays and how loud, and is only written when missing, so edit it
 freely. `python3 tools/make_sounds.py --only step door` re-renders just those.
 

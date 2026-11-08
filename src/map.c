@@ -543,6 +543,7 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
         for (int tries = 0; tries < 60 && placed < want_s; tries++) {
             int x = rng_range(&rng, rm->x, rm->x + rm->w - 1), y = rm->y - 1;
             if (tile_at(lv, x, y) != T_WALL || !tile_walkable(tile_at(lv, x, y + 1))) continue;
+            if (!tile_solid(tile_at(lv, x, y - 1))) continue;      /* a cut-down front wall has no face to hang it on */
             if (level_light_on(lv, x, y) || level_light_on(lv, x - 1, y) || level_light_on(lv, x + 1, y) ||
                 level_light_on(lv, x - 2, y) || level_light_on(lv, x + 2, y))
                 continue;

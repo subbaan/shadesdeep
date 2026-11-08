@@ -8,8 +8,12 @@ several variants (step_a/_b/_c...) and the game picks one at random.
 assets/sounds/sounds.txt maps game events to files and volumes. It is only
 written when missing, so hand edits survive re-runs.
 
+Existing files are kept (you may have swapped in your own), except for sounds
+named with --only, or everything with --force.
+
 Run: python3 tools/make_sounds.py [out_dir]          (default assets/sounds)
      python3 tools/make_sounds.py --only NAME...     render just these sounds
+     python3 tools/make_sounds.py --force            re-render and overwrite all
 """
 import os
 import sys
@@ -18,7 +22,7 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import butter, lfilter, fftconvolve
 
-VERSION = "1.0.0"
+VERSION = "1.2.0"
 SR = 44100
 RNG = np.random.default_rng(2611)
 
@@ -505,17 +509,20 @@ def ambience(v):
     air = lp(brown(d), 260) * (0.75 + 0.25 * np.sin(2 * np.pi * t / 11.3)) * 1.6
     hum = (sine(48.5, d) * 0.06 + sine(73.0, d) * 0.03) * (0.6 + 0.4 * np.sin(2 * np.pi * t / 7.7))
     out = mix(air, hum)
-    # drips, some near, some far
+    # drips: a few, quiet, mostly far off, with only a little room on them
     drips = np.zeros(n_(d))
-    for k in range(int(d * 0.9)):
+    for k in range(int(d * 0.3)):
         t0 = RNG.uniform(0, d - 0.6)
-        f = RNG.uniform(900, 2200)
-        dd = 0.09
-        dr = sine(slide(f, f * 1.8, dd), dd) * env(dd, 0.001, 0.02, 0) * RNG.uniform(0.05, 0.22)
+        f = RNG.uniform(900, 2000)
+        dd = 0.08
+        far = RNG.uniform() < 0.6
+        dr = sine(slide(f, f * 1.6, dd), dd) * env(dd, 0.001, 0.015, 0) * RNG.uniform(0.025, 0.07)
+        if far:
+            dr = lp(dr, 1400) * 0.6
         i = n_(t0)
         drips[i:i + len(dr)] += dr[:len(drips) - i]
-    wet = fftconvolve(drips, room_ir())[:len(drips)] * 3.0
-    out = mix(out, drips * 0.6 + wet * 0.8)
+    wet = fftconvolve(drips, room_ir())[:len(drips)] * 0.5
+    out = mix(out, drips * 0.8 + lp(wet, 2500) * 0.35)
     # a far-off groan of settling stone every so often
     for t0 in (6.5, 19.0, 28.5):
         dd = 3.2
@@ -584,6 +591,8 @@ def main(argv):
     out = "assets/sounds"
     only = None
     args = argv[1:]
+    force = "--force" in args
+    args = [a for a in args if a != "--force"]
     if "--only" in args:
         i = args.index("--only")
         only = set(args[i + 1:])
@@ -601,8 +610,11 @@ def main(argv):
         if only and name not in only:
             continue
         for v in range(n):
-            x = fn(v)
             path = os.path.join(out, filename(name, v, n))
+            if os.path.exists(path) and not force and not only:
+                print(f"  {path}  kept")
+                continue
+            x = fn(v)
             (write_loop if loop else write)(path, x)
             print(f"  {path}  {len(x) / SR:.2f}s")
     txt = os.path.join(out, "sounds.txt")
