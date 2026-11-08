@@ -439,6 +439,36 @@ Game *game_new(uint32_t seed)
     return g;
 }
 
+static void update_light(Game *g);
+
+/* a game just read back from a save: rebuild what's worked out rather than stored */
+void game_resume(Game *g)
+{
+    Level *lv = game_level(g);
+    g->autom = AUTO_NONE;
+    g->nfx = g->nsnd = 0;
+    g->proj.active = false;
+    g->forge_req = false;
+    g->level_changed = true;
+    g->lower_dirty = true;
+    memset(g->fl, 0, sizeof g->fl);
+    Mob *ms = g->mobs[g->depth];
+    for (int i = 0; i <= MAX_MOBS; i++) {
+        Mob *m = i < MAX_MOBS ? &ms[i] : &g->player;
+        m->rx = m->ax = (float)m->x;
+        m->ry = m->ay = (float)m->y;
+        m->at = 1;
+        m->bump = m->flash = 0;
+    }
+    for (int d = 0; d < MAX_DEPTH + 2; d++)
+        if (g->lv[d]) g->lv[d]->light_dirty = true;
+    update_light(g);
+    compute_view(g);
+    for (int y = 0; y < MAP_H; y++)
+        for (int x = 0; x < MAP_W; x++) g->visf[y][x] = (lv->f[y][x] & F_VIS) ? 1.0f : 0.0f;
+    game_msg(g, C_INFO, "you take up where you left off, on depth %d.", g->depth);
+}
+
 void game_free(Game *g)
 {
     if (!g) return;

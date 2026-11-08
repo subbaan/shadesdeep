@@ -461,10 +461,10 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Forge", "walk into a forge brazier to spend embers on your gear or yourself" },
         { "Chasms", "step in to jump down a level (it hurts; water below breaks the fall)" },
         { "Map", "m  the whole level; click a place on it to travel there" },
-        { "Water", "shallows splash; deep water puts out a torch and goblins won't swim" },
+        { "Water", "shallows splash; deep water puts out a torch; goblins won't swim, eels lurk" },
         { "Zoom", "+ and -  or the mouse wheel;  text size is kitty's font zoom (ctrl+shift+= / -)" },
         { "Sound", "F2 turns it off and on" },
-        { "Quit", "Esc twice" },
+        { "Save and quit", "Esc twice (the next start carries on)" },
     };
     int n = sizeof L / sizeof *L;
     Font *hf = ui->head, *bf = ui->body;
@@ -810,7 +810,7 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
                          font_ascent(ui->small) + font_line(ui->small) + ui->px / 3, fb, 0x8a7c62, 200);
     }
     if (f->quit_armed) {
-        const char *q = "Press Esc again to quit";
+        const char *q = "Press Esc again to save and quit";
         int w = font_width(ui->head, q);
         font_draw_shadow(ui->head, cv, (cv->w - w) / 2, cv->h / 2, q, C_WARN, 255);
     }

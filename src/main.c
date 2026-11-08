@@ -16,6 +16,7 @@
 #include "gfx.h"
 #include "kgfx.h"
 #include "render.h"
+#include "save.h"
 #include "sound.h"
 #include "term.h"
 #include "ui.h"
@@ -60,6 +61,16 @@ static int find_assets(char *out, size_t n, const char *override)
     return dir_has_fonts(out) ? 0 : -1;
 }
 
+/* save the game (not a finished one); false if there was nothing to save or it failed (err says) */
+static bool save_now(Game *g, const char *path, char *err, size_t n)
+{
+    if (!path[0] || g->state == GS_DEAD) return false;
+    while (g->proj.active) game_update(g, 1.0f / 60);     /* let a thrown item land first */
+    if (save_write(g, path, err, n) == 0) return true;
+    game_msg(g, C_BAD, "%s.", err);
+    return false;
+}
+
 static void usage(FILE *f)
 {
     fprintf(f,
@@ -72,6 +83,11 @@ static void usage(FILE *f)
         "  -f, --fps=N         target frame rate (default 60)\n"
         "  -m, --mode=MODE     pixel transport: shm (default), direct, directz\n"
         "  -a, --assets=DIR    asset directory (default: found next to the binary)\n"
+        "      --new           start a new game even if there is a saved one (it is\n"
+        "                      replaced when you quit)\n"
+        "      --save=FILE     where to keep the saved game\n"
+        "                      (default ~/.local/share/lume/save.gz)\n"
+        "      --no-save       don't resume or save a game\n"
         "      --mute          start with the sound off (F2 toggles it in the game)\n"
         "      --no-sound      don't open the audio device at all\n"
         "      --show-fps      show the frame rate under the version\n"
@@ -85,7 +101,8 @@ static void usage(FILE *f)
         "  -V, --version       show version\n"
         "\n"
         "In the game press ? for the controls, m for the map. Mouse: click to travel\n"
-        "or attack, hover for descriptions, wheel to zoom. Esc twice quits.\n",
+        "or attack, hover for descriptions, wheel to zoom. Esc twice saves and quits;\n"
+        "the next start picks the game up again. Dying ends it for good.\n",
         LUME_NAME);
 }
 
@@ -492,6 +509,8 @@ int main(int argc, char **argv)
 {
     TxMode tx = TX_SHM;
     uint32_t seed = 0;
+    bool new_game = false, no_save = false;
+    const char *save_opt = NULL;
     bool seed_given = false, probe_only = false, show_fps = false, start_muted = false, no_sound = false;
     int fps = 60, zoom_opt = 0, dump_w = 1300, dump_h = 700, dump_cell = 20, steps = 0, hover_x = -1, hover_y = -1;
     float tscale = 1.0f;
@@ -513,6 +532,9 @@ int main(int argc, char **argv)
         { "cell",     required_argument, 0, 'C' },
         { "steps",    required_argument, 0, 'E' },
         { "hover",    required_argument, 0, 'H' },
+        { "new",      no_argument,       0, 'W' },
+        { "save",     required_argument, 0, 'L' },
+        { "no-save",  no_argument,       0, 'X' },
         { "help",     no_argument,       0, 'h' },
         { "version",  no_argument,       0, 'V' },
         { 0, 0, 0, 0 }
@@ -535,6 +557,9 @@ int main(int argc, char **argv)
         case 'C': dump_cell = atoi(optarg); break;
         case 'E': steps = atoi(optarg); break;
         case 'H': if (sscanf(optarg, "%d,%d", &hover_x, &hover_y) != 2) { fprintf(stderr, "%s: bad hover\n", LUME_NAME); return 2; } break;
+        case 'W': new_game = true; break;
+        case 'L': save_opt = optarg; break;
+        case 'X': no_save = true; break;
         case 'h': usage(stdout); return 0;
         case 'V': printf("%s %s\n", LUME_NAME, LUME_VERSION); return 0;
         default:  usage(stderr); return 2;
@@ -584,7 +609,37 @@ int main(int argc, char **argv)
     if (tx == TX_SHM && !caps.gfx_shm) tx = TX_DIRECTZ;
     ui_set_scale(ui, ts.cellh, tscale);
 
-    Game *g = game_new(seed);
+    /* resume the saved game, if there is one */
+    char save_path[PATH_MAX] = "", save_err[PATH_MAX + 160] = "";
+    if (!no_save) {
+        if (save_opt) snprintf(save_path, sizeof save_path, "%s", save_opt);
+        else if (!save_default_path(save_path, sizeof save_path)) save_path[0] = 0;
+    }
+    Game *g = NULL;
+    bool resumed = false;
+    if (save_path[0] && !new_game && save_exists(save_path)) {
+        bool incompatible;
+        g = save_read(save_path, &incompatible, save_err, sizeof save_err);
+        if (g) {
+            game_resume(g);
+            resumed = true;
+        } else {
+            /* keep it out of the way rather than overwrite it */
+            char old[PATH_MAX + 8];
+            snprintf(old, sizeof old, "%s.old", save_path);
+            if (rename(save_path, old) == 0) {
+                size_t l = strlen(save_err);
+                snprintf(save_err + l, sizeof save_err - l, "; it was kept as %s and a new game begins", old);
+            }
+        }
+    }
+    if (!g) g = game_new(seed);
+    if (save_err[0]) game_msg(g, C_WARN, "%s.", save_err);
+    if (resumed && seed_given) game_msg(g, C_DIM, "(--seed is ignored when resuming; --new starts a fresh game)");
+    else if (new_game && save_path[0] && save_exists(save_path))
+        game_msg(g, C_DIM, "(a new game: your saved one will be replaced when you quit)");
+    int saved_depth = g->depth;
+    bool save_gone = false;
     Renderer *r = render_new();
     ui_set_icons(ui, render_item_icons(r));
     if (!no_sound) {
@@ -692,6 +747,13 @@ int main(int argc, char **argv)
             if (same) click = UA_NONE;
         }
         bool busy = game_busy(g);
+        if (g->state == GS_DEAD && !save_gone) {
+            save_remove(save_path);             /* death is final */
+            save_gone = true;
+        } else if (g->state != GS_DEAD && g->depth != saved_depth && !busy) {
+            save_now(g, save_path, save_err, sizeof save_err);   /* a new level: keep the run safe */
+            saved_depth = g->depth;
+        }
 
         if (g->state == GS_DEAD) {
             ctl.menu = MENU_NONE;
@@ -699,6 +761,8 @@ int main(int argc, char **argv)
             if (pr[K_ENTER] || pr[K_KPENTER] || click == UA_NEW_GAME) {
                 game_free(g);
                 g = game_new((uint32_t)time(NULL) ^ seed++);
+                save_gone = false;
+                saved_depth = g->depth;
                 render_camera(r, g, fr.world.w, fr.world.h, 0, true);
             } else if (PLAIN('q') || click == UA_QUIT) {
                 quit = true;
@@ -854,9 +918,13 @@ int main(int argc, char **argv)
         }
     }
 
+    save_err[0] = 0;
+    bool saved = save_now(g, save_path, save_err, sizeof save_err);
     snd_shutdown();
     kgfx_cleanup(&kg);
     term_restore();
+    if (save_err[0]) fprintf(stderr, "%s: %s\n", LUME_NAME, save_err);
+    else if (saved) printf("Game saved (depth %d). Run %s again to carry on.\n", g->depth, LUME_NAME);
     free(fr.screen.px);
     free(fr.world.px);
     render_free(r);

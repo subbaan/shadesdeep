@@ -5,7 +5,7 @@ art, per-pixel coloured lighting and smooth animation, presented through
 kitty's graphics protocol. Brogue-style accessibility: full mouse support,
 hover descriptions and clickable actions.
 
-Version: 0.8.0 (bats, slingers, ogres and eels) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.8.1 (saving) · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -32,7 +32,11 @@ sound; if no audio device opens, the game runs silent.
   `z` or `.` rest a turn, `Z` rest until healed; `>` travel to the stairs
   down and descend, `<` climb; `i` items, `t` throw, `a` / `q` use,
   `d` drop, `T` light or snuff your torch; `m` map; `+` / `-` zoom;
-  F2 sound on/off; `?` help; Esc twice quits.
+  F2 sound on/off; `?` help; Esc twice saves and quits.
+- **Saving:** quitting (or closing the window) saves the game, and the next
+  start carries on where you left off; it's also saved on every new level.
+  Death deletes the save. It lives in `~/.local/share/lume/save.gz`;
+  `--new` starts afresh, `--save=FILE` and `--no-save` change or skip it.
 - **Map:** `m` (or the Map button) shows the whole explored level, drawn
   with the game's own graphics: you, the stairs and any creatures you can make
   out are marked. Click a place on it to travel there.

@@ -14,6 +14,8 @@
 #define MAX_FLOAT 32
 #define MAX_PATH  (MAP_W * MAP_H)
 
+/* Saves store these enums as numbers: add new values at the end, and bump
+ * SAVE_FORMAT in save.c if existing values ever change meaning. */
 typedef enum { MK_PLAYER, MK_RAT, MK_GOBLIN, MK_SHADE, MK_BAT, MK_SLINGER, MK_OGRE, MK_EEL, MK_COUNT } MobKind;
 
 #define SHADE_FEAR 0.30f   /* firelight a shade cannot bear: it won't enter it, and a fixed fire
@@ -205,6 +207,7 @@ typedef struct {
 
 Game *game_new(uint32_t seed);
 void  game_free(Game *g);
+void  game_resume(Game *g);                         /* after reading a save */
 Level *game_level(Game *g);
 Level *game_level_below(Game *g);
 Mob  *game_mobs(Game *g, int depth);

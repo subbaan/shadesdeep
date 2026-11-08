@@ -1,6 +1,6 @@
 # Lume — Player's Manual
 
-*Covers Lume 0.8.0. This manual grows with the game: each new feature gets
+*Covers Lume 0.8.1. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches and
@@ -49,7 +49,7 @@ Every action also has a button on screen.
 | Help | `?` | **?** button |
 | Zoom | `+` / `-` | mouse wheel |
 | Sound on/off | `F2` | |
-| Quit | `Esc` twice | |
+| Save and quit | `Esc` twice | |
 
 **Aiming a throw:** move the reticle with the mouse or the direction keys.
 `Tab` cycles through the monsters you can see. Click or press `Enter` to
@@ -61,6 +61,20 @@ you move the mouse again, so things scrolling under a resting pointer won't
 pop up cards.
 
 **Text size** follows kitty's own font zoom (`ctrl+shift+=` / `-`).
+
+### Saving
+
+There's one game at a time, and it's always kept. Quitting (`Esc` twice, or
+just closing the window) saves it, and the next time you start Lume you carry
+on exactly where you left off. The game is also saved each time you reach a
+new level, in case something goes wrong. **Dying ends the game for good:** the
+save is deleted and the next start is a new dungeon.
+
+The save lives in `~/.local/share/lume/save.gz`. Starting with `--new`
+begins a fresh game (your saved one is replaced when you quit), `--save=FILE`
+keeps it somewhere else, and `--no-save` plays without one. A save from a
+version of Lume that this one can't read is set aside as `save.gz.old`
+rather than deleted.
 
 ---
 
