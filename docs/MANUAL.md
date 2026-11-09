@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.16.4. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.16.5. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -258,9 +258,10 @@ means one that's asleep, dazzled, or awake but not hunting you. Your blow
 times** the damage. The first blow alerts it, so you get one free strike; make it
 count. The Hollow is never caught unawares.
 
-**Coming up from behind.** A monster on the move watches the way it's going,
-which is the way its picture faces. Approach from the side it has turned its
-back on and it notices you from only **half as far** (in the light or the
+**Coming up from behind.** A monster on the move watches the way it's going:
+the way its picture faces when it walks left or right, or straight ahead when
+it walks up or down a corridor (on a diagonal, the way it's heading). Approach
+from behind it and it notices you from only **half as far** (in the light or the
 dark), though it always notices you right beside it. The hover card says when
 its back is to you. A monster that has stood still for a couple of turns looks
 all around, so this works on things that are walking: a wandering band going

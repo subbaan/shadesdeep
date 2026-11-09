@@ -597,16 +597,17 @@ bool game_burning(Game *g, int x, int y) { return in_map(x, y) && game_level(g)-
 bool game_final(const Game *g) { return g->depth == MAX_DEPTH; }
 
 /* a monster you can make out: in view, or a shade's eyes in the dark */
-/* A monster on the move watches the way it's going, which is the way its sprite
- * faces: from the side behind it, it notices you only half as far (though always
+/* A monster on the move watches the way it's going (left or right, that's the
+ * way its sprite faces; up or down a corridor, the way it's walking): from the
+ * half of the world behind it, it notices you only half as far (though always
  * right beside it). One that has stood still a couple of turns looks all about; a
  * sleeper sees nothing anyway; shades feel your warmth and bats hear you. */
 bool game_mob_back_to(const Game *g, const Mob *m)
 {
     if (!m->alive || m->asleep || !m->moving || shadeish(m->kind) || m->kind == MK_BAT || m->kind == MK_EEL)
         return false;
-    int dx = g->player.x - m->x;
-    return m->flip ? dx > 0 : dx < 0;           /* flip: it faces left */
+    int dx = g->player.x - m->x, dy = g->player.y - m->y;
+    return dx * m->hdx + dy * m->hdy < 0;       /* you're on the far side of its heading */
 }
 
 bool game_mob_noticed(Game *g, const Mob *m)
@@ -1152,8 +1153,10 @@ static void make_noise(Game *g, int x, int y, int radius);
 /* a monster steps to (nx, ny), splashing if it's water */
 static void mob_go(Game *g, Mob *m, int nx, int ny)
 {
+    m->hdx = (int8_t)(nx > m->x ? 1 : nx < m->x ? -1 : 0);
+    m->hdy = (int8_t)(ny > m->y ? 1 : ny < m->y ? -1 : 0);
     start_tween(m, nx, ny);
-    m->moving = 2;                          /* on the move: it watches the way it's facing */
+    m->moving = 2;                          /* on the move: it watches the way it's going */
     Level *lv = game_level(g);
     Tile t = tile_at(lv, nx, ny);
     if (m->kind == MK_BAT || m->kind == MK_EEL) return;   /* on the wing, or under the surface: silent */

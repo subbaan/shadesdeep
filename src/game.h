@@ -53,6 +53,7 @@ typedef struct {
     float idle;         /* phase for idle bob */
     bool known;         /* the player has seen it before */
     uint8_t moving;     /* (padding) its own turns it still counts as on the move: set by a step */
+    int8_t hdx, hdy;    /* (padding) the way it last stepped: the way it's looking while on the move */
     int stun;           /* turns a shade is held by a sudden blaze */
     int lvl;            /* depth it was born on: deeper monsters hit harder */
     int surfaced;       /* an eel: turns it stays above the water after a lunge (0: hidden) */
