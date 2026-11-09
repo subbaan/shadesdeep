@@ -23,8 +23,11 @@ typedef struct {
     Image door;             /* TILE x (TILE + WALL_R), drawn raised */
     Image door_low;         /* TILE x (TILE + LOW_R): a door in a cut-down front wall */
     Image door_side;        /* TILE x (TILE + WALL_R): a door in a north-south wall, seen edge on */
-    Image door_open;
+    Image door_open;        /* the doorway floor, an oak sill across it */
     Image door_open_side;
+    Image door_leaf;        /* TILE x (TILE + WALL_R): an open door swung back against its left post, edge on */
+    Image door_leaf_low;    /* TILE x (TILE + LOW_R): the same in a cut-down front wall */
+    Image door_leaf_side;   /* TILE x (WALL_R + 4): an open door in a north-south wall, back against its north post */
     Image sconce;           /* bracket and torch, unlit colours */
     Image brazier;          /* forge brazier on its legs, 28 x 26; feet at the bottom */
     Image brazier_glow;     /* its coals (emissive) */

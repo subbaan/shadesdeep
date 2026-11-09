@@ -1166,6 +1166,23 @@ static void draw_door(Renderer *r, Canvas *cv, const View *v, int tx, int ty)
     draw_lit(cv, sx, sy - rz, im, TILE, TILE + rz, c00, c10, c01, c11, 0.8f, 1.0f, 0, v->fog, NULL, 0);
 }
 
+/* an open door, standing back against its post (the doorway floor is drawn with the ground) */
+static void draw_door_leaf(Renderer *r, Canvas *cv, const View *v, int tx, int ty)
+{
+    const Level *lv = v->lv;
+    int sx = tx * TILE - v->camx, sy = ty * TILE - v->camy;
+    const CF *c00 = &r->corner[ty][tx], *c10 = &r->corner[ty][tx + 1];
+    const CF *c01 = &r->corner[ty + 1][tx], *c11 = &r->corner[ty + 1][tx + 1];
+    if (tile_solid(tile_at(lv, tx, ty - 1)) && tile_solid(tile_at(lv, tx, ty + 1))) {
+        draw_lit(cv, sx, sy - WALL_R, &r->t.door_leaf_side, TILE, WALL_R + 4, c00, c10, c01, c11, 0.95f, 1.1f, 0,
+                 v->fog, NULL, 0);
+        return;
+    }
+    int rz = wall_raise(lv, tx, ty);
+    const Image *im = rz == WALL_R ? &r->t.door_leaf : &r->t.door_leaf_low;
+    draw_lit(cv, sx, sy - rz, im, TILE, TILE + rz, c00, c10, c01, c11, 0.8f, 1.0f, 0, v->fog, NULL, 0);
+}
+
 static void light_at_px(const Renderer *r, float wx, float wy, CF *o)
 {
     float fx = wx / TILE, fy = wy / TILE;
@@ -1959,10 +1976,11 @@ static void draw_rows(Renderer *r, Canvas *cv, const View *v)
         for (int tx = tx0; tx <= tx1; tx++) {
             if (!in_map(tx, ty)) continue;
             Tile t = (Tile)lv->t[ty][tx];
-            if (t != T_WALL && t != T_DOOR) continue;
+            if (t != T_WALL && t != T_DOOR && t != T_DOOR_OPEN) continue;
             if (v->fog && !(lv->f[ty][tx] & F_SEEN)) continue;
             if (t == T_WALL) draw_wall(r, cv, v, tx, ty);
-            else draw_door(r, cv, v, tx, ty);
+            else if (t == T_DOOR) draw_door(r, cv, v, tx, ty);
+            else draw_door_leaf(r, cv, v, tx, ty);
         }
         for (int i = 0; i < lv->nlights; i++)
             if (lv->lights[i].fy == ty && lv->lights[i].kind != L_PLAYER) draw_fixture(r, cv, v, &lv->lights[i]);

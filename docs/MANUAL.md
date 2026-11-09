@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.16.6. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.16.7. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -452,7 +452,9 @@ less likely.
   anything you drop in it, and drags you under if you wear mail. Goblins,
   slingers and ogres won't follow you in, but bats fly over it and eels may be
   waiting in it.
-- **Doors** block sight and light until opened. Walk into one to open it (that
+- **Doors** block sight and light until opened. An open door is drawn swung
+  back against its post, with an oak sill across the doorway, so you can tell
+  an open doorway from plain corridor. Walk into one to open it (that
   takes your move). Standing beside an open door (straight across, not on a
   diagonal), press `c` or the **Close** button to shut it again. You can't
   close it on a monster, an item, a burning torch or burning oil. If there are

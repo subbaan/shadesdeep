@@ -263,17 +263,98 @@ static void build_door_side(Image *im)
         }
 }
 
+/* The floor of an open doorway: stone posts at either end and a worn oak sill
+ * across the middle, where the door closes down on it. */
 static void build_door_open(Image *im, bool side)
 {
     build_floor(im, 2);
     for (int y = 0; y < TILE; y++)
         for (int x = 0; x < TILE; x++) {
             uint32_t c = get(im, x, y) & 0xffffff;
-            int across = side ? y : x, along = side ? x : y;
-            if (across < 3 || across >= TILE - 3) c = jitter(0x7a6d5d, (int)((fbm(x * 0.4f, y * 0.4f, 5) - 0.5f) * 30));
-            else if (along > 12 && along < 16) c = jitter(c, -30);              /* threshold */
+            int across = side ? y : x, along = side ? x : y;      /* across the doorway / along the way through */
+            if (across < 3 || across >= TILE - 3) {
+                c = jitter(0x7a6d5d, (int)((fbm(x * 0.4f, y * 0.4f, 5) - 0.5f) * 30));   /* stone posts */
+            } else if (along >= 12 && along < 20) {
+                int a = along - 12;
+                float g = fbm(across * 0.12f, a * 0.7f, 41);                        /* grain runs across */
+                c = jitter(0x704828, (int)((g - 0.5f) * 40));
+                if (a == 0) c = jitter(c, 40);                                       /* worn, lit edge */
+                else if (a == 1) c = jitter(c, 16);
+                else if (a == 7) c = jitter(c, -50);
+                if (a >= 3 && a <= 4 && (across % 9 == 6 || across % 9 == 7)) c = a == 3 ? 0x8c8680 : 0x3a3634;   /* nails */
+            } else if (along == 11 || along == 20) {
+                c = jitter(c, -45);                                                  /* the gap either side */
+            }
             put(im, x, y, A(c));
         }
+}
+
+/* An open door swung back against its left post, seen edge on: a narrow oak slab
+ * its top running the length of the doorway, its end facing us. Drawn raised. */
+static void build_door_leaf(Image *im, int raise)
+{
+    const int H = TILE + raise, x0 = 3, x1 = 9;
+    image_alloc(im, TILE, H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < TILE; x++) {
+            if (x < x0) continue;
+            if (x >= x1) {                                      /* its shadow on the doorway floor */
+                int d = x - x1 + 1;
+                if (y >= raise + 2 && d <= 4) put(im, x, y, (uint32_t)(140 - d * 30) << 24);
+                continue;
+            }
+            int e = x - x0;
+            uint32_t c;
+            if (y < TILE) {                                     /* the top edge */
+                float g = fbm(x * 0.5f, y * 0.12f, 17);
+                c = jitter(0x8a5a30, (int)((g - 0.5f) * 44));
+                if (e == 0) c = jitter(c, 34);
+                else if (e == x1 - x0 - 1) c = jitter(c, -46);
+                if (y == 6 || y == 7 || y == TILE - 8 || y == TILE - 7) c = y & 1 ? 0x4a4846 : 0x7a7874;   /* hinge straps */
+                if (y == 0) c = jitter(c, 30);
+            } else {                                            /* the end, facing us */
+                int fy = y - TILE;
+                c = jitter(0x5a3a20, (int)((fbm(x * 0.3f, fy * 0.3f, 18) - 0.5f) * 36));
+                if (fy == 0) c = 0xa87444;
+                if (e == x1 - x0 - 1) c = jitter(c, -40);
+                if (fy >= raise - 2) c = jitter(c, -30);
+            }
+            put(im, x, y, A(c));
+        }
+}
+
+/* An open door in a north-south wall, swung back flat against the doorway's north
+ * post: its face turned to us, standing where the stone face would be. TILE x (WALL_R + 4):
+ * its top edge in rows 0..3, the face below, its foot on the doorway floor. */
+static void build_door_leaf_side(Image *im)
+{
+    const int H = WALL_R + 4, x0 = 3, x1 = TILE - 3;
+    image_alloc(im, TILE, H);
+    for (int y = 0; y < H; y++)
+        for (int x = x0; x < x1; x++) {
+            uint32_t c;
+            if (y < 4) {                                        /* the top edge, from above */
+                c = jitter(0x8a5a30, (int)((fbm(x * 0.2f, y * 0.5f, 19) - 0.5f) * 36));
+                if (y == 0) c = jitter(c, 34);
+                if (y == 3) c = jitter(c, -20);
+            } else {                                            /* the face: upright planks, iron bands */
+                int fy = y - 4, p = (x - x0) / 6;
+                float g = fbm(x * 0.2f + p * 3, fy * 0.08f, 7);
+                c = jitter(0x6e4626, (int)((g - 0.5f) * 40) + (p & 1) * 6);
+                if ((x - x0) % 6 == 0) c = 0x2e1c10;
+                if (fy == 0) c = 0xa87444;                          /* lit arris under the top */
+                if (fy == 3 || fy == WALL_R - 5) c = 0x3a3836;      /* iron bands */
+                if (fy == 4 || fy == WALL_R - 4) c = 0x6a6866;
+                if (fy >= WALL_R - 2) c = jitter(c, -36);           /* its foot, in shadow */
+            }
+            if (x == x0 || x == x1 - 1) c = jitter(c, -40);
+            put(im, x, y, A(c));
+        }
+    /* an iron ring for a handle, near the free end */
+    const int rx = x1 - 6, ry = 4 + WALL_R / 2;
+    for (int dy = -2; dy <= 2; dy++)
+        for (int dx = -2; dx <= 2; dx++)
+            if (dx * dx + dy * dy >= 2 && dx * dx + dy * dy <= 5) put(im, rx + dx, ry + dy, A(dy < 0 ? 0xb0a888 : 0x4a4438));
 }
 
 /* A torch in an iron sconce: a riveted backplate on the wall, a cup on a short
@@ -959,6 +1040,9 @@ void tiles_build(Tiles *t)
     build_door_side(&t->door_side);
     build_door_open(&t->door_open, false);
     build_door_open(&t->door_open_side, true);
+    build_door_leaf(&t->door_leaf, WALL_R);
+    build_door_leaf(&t->door_leaf_low, LOW_R);
+    build_door_leaf_side(&t->door_leaf_side);
     build_sconce(&t->sconce);
     build_brazier(&t->brazier, &t->brazier_glow);
     build_crystal(&t->crystal);

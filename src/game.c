@@ -2703,6 +2703,21 @@ bool game_debug_to_spot(Game *g, int kind)
         compute_view(g);
         return true;
     }
+    if (kind == 6) {
+        /* just south of a door in an east-west wall, the level revealed */
+        for (int y = 2; y < MAP_H - 2; y++)
+            for (int x = 1; x < MAP_W - 1; x++) {
+                Tile t = (Tile)lv->t[y][x];
+                if ((t != T_DOOR && t != T_DOOR_OPEN) || !tile_solid((Tile)lv->t[y][x - 1]) || !tile_solid((Tile)lv->t[y][x + 1])
+                    || !tile_walkable((Tile)lv->t[y + 1][x]) || !mob_free(g, x, y + 1)) continue;
+                place_player(g, x, y + 1);
+                for (int yy = 0; yy < MAP_H; yy++)
+                    for (int xx = 0; xx < MAP_W; xx++) lv->f[yy][xx] |= F_SEEN;
+                compute_view(g);
+                return true;
+            }
+        return false;
+    }
     if (kind == 3 || kind == 4) {
         /* in front of a cold sconce, a shade two steps away; 4 also lights the sconce */
         for (int i = 0; i < lv->nlights; i++) {

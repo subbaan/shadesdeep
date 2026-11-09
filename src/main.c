@@ -416,9 +416,18 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         if (!ok) fprintf(stderr, "%s: no %s room on this level\n", SHADESDEEP_NAME, k);
     }
     /* SHADESDEEP_DUMP_SPOT=0..5: an east-west corridor, a side-wall door, a room's south wall,
-     * a cold sconce with a shade near (4: and light it), the Heartflame's hall (5). After SHADESDEEP_DUMP_JUMP */
+     * a cold sconce with a shade near (4: and light it), the Heartflame's hall (5),
+     * below a door in an east-west wall (6). After SHADESDEEP_DUMP_JUMP */
     if (getenv("SHADESDEEP_DUMP_SPOT") && !game_debug_to_spot(g, atoi(getenv("SHADESDEEP_DUMP_SPOT"))))
         fprintf(stderr, "%s: no such spot on this level\n", SHADESDEEP_NAME);
+    /* SHADESDEEP_DUMP_OPEN=1: every door on the level stands open (to see the open-door tiles) */
+    if (getenv("SHADESDEEP_DUMP_OPEN")) {
+        Level *dl = game_level(g);
+        for (int y = 0; y < MAP_H; y++)
+            for (int x = 0; x < MAP_W; x++)
+                if (dl->t[y][x] == T_DOOR) dl->t[y][x] = T_DOOR_OPEN;
+        dl->light_dirty = true;
+    }
     for (int i = 0; i < 120; i++) game_update(g, 1.0f / 60);
     static Hover hv;
     hv.awake = hv.tip_live = hv.tip_arm = mx >= 0;
