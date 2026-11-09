@@ -243,6 +243,22 @@ bool game_by_fire(Game *g)
 
 #define TORCHES_PER_LEVEL 0.75f    /* the paced supply of torches on the floor */
 
+/* How much sharper and tougher than the top a monster is at depth d. Full steps
+ * down to depth 9, two thirds of a step per level after that: the gear and forge
+ * upgrades you gather can't keep pace with a full step all 26 levels down. */
+static int depth_up(int d)
+{
+    if (d <= 1) return 0;
+    if (d <= 9) return d - 1;
+    return 8 + (d - 9) * 2 / 3;
+}
+
+/* a monster's health at depth d */
+static int mob_hp_at(MobKind k, int d)
+{
+    return MOB_INFO[k].hp + MOB_INFO[k].hp * depth_up(d) / 8;
+}
+
 /* who lives at depth d: rats thin out, goblins, bats, slingers and ogres come in */
 static MobKind pick_kind(Rng *r, int d)
 {
@@ -314,7 +330,7 @@ static int spawn_band(Game *g, int d, Rng *r, int x, int y)
         Mob *m = &ms[slot];
         mob_init(m, kinds[k], bx, by);
         m->lvl = d;
-        m->hp = m->maxhp = MOB_INFO[kinds[k]].hp + MOB_INFO[kinds[k]].hp * (d - 1) / 8;
+        m->hp = m->maxhp = mob_hp_at(kinds[k], d);
         m->band = (uint8_t)id;
         m->lead = made == 0;
         m->tx = m->ty = -1;         /* no destination yet */
@@ -349,7 +365,7 @@ static void spawn_mobs(Game *g, int d)
         Mob *m = &g->mobs[d][placed++];
         mob_init(m, k, x, y);
         m->lvl = d;
-        m->hp = m->maxhp = MOB_INFO[k].hp + MOB_INFO[k].hp * (d - 1) / 8;
+        m->hp = m->maxhp = mob_hp_at(k, d);
         m->asleep = k != MK_SHADE && rng_chance(&r, 65);
         m->flip = rng_chance(&r, 50);
     }
@@ -368,7 +384,7 @@ static void spawn_mobs(Game *g, int d)
         Mob *m = &g->mobs[d][placed++];
         mob_init(m, MK_EEL, x, y);
         m->lvl = d;
-        m->hp = m->maxhp = MOB_INFO[MK_EEL].hp + MOB_INFO[MK_EEL].hp * (d - 1) / 8;
+        m->hp = m->maxhp = mob_hp_at(MK_EEL, d);
         eels--;
     }
     /* special rooms: a nest full of shades, an armoury with its guards asleep among the racks */
@@ -388,7 +404,7 @@ static void spawn_mobs(Game *g, int d)
             Mob *m = &g->mobs[d][placed++];
             mob_init(m, k, x, y);
             m->lvl = d;
-            m->hp = m->maxhp = MOB_INFO[k].hp + MOB_INFO[k].hp * (d - 1) / 8;
+            m->hp = m->maxhp = mob_hp_at(k, d);
             m->asleep = k != MK_SHADE && rng_chance(&r, 80);
             m->flip = rng_chance(&r, 50);
             want--;
@@ -428,7 +444,7 @@ static void spawn_mobs(Game *g, int d)
             } else {
                 mob_init(m, MK_SHADE, x, y);
                 m->lvl = d;
-                m->hp = m->maxhp = MOB_INFO[MK_SHADE].hp + MOB_INFO[MK_SHADE].hp * (d - 1) / 8;
+                m->hp = m->maxhp = mob_hp_at(MK_SHADE, d);
             }
             m->flip = rng_chance(&r, 50);
             want--;
@@ -672,6 +688,7 @@ Game *game_new(uint32_t seed)
     g->weapon = (Slot){ IT_SWORD, 1, 0 };
     g->armour = (Slot){ IT_LEATHER, 1, 0 };
     g->deepest = 1;
+    g->hp_low = g->player.hp;
     game_msg(g, C_INFO, "far below, at depth %d, the Heartflame has gone cold. Carry fire down to it.", MAX_DEPTH);
     game_msg(g, C_INFO, "you descend into the dark. Light is precious down here.");
     game_msg(g, C_DIM, "click to travel, x explores, ? for help.");
@@ -755,7 +772,7 @@ static void mob_stats(Game *g, const Mob *m, int *acc, int *dmin, int *dmax, int
         *def = mi->def + game_armour_def(&g->armour);
         return;
     }
-    int up = m->lvl > 1 ? m->lvl - 1 : 0;      /* deeper monsters are a little sharper */
+    int up = depth_up(m->lvl);                  /* deeper monsters are a little sharper */
     *acc = mi->acc + up * 2;
     *dmin = mi->dmin + up / 5;
     *dmax = mi->dmax + up / 3;
@@ -772,6 +789,16 @@ static void ember(Game *g, int n, const char *why)
 
 static void hearth_light(Game *g);
 static void band_alert(Game *g, const Mob *m, int x, int y);
+
+/* the player loses dmg HP, from a monster of kind k (MK_PLAYER: anything else) */
+static void hurt_note(Game *g, MobKind k, int dmg)
+{
+    if (dmg <= 0) return;
+    if (k > MK_PLAYER && k < MK_COUNT) g->dmg_by[k] += dmg;
+    else g->dmg_other += dmg;
+    int left = g->player.hp - dmg;
+    if (left < g->hp_low) g->hp_low = left < 0 ? 0 : left;
+}
 
 /* returns true if it hit */
 static bool attack(Game *g, Mob *a, Mob *d)
@@ -819,6 +846,7 @@ static bool attack(Game *g, Mob *a, Mob *d)
         g->warm_t = 0;
         if (d->hp > game_max_hp(g)) d->hp = game_max_hp(g);
     }
+    if (pl_def) hurt_note(g, a->kind, dmg);
     d->hp -= dmg;
     d->flash = 1.0f;
     sfx_ex(g, pl_def ? SND_HURT : SND_HIT, d->x, d->y, false, 0.06f, 1);
@@ -1266,6 +1294,7 @@ static void sling(Game *g, Mob *m)
         return;
     }
     int dmg = rng_range(&g->rng, dmin, dmax);
+    hurt_note(g, m->kind, dmg);
     p->hp -= dmg;
     p->flash = 1.0f;
     g->shake = 0.3f;
@@ -1484,6 +1513,7 @@ static void fire_harm(Game *g)
     Mob *p = &g->player;
     if (g->state == GS_DEAD || !lv->burn[p->y][p->x]) return;
     int dmg = rng_range(&g->rng, 2, 4);
+    hurt_note(g, MK_PLAYER, dmg);
     p->hp -= dmg;
     p->flash = 1;
     g->shake = 0.25f;
@@ -1677,6 +1707,7 @@ static void arrive(Game *g)
 {
     if (g->depth <= g->deepest) return;
     g->deepest = g->depth;
+    g->hp_low = g->player.hp;
     if (game_final(g)) {
         game_msg(g, C_WARN, "the cold here bites to the bone. This is the bottom of the world: somewhere on this level "
                  "lies the Heartflame's hearth.");
@@ -1752,6 +1783,7 @@ static void spring_trap(Game *g, int x, int y)
         break;
     case TR_SNARE:
         g->snare = rng_range(&g->rng, 3, 4);
+        hurt_note(g, MK_PLAYER, 1);
         p->hp -= 1;
         p->flash = 1;
         floater(g, x, y, 0xff5a4a, "1");
@@ -2123,6 +2155,7 @@ bool game_move(Game *g, int dx, int dy)
             }
             if (mail) {
                 int dmg = rng_range(&g->rng, 2, 3);
+                hurt_note(g, MK_PLAYER, dmg);
                 p->hp -= dmg;
                 p->flash = 1;
                 char tx[16];
@@ -2225,6 +2258,7 @@ static void fall_to(Game *g, int fx, int fy)
             game_msg(g, C_INFO, "you plunge into the water below, which breaks your fall.");
         }
     }
+    hurt_note(g, MK_PLAYER, dmg);
     p->hp -= dmg;
     p->flash = 1.0f;
     g->shake = 0.6f;
@@ -3250,6 +3284,7 @@ bool game_use(Game *g, int slot)
         return true;
     case IT_POTION: {
         take_one(g, slot);
+        g->potions_drunk++;
         int heal = 15;
         if (p->hp + heal > game_max_hp(g)) heal = game_max_hp(g) - p->hp;
         p->hp += heal;

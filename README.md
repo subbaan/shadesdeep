@@ -7,7 +7,7 @@ hover descriptions and clickable actions.
 
 ![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
 
-Version: 0.16.1 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.16.2 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -74,7 +74,9 @@ sound; if no audio device opens, the game runs silent.
   ended, how deep you got, turns, embers, kills and the date, best first.
   The closing screen tells you where the run stands, and
   `shadesdeep --hall-of-fame` prints the table in the terminal. Put a picture
-  at `assets/title.png` and the title screen uses it.
+  at `assets/title.png` and the title screen uses it. A run log for balance
+  tuning (`runlog.txt`, same folder) gets a line of stats on each new depth and
+  at the end of each run.
 - **Map:** `m` (or the Map button) shows the whole explored level, drawn
   with the game's own graphics: you, the stairs and any creatures you can make
   out are marked. Click a place on it to travel there.

@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "fame.h"
+#include "runlog.h"
 #include "game.h"
 #include "gfx.h"
 #include "kgfx.h"
@@ -821,6 +822,18 @@ int main(int argc, char **argv)
     if (save_path[0]) fame_path_for(save_path, fame_path, sizeof fame_path);
     static FameEntry fame_list[FAME_MAX], fame_mine;
     int fame_n = 0;
+    /* the run log, for tuning: a line on each new depth and one at the end */
+    char run_path[PATH_MAX + 32] = "";
+    if (save_path[0]) runlog_path_for(save_path, run_path, sizeof run_path);
+    int run_logged = resumed ? g->deepest : 0;  /* deepest level written down so far (0: not started) */
+    bool run_warned = false;
+#define RUNLOG(ev) do { \
+        char rerr_[PATH_MAX + 64]; \
+        if (run_path[0] && !runlog_write(run_path, g, (ev), rerr_, sizeof rerr_) && !run_warned) { \
+            fprintf(stderr, "%s: %s\n", SHADESDEEP_NAME, rerr_); \
+            run_warned = true; \
+        } \
+    } while (0)
     Image title_art = { 0 };
     {
         char tp[PATH_MAX + 16];
@@ -916,9 +929,11 @@ int main(int argc, char **argv)
                             fame_from_game(g, FAME_ABANDONED, &e);
                             if (!fame_add(fame_path, &e, ferr, sizeof ferr)) fprintf(stderr, "%s: %s\n", SHADESDEEP_NAME, ferr);
                         }
+                        if (run_logged) RUNLOG("gaveup");
                         save_remove(save_path);
                         game_free(g);
                         g = game_new((uint32_t)time(NULL) ^ seed++);
+                        run_logged = 0;
                         save_gone = false;
                         saved_depth = g->depth;
                         render_camera(r, g, fr.world.w, fr.world.h, 0, true);
@@ -1039,6 +1054,7 @@ int main(int argc, char **argv)
         if (over && !save_gone) {
             save_remove(save_path);             /* death is final, and so is the end */
             save_gone = true;
+            RUNLOG(g->state == GS_WON ? "won" : "died");
             if (fame_path[0]) {
                 char ferr[PATH_MAX + 64];
                 fame_from_game(g, g->state == GS_WON ? FAME_WON : FAME_DIED, &fame_mine);
@@ -1046,6 +1062,9 @@ int main(int argc, char **argv)
                 if (!ctl.fame_rank) game_msg(g, C_WARN, "%s.", ferr);
                 fame_n = fame_load(fame_path, fame_list, FAME_MAX, &ctl.fame_total);
             }
+        } else if (!over && scr == SCR_PLAY && g->deepest > run_logged) {
+            RUNLOG(run_logged ? "level" : "start");
+            run_logged = g->deepest;
         } else if (!over && g->depth != saved_depth && !busy) {
             save_now(g, save_path, save_err, sizeof save_err);   /* a new level: keep the run safe */
             saved_depth = g->depth;
@@ -1060,6 +1079,7 @@ int main(int argc, char **argv)
                 bool to_title = pr[K_ESC] || click == UA_TITLE;
                 game_free(g);
                 g = game_new((uint32_t)time(NULL) ^ seed++);
+                run_logged = 0;
                 save_gone = false;
                 saved_depth = g->depth;
                 ctl.fame_rank = 0;

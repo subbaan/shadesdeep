@@ -214,6 +214,11 @@ typedef struct {
     int sconces_lit;                    /* sconces lit by hand */
     int snare;                          /* turns of struggling left to get out of a snare */
     int trap_x, trap_y;                 /* known trap the player was warned about (move again to step on it) */
+    /* for the run log (balance tuning): where the player's health went */
+    int dmg_by[MK_COUNT];               /* damage taken from each kind of monster, over the run */
+    int dmg_other;                      /* from falls, fire, snares and swimming in mail */
+    int potions_drunk;
+    int hp_low;                         /* lowest HP since first reaching the deepest level */
     FloorItem items[MAX_DEPTH + 2][MAX_ITEMS];
     Projectile proj;
     Fx fx[MAX_FX];

@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.16.1. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.16.2. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -263,7 +263,9 @@ sleeping monster may stir. That's far more likely in the light than in the
 dark: right beside it, about 3 in 10 with a light on you, but only about 1 in 8
 in the dark. A shadow cloak halves the chance. So snuff your torch, step out of
 the lamplight, and come in quietly. Wading and mail still make noise. Deeper monsters are a little
-tougher: more health and a bit more accuracy and damage per depth.
+tougher: more health and a bit more accuracy and damage per depth. Below depth 9
+that climb slows to two thirds of its pace, so the forge and the gear you find
+can keep up all the way down.
 
 ---
 
@@ -584,6 +586,11 @@ The hall is kept next to the save, in `~/.local/share/shadesdeep/halloffame.txt`
 It's plain text, one run per line. Lines are only ever added, so nothing in it
 is lost. `shadesdeep --hall-of-fame` prints it in the terminal. Games played
 with `--no-save` aren't recorded.
+
+Beside it, `runlog.txt` keeps a line of numbers each time a run reaches a new
+depth and one when it ends: health, gear, embers, potions, and how much damage
+each kind of monster has done to you. The game never reads it; it's there so
+the difficulty can be tuned from real runs. It's safe to delete.
 
 ---
 
