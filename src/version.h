@@ -2,6 +2,6 @@
 #define VERSION_H
 
 #define SHADESDEEP_NAME    "shadesdeep"
-#define SHADESDEEP_VERSION "0.15.1"
+#define SHADESDEEP_VERSION "0.15.2"
 
 #endif

@@ -7,7 +7,7 @@ hover descriptions and clickable actions.
 
 ![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
 
-Version: 0.15.1 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.15.2 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -29,6 +29,9 @@ sound; if no audio device opens, the game runs silent.
   has gone cold. Carry fire down to it: walk into its hearth with a lit
   torch three times, while the Hollow (the great shade that put it
   out) tries to smother it. Win or lose, a closing screen sums up the run.
+- **Sneak attacks:** any blow on a monster that hasn't noticed you (asleep,
+  dazzled, or not hunting you) always lands, for triple damage. Sleepers stir
+  as you come close, much less often in the dark or in a shadow cloak.
 - **Traps and special rooms:** from depth 2, hidden alarm plates, draught
   vents, trapdoors and snares (a lit torch helps you spot them; known ones are
   marked and travel goes around them), and now and then a trapped storeroom,
@@ -118,7 +121,7 @@ sound; if no audio device opens, the game runs silent.
   Open Items, pick a weapon or armour and press Wield / Wear (the old piece
   goes back in your pack). The item card shows its numbers next to yours.
   - *Short sword* (you start with it): steady, accurate, no tricks.
-  - *Dagger*: triple damage on anything that hasn't noticed you.
+  - *Dagger*: its sneak attacks do five times the damage instead of three.
   - *Spear*: every thrust also hits whatever stands behind your target.
   - *Axe*: hits every foe around you, but is harder to aim.
   - *Mace*: knocks the foe back a step: into a wall for extra harm, into
@@ -176,7 +179,9 @@ title screen (fresh, with a saved game, asking to give it up), with
 the hall of fame in FILE with RANK picked out. `SHADESDEEP_DUMP_HP=N` sets your hit points
 and `SHADESDEEP_DUMP_FAMEADD=FILE` writes a finished run into FILE (with
 `SHADESDEEP_DUMP_MOBS="goblin,1,0"` and `SHADESDEEP_DUMP_REST=20`, a quick death to test with).
-`SHADESDEEP_DUMP_WADE=1` reports how many of the `--steps` tour's steps waded.
+`SHADESDEEP_DUMP_WADE=1` reports how many of the `--steps` tour's steps waded. A `~` after a creature's name in `SHADESDEEP_DUMP_MOBS` puts it there
+asleep, `SHADESDEEP_DUMP_STRIKE=dx,dy[,N]` steps (attacks) that way N times, and
+`SHADESDEEP_DUMP_WIELD=1` wields the last piece `SHADESDEEP_DUMP_GEAR` added.
 
 The title picture is `assets/title.png`, any size (16:9 such as 1920x1080 is
 best). It's scaled to cover the window, cropped evenly if the shapes differ,

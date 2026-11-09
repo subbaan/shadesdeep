@@ -451,6 +451,8 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
             q = e + 1;
         }
     }
+    /* SHADESDEEP_DUMP_WIELD=1: wield (or wear) the last piece SHADESDEEP_DUMP_GEAR added */
+    if (getenv("SHADESDEEP_DUMP_WIELD") && g->ninv > 0) game_use(g, g->ninv - 1);
     /* SHADESDEEP_DUMP_ITEMS="kind,count;...": put things in the pack (kinds: oil flash salt warmth potion dart torch) */
     if (getenv("SHADESDEEP_DUMP_ITEMS")) {
         static const struct { const char *n; ItemKind k; } N[] = {
@@ -491,16 +493,32 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         while (sscanf(s, "%23[^,],%d,%d%n", nm, &sx, &sy, &used) == 3) {
             bool up = nm[strlen(nm) - 1] == '+';
             if (up) nm[strlen(nm) - 1] = 0;
+            bool zz = nm[0] && nm[strlen(nm) - 1] == '~';     /* "goblin~": asleep */
+            if (zz) nm[strlen(nm) - 1] = 0;
             int k = MK_COUNT;
             for (int i = 1; i < MK_COUNT; i++)
                 if (!strcmp(nm, MOB_INFO[i].name) || (i == MK_SLINGER && !strcmp(nm, "slinger"))) k = i;
             if (k == MK_COUNT || !game_debug_spawn(g, (MobKind)k, g->player.x + sx, g->player.y + sy))
                 fprintf(stderr, "%s: can't put a %s at %+d,%+d\n", SHADESDEEP_NAME, nm, sx, sy);
             else if (up) game_mob_at(g, g->player.x + sx, g->player.y + sy)->surfaced = 3;
+            if (zz && game_mob_at(g, g->player.x + sx, g->player.y + sy)) {
+                Mob *zm = game_mob_at(g, g->player.x + sx, g->player.y + sy);
+                zm->asleep = true;
+                zm->hunting = false;
+            }
             s += used;
             if (*s != ';') break;
             s++;
         }
+    }
+    /* SHADESDEEP_DUMP_STRIKE=dx,dy[,N]: step (attack) that way N times */
+    {
+        int sdx, sdy, sn = 1;
+        if (getenv("SHADESDEEP_DUMP_STRIKE") && sscanf(getenv("SHADESDEEP_DUMP_STRIKE"), "%d,%d,%d", &sdx, &sdy, &sn) >= 2)
+            for (int i = 0; i < sn && g->state == GS_PLAY; i++) {
+                game_move(g, sdx, sdy);
+                for (int k = 0; k < 30 && game_busy(g); k++) game_update(g, 1.0f / 30);
+            }
     }
     /* SHADESDEEP_DUMP_HP=N: the player's hit points (to test dying) */
     if (getenv("SHADESDEEP_DUMP_HP")) g->player.hp = atoi(getenv("SHADESDEEP_DUMP_HP"));

@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.15.1. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.15.2. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -235,7 +235,19 @@ you warm up:
 | **Eel** | From depth 2, in pools of deep water. It lurks **unseen** under the surface (now and then a ripple gives it away) and lunges at anything swimming near it or standing **on the bank beside it**. Once it has bitten it stays up for a turn or two, long enough to hit back, then slips under again. It never leaves the water. |
 
 Monsters may be asleep. Noise (splashing, a thrown torch or dart landing, mail
-jingling) wakes them and draws them to look. Deeper monsters are a little
+jingling) wakes them and draws them to look.
+
+**Sneak attacks.** A monster that hasn't noticed you can't defend itself. That
+means one that's asleep, dazzled, or awake but not hunting you. Your blow
+**always lands and does triple damage** with any weapon. A dagger does **five
+times** the damage. The first blow alerts it, so you get one free strike; make it
+count. The Hollow is never caught unawares.
+
+**Creeping up on a sleeper:** each turn you're close and in its sight, a
+sleeping monster may stir. That's far more likely in the light than in the
+dark: right beside it, about 3 in 10 with a light on you, but only about 1 in 8
+in the dark. A shadow cloak halves the chance. So snuff your torch, step out of
+the lamplight, and come in quietly. Wading and mail still make noise. Deeper monsters are a little
 tougher: more health and a bit more accuracy and damage per depth.
 
 ---
@@ -287,7 +299,8 @@ A thrown twist of flash powder goes off where it lands in a blinding flash.
 - **Everything within 5 tiles that has a clear line to the flash is dazzled**
   for 3–4 turns (2 for an ogre): it can't act, it loses track of you, and it
   wakes up if it was asleep. While a monster is dazzled your blows and darts
-  **always hit**, and a dagger does its triple damage.
+  **always hit**, and every blow is a sneak attack: triple damage, or five
+  times with a dagger.
 - **Shades are scorched** by it for 4–8. They still feel your warmth, though.
 - **You see the room** it lights, as if you'd explored it.
 - **The bang carries**: things up to 8 tiles away come to look.
@@ -322,7 +335,7 @@ card shows the piece's numbers next to yours.
 | Weapon | Hit | Damage | Special |
 |---|---|---|---|
 | **Short sword** *(you start with it)* | 85 | 2–5 | Steady and accurate. No tricks. |
-| **Dagger** | 95 | 1–3 | **Triple damage** on anything that hasn't noticed you: asleep, or not hunting you. Weak in an open fight. |
+| **Dagger** | 95 | 1–3 | Its [sneak attacks](#other-monsters) do **five times** the damage, not three: on anything asleep, dazzled, or not hunting you. Weak in an open fight. |
 | **Spear** | 80 | 2–5 | Each thrust **also hits whatever stands behind** your target. |
 | **Axe** | 72 | 2–5 | **Hits every foe around you** at once. Harder to aim. |
 | **Mace** | 70 | 3–6 | **Knocks the foe back** a step: into a wall for extra damage, into deep water, or over the edge of a chasm onto the level below. A knocked-back foe spends its next turn stepping back in. |
@@ -546,8 +559,9 @@ with `--no-save` aren't recorded.
   you faster and clears the chill.
 - **A thrown torch isn't lost.** It lights a room from a distance, sears a
   shade, or lures monsters with its noise, and you can pick it back up.
-- **Daggers love the dark.** In a shadow cloak, sleeping and wandering monsters
-  rarely notice you before the dagger lands.
+- **Strike first, in the dark.** With your torch snuffed, most sleepers stay
+  asleep until your blow lands, and that blow does triple damage with any weapon.
+  A dagger and a shadow cloak make it five times, and they rarely wake first.
 - **A mace by a chasm** sends monsters to the level below.
 - **Fight slingers in the dark.** Snuff your torch and close in through the
   shadows; they can't aim at what they can't see. Or duck round a corner and

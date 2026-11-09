@@ -48,7 +48,7 @@ const ItemInfo ITEM_INFO[IT_COUNT] = {
                     0, true, GEAR_WEAPON, 85, 2, 5, 0 },
     [IT_DAGGER] = { "dagger", "daggers",
                     "A slim blade for quiet work. A foe that hasn't noticed you (asleep, or not hunting you) "
-                    "takes triple damage. Weak in an open fight.",
+                    "takes five times the damage, not the usual three. Weak in an open fight.",
                     0, true, GEAR_WEAPON, 95, 1, 3, 0 },
     [IT_SPEAR]  = { "spear", "spears",
                     "Long reach: every thrust also strikes whatever stands behind your target.",
@@ -691,7 +691,10 @@ static bool attack(Game *g, Mob *a, Mob *d)
     int acc, dmin, dmax, def, x0, x1, x2;
     mob_stats(g, a, &acc, &dmin, &dmax, &x0);
     mob_stats(g, d, &x0, &x1, &x2, &def);
-    bool unaware = !pl_def && (d->asleep || !d->hunting || d->daze > 0);
+    /* a sneak attack: on anything asleep, dazzled, or not yet hunting you. It always
+     * lands, for triple damage (a dagger's, quintuple). The Hollow is never caught napping. */
+    bool unaware = pl_att && d->kind != MK_HOLLOW && (d->asleep || !d->hunting || d->daze > 0);
+    bool was_asleep = d->asleep;
     a->bump = 1.0f;
     a->bdx = d->x - a->x;
     a->bdy = d->y - a->y;
@@ -701,7 +704,7 @@ static bool attack(Game *g, Mob *a, Mob *d)
     if (d->kind == MK_EEL && d->surfaced < 2) d->surfaced = 2;      /* struck: it shows itself */
     if (a->bdx) a->flip = a->bdx < 0;
     int chance = acc - def;
-    if (d->asleep || d->daze > 0) chance = 100;
+    if (d->asleep || d->daze > 0 || unaware) chance = 100;
     d->asleep = false;
     if (!pl_def) { d->hunting = true; d->tx = a->x; d->ty = a->y; }
     if ((int)(rng_u32(&g->rng) % 100) >= chance) {
@@ -711,8 +714,8 @@ static bool attack(Game *g, Mob *a, Mob *d)
         return false;
     }
     int dmg = rng_range(&g->rng, dmin, dmax);
-    bool sneak = pl_att && g->weapon.kind == IT_DAGGER && unaware;
-    if (sneak) dmg *= 3;
+    bool sneak = unaware;
+    if (sneak) dmg *= g->weapon.kind == IT_DAGGER ? 5 : 3;
     int chill = 0;
     bool warded = false;
     if (shadeish(a->kind) && pl_def && g->warm_left > 0) {
@@ -730,8 +733,12 @@ static bool attack(Game *g, Mob *a, Mob *d)
     d->flash = 1.0f;
     sfx_ex(g, pl_def ? SND_HURT : SND_HIT, d->x, d->y, false, 0.06f, 1);
     char t[16];
-    snprintf(t, sizeof t, "%d", dmg);
-    floater(g, d->x, d->y, pl_def ? 0xff5a4a : 0xffd27a, t);
+    snprintf(t, sizeof t, sneak ? "%d!" : "%d", dmg);
+    floater(g, d->x, d->y, pl_def ? 0xff5a4a : sneak ? 0xffb030 : 0xffd27a, t);
+    if (sneak) {                        /* make it land like one */
+        g->shake = 0.45f;
+        sfx_ex(g, SND_THUD, d->x, d->y, false, 0.03f, 1.15f);
+    }
     if (pl_def) {
         g->shake = a->kind == MK_OGRE ? 0.7f : 0.35f;
         if (a->kind == MK_OGRE) sfx_ex(g, SND_THUD, d->x, d->y, false, 0.08f, 0.9f);
@@ -762,11 +769,16 @@ static bool attack(Game *g, Mob *a, Mob *d)
     }
     if (d->hp <= 0) {
         kill_mob(g, d);
-        game_msg(g, C_GOOD, sneak ? "you strike the unaware %s dead!" : "you slay the %s!", di->name);
+        if (sneak) game_msg(g, C_GOOD, was_asleep ? "you slay the sleeping %s before it stirs!"
+                                              : "you catch the %s unawares and cut it down!", di->name);
+        else game_msg(g, C_GOOD, "you slay the %s!", di->name);
         if (shadeish(d->kind)) { push_fx(g, FX_DISSOLVE, d->x, d->y); sfx(g, SND_DISSOLVE, d->x, d->y); }
         else sfx_ex(g, SND_KILL, d->x, d->y, false, 0.1f, 1);
     } else {
-        game_msg(g, C_TEXT, sneak ? "you strike the unaware %s!" : "you hit the %s.", di->name);
+        if (sneak) game_msg(g, C_GOOD, was_asleep ? "you strike the sleeping %s a savage blow (x%d)!"
+                                              : "you catch the %s unawares (x%d)!", di->name,
+                            g->weapon.kind == IT_DAGGER ? 5 : 3);
+        else game_msg(g, C_TEXT, "you hit the %s.", di->name);
     }
     return true;
 }
@@ -1088,7 +1100,9 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
     }
     bool sees = dist <= range && los(lv, m->x, m->y, p->x, p->y);
     if (m->asleep) {
-        int pct = !sees ? 0 : dist <= 2 ? 45 : 20;
+        /* a sleeper stirs as you come near, more surely in the light; a shadow cloak muffles you */
+        int pct = !sees ? 0 : dist <= 1 ? (lit ? 30 : 12) : dist <= 2 ? (lit ? 22 : 8) : 10;
+        if (cloak) pct /= 2;
         if (pct && (int)(rng_u32(&g->rng) % 100) < pct) {
             m->asleep = false;
             m->hunting = true;
