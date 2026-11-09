@@ -535,7 +535,9 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     /* SHADESDEEP_DUMP_USE=1: use the first item in the pack (after the creatures are placed) */
     if (getenv("SHADESDEEP_DUMP_USE")) game_use(g, 0);
     if (getenv("SHADESDEEP_DUMP_THROW") && sscanf(getenv("SHADESDEEP_DUMP_THROW"), "%d,%d,%f", &adx, &ady, &frac) >= 2) {
-        if (game_throw(g, 0, g->player.x + adx, g->player.y + ady))
+        /* SHADESDEEP_DUMP_SLOT=N: throw the pack's Nth item instead of the first */
+        int tslot = getenv("SHADESDEEP_DUMP_SLOT") ? atoi(getenv("SHADESDEEP_DUMP_SLOT")) : 0;
+        if (game_throw(g, tslot, g->player.x + adx, g->player.y + ady))
             while (g->proj.active && g->proj.pos < g->proj.n * frac) game_update(g, 1.0f / 240);
         if (frac >= 1) for (int i = 0; i < 60; i++) game_update(g, 1.0f / 60);
     }
@@ -552,6 +554,16 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         game_search(g);
         for (int i = 0; i < 400 && g->autom == AUTO_SEARCH; i++) game_update(g, 1.0f / 30);
         if (getenv("SHADESDEEP_DUMP_BANDS")) break;
+    }
+    /* SHADESDEEP_DUMP_MSGS=1: print the message log */
+    if (getenv("SHADESDEEP_DUMP_MSGS"))
+    {
+        for (int i = 0; i < g->nmsgs; i++) fprintf(stderr, "msg: %s\n", g->msgs[i].text);
+        Mob *dm = game_mobs(g, g->depth);       /* and who's about, within 8 tiles */
+        for (int i = 0; i < MAX_MOBS; i++)
+            if (dm[i].alive && abs(dm[i].x - g->player.x) <= 8 && abs(dm[i].y - g->player.y) <= 8)
+                fprintf(stderr, "mob: %s at %+d,%+d hp %d/%d%s\n", MOB_INFO[dm[i].kind].name, dm[i].x - g->player.x,
+                        dm[i].y - g->player.y, dm[i].hp, dm[i].maxhp, game_burning(g, dm[i].x, dm[i].y) ? " (in fire)" : "");
     }
     /* SHADESDEEP_DUMP_BANDS=1: say how many wandering bands are on the level */
     if (getenv("SHADESDEEP_DUMP_BANDS")) {

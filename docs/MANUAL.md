@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.16.2. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.16.3. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -302,9 +302,13 @@ and leaves soot.
   beside them does. Its warmth also clears the chill.
 - **Nothing walks into it willingly.** Goblins, rats, ogres and bats all go
   round, so a burning doorway or corridor holds a chase off for a while.
-- **It sears whatever stands in it** for 2–4 a turn. A monster caught in it
-  steps out on its next turn (unless it's dazzled). Walking into it yourself
-  asks first: move again to go through.
+- **The burst engulfs everything in the splash** for 3–5 (a little more
+  deeper down: +1 for every three levels' worth of monster toughness). Then
+  it burns them once more, for 2–4 (with the same deep bonus), before they can
+  scramble out on their own turn. A pack bunched up together takes all of it.
+- **It sears whatever stands in it** for 2–4 a turn (you included). A monster
+  caught in it steps out on its next turn, unless it's dazzled, in which case it
+  keeps burning. Walking into it yourself asks first: move again to go through.
 - **It burns on water too**, shallow or deep.
 - **Into a chasm**, it lands and burns on the level below.
 - The landing makes a little noise.
@@ -627,6 +631,8 @@ the difficulty can be tuned from real runs. It's safe to delete.
   around.
 - **Flash, then strike.** A dazzled monster can't fight back, and every blow
   lands. With a dagger, a flash turns a fight into an ambush.
+- **Flash, then oil.** Dazzled monsters don't step out of the fire, so a
+  flash followed by an oil flask on the same pack burns them turn after turn.
 - **Burn the doorway behind you.** Oil thrown into a doorway or corridor
   you've just come through stops anything following you, shades included,
   for a dozen turns or so.

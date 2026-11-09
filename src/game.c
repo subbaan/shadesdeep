@@ -1493,7 +1493,7 @@ static void fire_harm(Game *g)
     for (int i = 0; i < MAX_MOBS; i++) {
         Mob *m = &ms[i];
         if (!m->alive || shadeish(m->kind) || game_mob_hidden(m) || !lv->burn[m->y][m->x]) continue;
-        int dmg = rng_range(&g->rng, 2, 4);
+        int dmg = rng_range(&g->rng, 2, 4) + depth_up(g->depth) / 3;
         bool seen = lv->f[m->y][m->x] & F_VIS;
         m->hp -= dmg;
         m->flash = 1;
@@ -1554,8 +1554,8 @@ static void end_turn(Game *g)
     }
     burn_floor_torches(g, g->depth);
     burn_floor_torches(g, g->depth + 1);
-    monsters_act(g);
-    if (g->state != GS_DEAD) fire_harm(g);
+    fire_harm(g);                       /* anything standing in burning oil burns before it can scramble out */
+    if (g->state != GS_DEAD) monsters_act(g);
     burn_tick(g, g->depth);
     burn_tick(g, g->depth + 1);
     if (g->warm_left > 0 && --g->warm_left == 0) game_msg(g, C_WARN, "the warming draught's glow fades; the cold can find you again.");
@@ -2930,6 +2930,13 @@ static void make_noise(Game *g, int x, int y, int radius)
     }
 }
 
+/* what burning oil does to a monster caught in it: a little more deeper down,
+ * so it keeps up with their health */
+static int oil_damage(Game *g, int depth)
+{
+    return rng_range(&g->rng, 3, 5) + depth_up(depth) / 3;
+}
+
 /* An oil flask bursts at (x, y) of `depth`: burning oil on it and most of the
  * ground around it (on water too; not past a wall's corner, not down a chasm). */
 static void ignite_oil(Game *g, int depth, int x, int y)
@@ -2946,6 +2953,30 @@ static void ignite_oil(Game *g, int depth, int x, int y)
             int turns = dx || dy ? rng_range(&g->rng, 9, 13) : rng_range(&g->rng, 13, 16);
             if (!dx && !dy) centre = turns;
             if (lv->burn[Y][X] < turns) lv->burn[Y][X] = (uint8_t)turns;
+            /* whatever the oil splashes over is engulfed as it goes up */
+            Mob *ms = g->mobs[depth];
+            for (int i = 0; i < MAX_MOBS; i++) {
+                Mob *m = &ms[i];
+                if (!m->alive || m->x != X || m->y != Y || shadeish(m->kind) || game_mob_hidden(m)) continue;
+                int dmg = oil_damage(g, depth);
+                m->hp -= dmg;
+                m->flash = 1;
+                m->asleep = false;
+                if (depth != g->depth) { if (m->hp <= 0) kill_mob(g, m); continue; }
+                bool seen = lv->f[Y][X] & F_VIS;
+                char t[16];
+                snprintf(t, sizeof t, "%d", dmg);
+                floater(g, X, Y, 0xffa040, t);
+                push_fx(g, FX_BURN, X, Y);
+                if (m->hp <= 0) {
+                    kill_mob(g, m);
+                    sfx(g, SND_KILL, X, Y);
+                    if (seen) game_msg(g, C_GOOD, "the %s dies in the flames!", MOB_INFO[m->kind].name);
+                } else {
+                    if (seen) game_msg(g, C_TEXT, "the %s is engulfed in burning oil!", MOB_INFO[m->kind].name);
+                    vocal(g, m);
+                }
+            }
         }
     if (!centre) return;
     Light *l = NULL;
@@ -3144,19 +3175,10 @@ static void resolve_throw(Game *g)
         }
         sfx_ex(g, SND_IGNITE, x, y, false, 0.05f, 1.0f);
         bool wet = tile_water((Tile)lv->t[y][x]);
-        if (m && !shadeish(m->kind)) {
-            int dmg = rng_range(&g->rng, 1, 2);
-            m->hp -= dmg;
-            m->flash = 1;
-            m->asleep = false;
-            snprintf(t, sizeof t, "%d", dmg);
-            floater(g, x, y, 0xffa040, t);
-            if (m->hp <= 0) { kill_mob(g, m); sfx(g, SND_KILL, x, y); game_msg(g, C_GOOD, "the flask bursts over the %s and it dies in the flames!", mn); m = NULL; }
-            else game_msg(g, C_TEXT, "the flask bursts over the %s and it is engulfed in burning oil!", mn);
-        } else {
-            game_msg(g, C_TEXT, wet ? "the flask bursts, and burning oil spreads across the water." : "the flask bursts into a pool of burning oil.");
-        }
-        ignite_oil(g, g->depth, x, y);
+        if (m && !shadeish(m->kind)) game_msg(g, C_TEXT, "the flask bursts over the %s!", mn);
+        else game_msg(g, C_TEXT, wet ? "the flask bursts, and burning oil spreads across the water." : "the flask bursts into a pool of burning oil.");
+        ignite_oil(g, g->depth, x, y);         /* engulfs everything in the splash */
+        if (m && !m->alive) m = NULL;
         make_noise(g, x, y, 4);
         break;
     }
