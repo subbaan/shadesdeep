@@ -577,7 +577,8 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         snprintf(desc, sizeof desc, "%s%s", MOB_INFO[m->kind].desc,
                  m->daze > 0 ? " It reels, dazzled: it can't act, and a blow will find it."
                  : m->kind == MK_SHADE && game_firelight(g, g->player.x, g->player.y) > SHADE_FEAR ? " It hangs back from your light."
-                 : m->asleep ? " It is asleep." : m->hunting ? " It is hunting you." : " It hasn't noticed you.");
+                 : m->asleep ? " It is asleep." : m->hunting ? " It is hunting you."
+                 : game_mob_back_to(g, m) ? " It hasn't noticed you, and its back is to you." : " It hasn't noticed you.");
         snprintf(hint, sizeof hint, "Click to attack");
     } else if (m && game_mob_noticed(g, m)) {
         snprintf(title, sizeof title, "Eyes in the dark");

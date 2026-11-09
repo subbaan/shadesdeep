@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.16.3. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.16.4. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -257,6 +257,15 @@ means one that's asleep, dazzled, or awake but not hunting you. Your blow
 **always lands and does triple damage** with any weapon. A dagger does **five
 times** the damage. The first blow alerts it, so you get one free strike; make it
 count. The Hollow is never caught unawares.
+
+**Coming up from behind.** A monster on the move watches the way it's going,
+which is the way its picture faces. Approach from the side it has turned its
+back on and it notices you from only **half as far** (in the light or the
+dark), though it always notices you right beside it. The hover card says when
+its back is to you. A monster that has stood still for a couple of turns looks
+all around, so this works on things that are walking: a wandering band going
+from room to room, or something going to look at a noise. Shades feel your
+warmth and bats hear you, so neither has a back to sneak up on.
 
 **Creeping up on a sleeper:** each turn you're close and in its sight, a
 sleeping monster may stir. That's far more likely in the light than in the
@@ -617,6 +626,9 @@ the difficulty can be tuned from real runs. It's safe to delete.
 - **Strike first, in the dark.** With your torch snuffed, most sleepers stay
   asleep until your blow lands, and that blow does triple damage with any weapon.
   A dagger and a shadow cloak make it five times, and they rarely wake first.
+- **Tail a band.** A band walking between rooms has its back to you. Follow
+  it in the dark, catch the last one up, and your first blow is a sneak attack.
+  Once it stops to look around, keep your distance.
 - **A mace by a chasm** sends monsters to the level below.
 - **Fight slingers in the dark.** Snuff your torch and close in through the
   shadows; they can't aim at what they can't see. Or duck round a corner and

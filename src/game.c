@@ -597,6 +597,18 @@ bool game_burning(Game *g, int x, int y) { return in_map(x, y) && game_level(g)-
 bool game_final(const Game *g) { return g->depth == MAX_DEPTH; }
 
 /* a monster you can make out: in view, or a shade's eyes in the dark */
+/* A monster on the move watches the way it's going, which is the way its sprite
+ * faces: from the side behind it, it notices you only half as far (though always
+ * right beside it). One that has stood still a couple of turns looks all about; a
+ * sleeper sees nothing anyway; shades feel your warmth and bats hear you. */
+bool game_mob_back_to(const Game *g, const Mob *m)
+{
+    if (!m->alive || m->asleep || !m->moving || shadeish(m->kind) || m->kind == MK_BAT || m->kind == MK_EEL)
+        return false;
+    int dx = g->player.x - m->x;
+    return m->flip ? dx > 0 : dx < 0;           /* flip: it faces left */
+}
+
 bool game_mob_noticed(Game *g, const Mob *m)
 {
     Level *lv = game_level(g);
@@ -1141,6 +1153,7 @@ static void make_noise(Game *g, int x, int y, int radius);
 static void mob_go(Game *g, Mob *m, int nx, int ny)
 {
     start_tween(m, nx, ny);
+    m->moving = 2;                          /* on the move: it watches the way it's facing */
     Level *lv = game_level(g);
     Tile t = tile_at(lv, nx, ny);
     if (m->kind == MK_BAT || m->kind == MK_EEL) return;   /* on the wing, or under the surface: silent */
@@ -1365,6 +1378,8 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
         if (shade_burns(g, m) || !m->alive) return;
         range = (float)mi->perception * (cloak ? 0.5f : 1.0f);   /* it feels your warmth, lit or not */
     }
+    if (game_mob_back_to(g, m)) range = fmaxf(range * 0.5f, 1.0f);   /* you're behind it */
+    if (m->moving) m->moving--;
     bool sees = dist <= range && los(lv, m->x, m->y, p->x, p->y);
     if (m->asleep) {
         /* a sleeper stirs as you come near, more surely in the light; a shadow cloak muffles you */

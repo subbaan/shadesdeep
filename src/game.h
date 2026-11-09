@@ -52,6 +52,7 @@ typedef struct {
     uint8_t linger;     /* turns the band stays put where it has got to */
     float idle;         /* phase for idle bob */
     bool known;         /* the player has seen it before */
+    uint8_t moving;     /* (padding) its own turns it still counts as on the move: set by a step */
     int stun;           /* turns a shade is held by a sudden blaze */
     int lvl;            /* depth it was born on: deeper monsters hit harder */
     int surfaced;       /* an eel: turns it stays above the water after a lunge (0: hidden) */
@@ -242,6 +243,7 @@ float game_firelight(Game *g, int x, int y);
 int   game_max_hp(const Game *g);                 /* max HP less the chill */
 bool  game_by_fire(Game *g);                      /* standing in a fixed fire's warmth */
 bool  game_mob_noticed(Game *g, const Mob *m);    /* in view, or a shade's eyes in the dark */
+bool  game_mob_back_to(const Game *g, const Mob *m);  /* on the move with its back to you: sees you half as far */
 bool  game_mob_hidden(const Mob *m);              /* an eel under the water: not there, as far as you know */
 bool  game_burning(Game *g, int x, int y);        /* burning oil on that tile of the current level */
 bool  game_final(const Game *g);                  /* on the last level, the Heartflame's */
