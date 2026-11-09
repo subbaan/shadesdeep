@@ -821,9 +821,10 @@ static bool attack(Game *g, Mob *a, Mob *d)
     int acc, dmin, dmax, def, x0, x1, x2;
     mob_stats(g, a, &acc, &dmin, &dmax, &x0);
     mob_stats(g, d, &x0, &x1, &x2, &def);
-    /* a sneak attack: on anything asleep, dazzled, or not yet hunting you. It always
+    /* a sneak attack: on anything asleep, dazzled, not yet hunting you, or just come
+     * through a door onto you. It always
      * lands, for triple damage (a dagger's, quintuple). The Hollow is never caught napping. */
-    bool unaware = pl_att && d->kind != MK_HOLLOW && (d->asleep || !d->hunting || d->daze > 0);
+    bool unaware = pl_att && d->kind != MK_HOLLOW && (d->asleep || !d->hunting || d->daze > 0 || d->startled);
     bool was_asleep = d->asleep;
     a->bump = 1.0f;
     a->bdx = d->x - a->x;
@@ -836,6 +837,7 @@ static bool attack(Game *g, Mob *a, Mob *d)
     int chance = acc - def;
     if (d->asleep || d->daze > 0 || unaware) chance = 100;
     d->asleep = false;
+    d->startled = false;
     if (!pl_def) { d->hunting = true; d->tx = a->x; d->ty = a->y; band_alert(g, d, a->x, a->y); }
     if ((int)(rng_u32(&g->rng) % 100) >= chance) {
         if (pl_att) game_msg(g, C_DIM, "you miss the %s.", di->name);
@@ -957,6 +959,7 @@ static bool mob_ground(Game *g, const Mob *m, int x, int y, int nx, int ny)
     switch (m->kind) {
     case MK_BAT:    return t == T_CHASM || (tile_walkable(t) && t != T_DOOR);  /* flies, but can't open doors */
     case MK_EEL:    return t == T_DEEP;                                         /* never leaves the water */
+    case MK_RAT:    return tile_walkable(t) && t != T_DOOR;                     /* no hands for a latch */
     case MK_SHADE:  return tile_walkable(t) && !lv->salt[ny][nx] && game_firelight(g, nx, ny) <= SHADE_FEAR;
     case MK_HOLLOW: return tile_walkable(t);                                    /* nothing but burning oil holds it back */
     case MK_GOBLIN: case MK_SLINGER: case MK_OGRE:
@@ -1002,8 +1005,26 @@ static bool mob_bfs(Game *g, const Mob *m, int tx, int ty)
 
 static void mob_step_toward(Game *g, Mob *m, int tx, int ty);
 
+/* a monster comes through a closed door: it opens it and steps into the doorway in
+ * one move. It couldn't see through the door, so if you're waiting right on the far
+ * side it walks into you unready: your first blow is a sneak attack. */
+static void mob_through_door(Game *g, Mob *m, int nx, int ny)
+{
+    Level *lv = game_level(g);
+    Mob *p = &g->player;
+    bool saw = los(lv, m->x, m->y, p->x, p->y);
+    lv->t[ny][nx] = T_DOOR_OPEN;
+    lv->light_dirty = true;
+    sfx(g, SND_DOOR, nx, ny);
+    mob_go(g, m, nx, ny);
+    if (!saw && !shadeish(m->kind) && cheb(nx, ny, p->x, p->y) <= 1) {
+        m->startled = true;
+        if (lv->f[ny][nx] & F_VIS) game_msg(g, C_GOOD, "the %s comes through the door, right onto you!", MOB_INFO[m->kind].name);
+    }
+}
+
 /* a step along the way to (tx, ty), around walls and water; straight at it if
- * there's no way round. Opens a door rather than stepping into it. */
+ * there's no way round. A closed door it opens and comes through in one move. */
 static void mob_path_step(Game *g, Mob *m, int tx, int ty)
 {
     if (!mob_bfs(g, m, tx, ty)) { mob_step_toward(g, m, tx, ty); return; }
@@ -1032,12 +1053,7 @@ static void mob_path_step(Game *g, Mob *m, int tx, int ty)
         return;                                              /* held up: wait */
     }
     int nx = m->x + DX8[best], ny = m->y + DY8[best];
-    if (lv->t[ny][nx] == T_DOOR) {
-        lv->t[ny][nx] = T_DOOR_OPEN;
-        lv->light_dirty = true;
-        sfx(g, SND_DOOR, nx, ny);
-        return;
-    }
+    if (lv->t[ny][nx] == T_DOOR) { mob_through_door(g, m, nx, ny); return; }
     mob_go(g, m, nx, ny);
 }
 
@@ -1107,6 +1123,11 @@ static void band_turn(Game *g, Mob *m)
             if (ms[i].alive && ms[i].band == m->band && &ms[i] != m && dd > 3 && dd <= 10) behind = true;
         }
         if (behind && rng_chance(&g->rng, 50)) return;
+        if (!mob_bfs(g, m, m->tx, m->ty) && !band_pick_goal(g, m)) {    /* its way is shut: somewhere else */
+            m->tx = m->ty = -1;
+            m->linger = 6;
+            return;
+        }
         mob_path_step(g, m, m->tx, m->ty);
         return;
     }
@@ -1138,12 +1159,7 @@ static void mob_step_toward(Game *g, Mob *m, int tx, int ty)
     }
     if (best < 0) return;
     int nx = m->x + DX8[best], ny = m->y + DY8[best];
-    if (lv->t[ny][nx] == T_DOOR) {
-        lv->t[ny][nx] = T_DOOR_OPEN;
-        lv->light_dirty = true;
-        sfx(g, SND_DOOR, nx, ny);
-        return;
-    }
+    if (lv->t[ny][nx] == T_DOOR) { mob_through_door(g, m, nx, ny); return; }
     mob_go(g, m, nx, ny);
 }
 
@@ -1362,6 +1378,7 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
     Mob *p = &g->player;
     const MobInfo *mi = &MOB_INFO[m->kind];
     if (m->kind == MK_EEL) { eel_turn(g, m); return; }
+    m->startled = false;                        /* it has its wits about it again */
     if (m->kind != MK_SHADE && lv->burn[m->y][m->x]) {
         /* caught in burning oil: get out of it, whatever else is going on */
         int start = rng_range(&g->rng, 0, 7);
@@ -1414,6 +1431,11 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
         if (bat && rng_chance(&g->rng, 35)) mob_wander(g, m);     /* flits off instead */
         else attack(g, m, p);
         return;
+    }
+    if (m->hunting && !sees && !bat && !shade && !mob_bfs(g, m, m->tx, m->ty)) {
+        /* it can't get to where it last saw you (a door shut on a rat, you swam off): it gives up */
+        m->hunting = false;
+        if (m->band) { m->tx = m->ty = -1; m->linger = (uint8_t)rng_range(&g->rng, 2, 5); }
     }
     if (m->hunting) {
         if (bat && rng_chance(&g->rng, 40)) mob_wander(g, m);
@@ -1895,6 +1917,63 @@ static void search_secrets(Game *g)
             floater(g, x, y, 0xffd070, "!");
             game_stop(g);
         }
+}
+
+/* the open doors beside you, straight across (a doorway's corners are wall) */
+static bool door_beside(Game *g, int d, int *x, int *y)
+{
+    static const int DX[4] = { 0, 1, 0, -1 }, DY[4] = { -1, 0, 1, 0 };
+    *x = g->player.x + DX[d];
+    *y = g->player.y + DY[d];
+    return in_map(*x, *y) && game_level(g)->t[*y][*x] == T_DOOR_OPEN;
+}
+
+int game_doors_beside(Game *g)
+{
+    int n = 0, x, y;
+    for (int d = 0; d < 4; d++) n += door_beside(g, d, &x, &y);
+    return n;
+}
+
+/* what's stopping a door from closing, if anything */
+static const char *door_blocked(Game *g, int x, int y)
+{
+    Level *lv = game_level(g);
+    Mob *m = game_mob_at(g, x, y);
+    if (m) return game_mob_noticed(g, m) ? MOB_INFO[m->kind].name : "something";
+    if (lv->burn[y][x]) return "the burning oil";
+    for (int i = 0; i < lv->nlights; i++)
+        if (lv->lights[i].kind == L_FLOORTORCH && lv->lights[i].lit && lv->lights[i].x == x && lv->lights[i].y == y)
+            return "the torch";
+    FloorItem *it = game_item_at(g, x, y);
+    if (it) return "something on the floor";
+    return NULL;
+}
+
+bool game_close_door(Game *g)
+{
+    if (g->state != GS_PLAY) return false;
+    game_stop(g);
+    Level *lv = game_level(g);
+    int shut = 0, x, y;
+    const char *why = NULL;
+    for (int d = 0; d < 4; d++) {
+        if (!door_beside(g, d, &x, &y)) continue;
+        const char *b = door_blocked(g, x, y);
+        if (b) { why = b; continue; }
+        lv->t[y][x] = T_DOOR;
+        lv->light_dirty = true;
+        sfx(g, SND_DOOR, x, y);
+        shut++;
+    }
+    if (!shut) {
+        if (why) game_msg(g, C_DIM, "you can't close the door: %s is in the way.", why);
+        else game_msg(g, C_DIM, "there's no open door beside you (a diagonal one won't do).");
+        return false;
+    }
+    game_msg(g, C_TEXT, shut > 1 ? "you close the doors." : "you close the door.");
+    end_turn(g);
+    return true;
 }
 
 void game_search(Game *g)

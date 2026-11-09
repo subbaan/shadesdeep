@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.16.5. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.16.6. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -48,6 +48,7 @@ Every action also has a button on screen.
 | Rest a turn | `z`, `.`, numpad 5 | click yourself |
 | Rest until healed | `Z` | **Rest** button |
 | Search for hidden doors (5 turns) | `s` | **Search** button |
+| Close an open door beside you | `c` | **Close** button (shows beside an open door) |
 | Pack | `i` | **Items** button |
 | Throw | `t`, then aim | **Throw** button |
 | Use (light, drink, pour, wield, wear) | `a` | from the item card |
@@ -226,7 +227,7 @@ you warm up:
 
 | Monster | Notes |
 |---|---|
-| **Rat** | Weak and quick to die. Often asleep. |
+| **Rat** | Weak and quick to die. Often asleep. Can't open doors. |
 | **Goblin** | A real fight early on. Sees well in the dark and better in the light. Won't swim, so deep water is a refuge from goblins. |
 | **Shade** | From depth 2. See [above](#shades-and-the-chill). |
 | **Bat** | From depth 2. Quick (it moves twice a turn) and erratic: it flits in, bites, and flits off again, so it's hard to pin down. Light draws it from a long way off; in the dark it only finds you up close. It flies, so chasms and deep water don't stop it, but it can't open doors. Silent on the wing. |
@@ -256,7 +257,8 @@ arrived.
 means one that's asleep, dazzled, or awake but not hunting you. Your blow
 **always lands and does triple damage** with any weapon. A dagger does **five
 times** the damage. The first blow alerts it, so you get one free strike; make it
-count. The Hollow is never caught unawares.
+count. The Hollow is never caught unawares. A monster that comes through a door
+right onto you is caught off guard too (see [ambush at a door](#the-dungeon)).
 
 **Coming up from behind.** A monster on the move watches the way it's going:
 the way its picture faces when it walks left or right, or straight ahead when
@@ -450,7 +452,22 @@ less likely.
   anything you drop in it, and drags you under if you wear mail. Goblins,
   slingers and ogres won't follow you in, but bats fly over it and eels may be
   waiting in it.
-- **Doors** block sight and light until opened.
+- **Doors** block sight and light until opened. Walk into one to open it (that
+  takes your move). Standing beside an open door (straight across, not on a
+  diagonal), press `c` or the **Close** button to shut it again. You can't
+  close it on a monster, an item, a burning torch or burning oil. If there are
+  two open doors beside you, both close.
+- **Who opens doors:** goblins, slingers, ogres, shades and the Hollow open a
+  door and come through it in a single move. Rats and bats can't open them at
+  all, so a shut door keeps them out. A rat chasing you gives up once a door
+  is shut between you.
+- **Ambush at a door.** A monster can't see through a closed door. If it comes
+  through one and you're standing right by the doorway on the other side, it
+  walks into you unready: your next blow is a [sneak attack](#other-monsters),
+  even if it was hunting you. That only lasts until its next turn. Shades feel
+  your warmth through the wood and the Hollow is never caught off guard, so
+  neither can be ambushed. A doorway's corners are wall, so stand **straight
+  in front of** the door; from the side you can't reach it.
 - **Crystals and glowmoss** in the caverns give off a cold light. It lets you
   see, but it doesn't count as fire, so shades don't mind it.
 - **The map** (`m`) shows the whole of the level you've seen, drawn with the
@@ -660,6 +677,12 @@ the difficulty can be tuned from real runs. It's safe to delete.
   then. Rest where you can see them coming, or behind a door.
 - **Split a band at a door.** Hold a doorway or corridor so they come at you one
   at a time, and catch the leader unawares if you can.
+- **Shut the door and wait.** Running from a goblin? Get through a door, close
+  it, and stand right in front of it. When it opens the door it's standing
+  next to you, unready, and your blow is a sneak attack. A dagger makes that
+  five times the damage.
+- **A door stops rats cold.** Shut one between you and a pack of rats and they
+  lose interest.
 - **Carry a lit torch where traps are likely**, in corridors and at the
   doors of storerooms, and you'll usually see them first.
 - **A mace and a known trapdoor** make a fine pair: knock the ogre in.

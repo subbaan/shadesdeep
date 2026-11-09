@@ -1052,7 +1052,7 @@ int main(int argc, char **argv)
         bool map_click = g_input.mclick[0] && click == UA_NONE && hv.hx >= 0 && !ui_over_panel(ui, mx, my);
         /* the status bar buttons work from any menu */
         if (click == UA_INV || click == UA_THROW || click == UA_TORCH || click == UA_EXPLORE || click == UA_REST ||
-            click == UA_SEARCH || click == UA_STAIRS || click == UA_HELP || click == UA_MAP) {
+            click == UA_SEARCH || click == UA_SHUT || click == UA_STAIRS || click == UA_HELP || click == UA_MAP) {
             bool same = (click == UA_INV && ctl.menu == MENU_INV) || (click == UA_THROW && ctl.menu == MENU_THROW)
                      || (click == UA_MAP && ctl.map);
             ctl.menu = MENU_NONE;
@@ -1195,6 +1195,8 @@ int main(int argc, char **argv)
                 game_rest_long(g);
             } else if (PLAIN('s') || click == UA_SEARCH) {
                 game_search(g);
+            } else if (PLAIN('c') || click == UA_SHUT) {
+                if (!busy) game_close_door(g);
             } else if (PLAIN('z') || (pr['.'] && !SHIFTED('.')) || pr[K_KP5]) {
                 if (!busy) game_rest(g);
             } else if (PLAIN('x') || click == UA_EXPLORE) {

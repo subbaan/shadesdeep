@@ -58,6 +58,7 @@ typedef struct {
     int lvl;            /* depth it was born on: deeper monsters hit harder */
     int surfaced;       /* an eel: turns it stays above the water after a lunge (0: hidden) */
     bool rest;          /* an ogre: sits out this turn (it acts every other turn) */
+    bool startled;      /* (padding) came through a door onto you: caught off guard until its next turn */
     int daze;           /* turns it reels, dazzled by flash powder: it can't act, and can't see you */
 } Mob;
 
@@ -258,6 +259,8 @@ static inline bool game_end_shown(const Game *g)
 bool game_move(Game *g, int dx, int dy);
 bool game_rest(Game *g);
 void game_rest_long(Game *g);
+int  game_doors_beside(Game *g);  /* open doors next to you (not diagonally) you could close */
+bool game_close_door(Game *g);    /* close them: a turn */
 void game_search(Game *g);      /* five turns spent searching the walls nearby for hidden doors */
 void game_explore(Game *g);
 void game_to_stairs(Game *g);

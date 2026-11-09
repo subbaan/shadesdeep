@@ -27,7 +27,7 @@ const char *tile_desc(Tile t)
     case T_WALL:        return "Rough-hewn blocks, cold to the touch.";
     case T_FLOOR:       return "Worn flagstones.";
     case T_DOOR:        return "A heavy door. It blocks sight and light until opened.";
-    case T_DOOR_OPEN:   return "An open doorway.";
+    case T_DOOR_OPEN:   return "An open doorway. Standing beside it, you can close it (c).";
     case T_CHASM:       return "The floor falls away into the level below. Jumping is quick but the fall hurts.";
     case T_STAIRS_DOWN: return "A stairway leading deeper into the dark.";
     case T_STAIRS_UP:   return "Stairs climbing back toward the surface.";

@@ -358,12 +358,16 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     const char *tl = g->torch_lit ? "Snuff" : "Torch";
     struct { const char *k, *l; UiAction a; bool en; } B[] = {
         { "x", "Explore", UA_EXPLORE, true }, { "Z", "Rest", UA_REST, true }, { "s", "Search", UA_SEARCH, true },
+        { "c", "Close", UA_SHUT, true },
         { "t", "Throw", UA_THROW, g->ninv > 0 },
         { "i", "Items", UA_INV, true }, { "T", tl, UA_TORCH, has_torch || g->torch_lit },
         { ">", game_final(g) ? "Hearth" : "Descend", UA_STAIRS, true },
         { "m", "Map", UA_MAP, true }, { NULL, "?", UA_HELP, true },
     };
     int nb = (int)(sizeof B / sizeof *B), gap = ui->px / 2, tw_full = 0, tw_compact = 0;
+    if (!game_doors_beside(g))                 /* "Close" only shows beside an open door */
+        for (int i = 0; i < nb; i++)
+            if (B[i].a == UA_SHUT) { for (int j = i; j < nb - 1; j++) B[j] = B[j + 1]; nb--; break; }
     for (int i = 0; i < nb; i++) {
         tw_full += button_width(ui, B[i].k, B[i].l) + gap;
         tw_compact += button_width(ui, NULL, B[i].l) + gap;
@@ -577,7 +581,9 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         snprintf(desc, sizeof desc, "%s%s", MOB_INFO[m->kind].desc,
                  m->daze > 0 ? " It reels, dazzled: it can't act, and a blow will find it."
                  : m->kind == MK_SHADE && game_firelight(g, g->player.x, g->player.y) > SHADE_FEAR ? " It hangs back from your light."
-                 : m->asleep ? " It is asleep." : m->hunting ? " It is hunting you."
+                 : m->asleep ? " It is asleep."
+                 : m->startled ? " It has come through the door right onto you, and is caught off guard."
+                 : m->hunting ? " It is hunting you."
                  : game_mob_back_to(g, m) ? " It hasn't noticed you, and its back is to you." : " It hasn't noticed you.");
         snprintf(hint, sizeof hint, "Click to attack");
     } else if (m && game_mob_noticed(g, m)) {
@@ -660,6 +666,8 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         snprintf(desc, sizeof desc, "%s", tile_desc(t));
         if (t == T_CHASM) snprintf(hint, sizeof hint, "Click to jump down to depth %d", g->depth + 1);
         else if (t == T_DEEP) snprintf(hint, sizeof hint, g->torch_lit ? "Click to swim here (your torch will go out)" : "Click to swim here");
+        else if (t == T_DOOR_OPEN && abs(x - g->player.x) + abs(y - g->player.y) == 1)
+            snprintf(hint, sizeof hint, "Click to step in, or c to close it");
         else if (tile_walkable(t)) snprintf(hint, sizeof hint, "Click to travel here");
         if (!vis) {
             size_t n = strlen(desc);
@@ -736,6 +744,7 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Explore", "x  (stops when something comes into view)" },
         { "Rest", "z or . a turn,  Z until healed" },
         { "Search", "s  five turns searching the walls close by for hidden doors (resting helps a little)" },
+        { "Doors", "walk into one to open it;  c closes an open door beside you (rats can't open them)" },
         { "Stairs", ">  travel to and descend,  <  climb" },
         { "Items", "i  your pack: pick an item to use, wield, throw or drop it  (a use, d drop)" },
         { "Throw", "t  then aim with the mouse or keys, Tab to cycle targets" },
