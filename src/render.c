@@ -391,6 +391,139 @@ static uint32_t sample_lower(const Renderer *r, float x, float y)
     return mix(top, bot, fy);
 }
 
+/* ------------------------------------------------- the broken rim of a chasm */
+
+static bool lip_ground(Tile t) { return t == T_FLOOR || t == T_RUBBLE; }
+
+/* how far (px) the broken floor reaches out over the pit at position a along
+ * boundary line b: a slow wander plus chunks knocked out of it */
+static int lip_depth(int a, int b, uint32_t salt)
+{
+    int k = a / 11, f = a % 11;
+    float h0 = (float)(hash2(k, b, salt) % 100) / 100.0f, h1 = (float)(hash2(k + 1, b, salt) % 100) / 100.0f;
+    float lo = h0 + (h1 - h0) * (float)f / 11.0f;
+    int chunk = (int)(hash2(a / 3, b, salt ^ 0x9e37u) % 4);
+    return 1 + (int)(lo * 5.0f) + chunk;         /* 1..9 */
+}
+
+/* the floor around a pit doesn't stop at a straight line: it overhangs it raggedly,
+ * in the same stone as the floor it's part of, with its broken edge catching the light */
+static void draw_chasm_lip(Renderer *r, Canvas *cv, const View *v, int tx, int ty, int sx, int sy)
+{
+    const Level *lv = v->lv;
+    bool gN = lip_ground(tile_at(lv, tx, ty - 1)), gS = lip_ground(tile_at(lv, tx, ty + 1));
+    bool gW = lip_ground(tile_at(lv, tx - 1, ty)), gE = lip_ground(tile_at(lv, tx + 1, ty));
+    bool cNW = lip_ground(tile_at(lv, tx - 1, ty - 1)) && !gN && !gW, cNE = lip_ground(tile_at(lv, tx + 1, ty - 1)) && !gN && !gE;
+    bool cSW = lip_ground(tile_at(lv, tx - 1, ty + 1)) && !gS && !gW, cSE = lip_ground(tile_at(lv, tx + 1, ty + 1)) && !gS && !gE;
+    if (!(gN || gS || gW || gE || cNW || cNE || cSW || cSE)) return;
+    int dN[TILE], dS[TILE], dW[TILE], dE[TILE];
+    for (int k = 0; k < TILE; k++) {
+        dN[k] = gN ? lip_depth(tx * TILE + k, ty, 0x4e11u) : 0;
+        dS[k] = gS ? lip_depth(tx * TILE + k, ty + 1, 0x4e11u) : 0;
+        dW[k] = gW ? lip_depth(ty * TILE + k, tx, 0x3e11u) : 0;
+        dE[k] = gE ? lip_depth(ty * TILE + k, tx + 1, 0x3e11u) : 0;
+    }
+    /* a corner of floor between two sides of the pit: a small broken chunk */
+    int rc[4] = { 0 };
+    bool cc[4] = { cNW, cNE, cSW, cSE };
+    for (int k = 0; k < 4; k++) if (cc[k]) rc[k] = 3 + (int)(hash2(tx * 2 + (k & 1), ty * 2 + (k >> 1), 0xc0c0u) % 5);
+    /* an outside corner of the pit (floor on two sides) is rounded off, not square */
+    int ro[4] = { 0 };
+    bool oc[4] = { gN && gW, gN && gE, gS && gW, gS && gE };
+    for (int k = 0; k < 4; k++) if (oc[k]) ro[k] = 20 + (int)(hash2(tx * 2 + (k & 1), ty * 2 + (k >> 1), 0x70c0u) % 10);
+    const CF *c00 = &r->corner[ty][tx], *c10 = &r->corner[ty][tx + 1];
+    const CF *c01 = &r->corner[ty + 1][tx], *c11 = &r->corner[ty + 1][tx + 1];
+#define LIP_IM(X, Y) (&r->t.floor[hash2((X), (Y), lv->seed) % N_FLOOR])
+    for (int j = 0; j < TILE; j++) {
+        int y = sy + j;
+        if ((unsigned)y >= (unsigned)cv->h) continue;
+        float vv = (j + 0.5f) / TILE;
+        CF L, Rr;
+        cf_lerp(&L, c00, c01, vv);
+        cf_lerp(&Rr, c10, c11, vv);
+        uint32_t *row = cv->px + (size_t)y * cv->w;
+        for (int i = 0; i < TILE; i++) {
+            int x = sx + i;
+            if ((unsigned)x >= (unsigned)cv->w) continue;
+            /* which piece of floor this pixel belongs to (if any), and is it the broken edge? */
+            const Image *im = NULL;
+            bool rim = false;
+            if (j < dN[i]) { im = LIP_IM(tx, ty - 1); rim = j == dN[i] - 1; }
+            else if (j >= TILE - dS[i]) { im = LIP_IM(tx, ty + 1); rim = j == TILE - dS[i]; }
+            else if (i < dW[j]) { im = LIP_IM(tx - 1, ty); rim = i == dW[j] - 1; }
+            else if (i >= TILE - dE[j]) { im = LIP_IM(tx + 1, ty); rim = i == TILE - dE[j]; }
+            /* rounding an outside corner: floor fills it beyond a quarter circle */
+            for (int k = 0; k < 4 && !im; k++) {
+                if (!ro[k]) continue;
+                int cx = (k & 1) ? TILE - 1 - i : i, cy = (k & 2) ? TILE - 1 - j : j;
+                if (cx >= ro[k] || cy >= ro[k]) continue;
+                float dx = (float)(ro[k] - cx), dy = (float)(ro[k] - cy), d = sqrtf(dx * dx + dy * dy);
+                if (d <= ro[k]) continue;
+                im = (k & 2) ? LIP_IM(tx, ty + 1) : LIP_IM(tx, ty - 1);
+                rim = d < ro[k] + 1.3f;
+            }
+            if (im) ;
+            else {
+                int ci = -1, cx = 0, cy = 0;
+                if (rc[0] && i < rc[0] && j < rc[0]) { ci = 0; cx = i; cy = j; }
+                else if (rc[1] && TILE - 1 - i < rc[1] && j < rc[1]) { ci = 1; cx = TILE - 1 - i; cy = j; }
+                else if (rc[2] && i < rc[2] && TILE - 1 - j < rc[2]) { ci = 2; cx = i; cy = TILE - 1 - j; }
+                else if (rc[3] && TILE - 1 - i < rc[3] && TILE - 1 - j < rc[3]) { ci = 3; cx = TILE - 1 - i; cy = TILE - 1 - j; }
+                if (ci >= 0 && cx + cy < rc[ci]) {
+                    im = LIP_IM(tx + ((ci & 1) ? 1 : -1), ty + ((ci & 2) ? 1 : -1));
+                    rim = cx + cy == rc[ci] - 1;
+                }
+            }
+            if (!im) {
+                /* the shadow the north lip throws down the cliff */
+                if (gN && j >= dN[i] && j < dN[i] + 3) row[x] = mix(row[x], 0x000000, j == dN[i] ? 150 : 80);
+                continue;
+            }
+            uint32_t a = im->px[j * im->w + i] & 0xffffff;
+            a = mix(a, 0x000000, 34);                           /* broken stone, a shade darker */
+            if (rim) a = add_sat(a, 30, 27, 22);
+            CF p;
+            cf_lerp(&p, &L, &Rr, (i + 0.5f) / TILE);
+            uint32_t lit = lightc(a, p.r, p.g, p.b);
+            row[x] = v->fog ? fogmix(lit, memtone(a), p.v, p.s) : lit;
+        }
+    }
+#undef LIP_IM
+}
+
+/* cracks running back into the floor from a pit's edge */
+static void draw_rim_cracks(Canvas *cv, int tx, int ty, int sx, int sy, int edge)
+{
+    for (int side = 0; side < 4; side++) {
+        if (!(edge & (1 << side))) continue;            /* 1 N, 2 W, 4 E, 8 S */
+        uint32_t h = hash2(tx * 4 + side, ty, 0xc7ac);
+        int n = 1 + (int)(h % 2);
+        for (int c = 0; c < n; c++) {
+            uint32_t q = hash2(tx * 7 + c, ty * 5 + side, 0xc7ad);
+            float along = 4 + (float)(q % 24), in = 0;
+            int len = 6 + (int)((q >> 8) % 9);
+            float drift = 0;
+            for (int k = 0; k < len; k++) {
+                drift += ((int)((q >> (k % 24)) & 3) - 1.5f) * 0.45f;
+                float px = along + drift, py = in;
+                int i, j;
+                switch (side) {
+                case 0:  i = (int)px; j = (int)py; break;
+                case 1:  i = (int)py; j = (int)px; break;
+                case 2:  i = TILE - 1 - (int)py; j = (int)px; break;
+                default: i = (int)px; j = TILE - 1 - (int)py; break;
+                }
+                in += 1;
+                if (i < 0 || j < 0 || i >= TILE || j >= TILE) break;
+                int x = sx + i, y = sy + j;
+                if ((unsigned)x >= (unsigned)cv->w || (unsigned)y >= (unsigned)cv->h) continue;
+                uint32_t *pp = &cv->px[(size_t)y * cv->w + x];
+                *pp = mix(*pp, 0x000000, k < len / 2 ? 150 : 100);
+            }
+        }
+    }
+}
+
 static void draw_chasm(Renderer *r, Canvas *cv, const View *v, int tx, int ty, int sx, int sy)
 {
     const Level *lv = v->lv;
@@ -456,6 +589,7 @@ static void draw_chasm(Renderer *r, Canvas *cv, const View *v, int tx, int ty, i
         CF a2 = a, b2 = b;
         draw_lit(cv, sx, sy, &r->t.cliff, TILE, TILE, &a, &b, &a2, &b2, 1.0f, 0.2f, 0, v->fog, NULL, 0);
     }
+    draw_chasm_lip(r, cv, v, tx, ty, sx, sy);
 }
 
 static void light_at_px(const Renderer *r, float wx, float wy, CF *o);
@@ -597,7 +731,7 @@ static void draw_trap(Renderer *r, Canvas *cv, const View *v, int tx, int ty, in
 static void draw_room_floor(Renderer *r, Canvas *cv, const View *v, int tx, int ty, int sx, int sy, int kind)
 {
     uint32_t h = hash2(tx, ty, 0x7007 + (uint32_t)kind);
-    if (h % 100 >= (kind == RK_NEST ? 45u : kind == RK_STORE ? 40u : 30u)) return;
+    if (h % 100 >= (kind == RK_NEST ? 45u : kind == RK_STORE ? 40u : kind == RK_SECRET ? 55u : 30u)) return;
     CF c;
     light_at_px(r, tx * TILE + 16.0f, ty * TILE + 16.0f, &c);
     if (!v->fog) c.v = c.s = 1;
@@ -632,6 +766,21 @@ static void draw_room_floor(Renderer *r, Canvas *cv, const View *v, int tx, int 
             for (int j = 0; j < 3; j++)
                 for (int i = 0; i < 12; i++)
                     if (!(j == 0 && i > 9)) floor_px(cv, v, &c, ox - 6 + i, oy + 4 + j, j == 2 ? 0x3a2814 : 0x6a4a28, 0.05f);
+    } else if (kind == RK_SECRET) {
+        /* the dust of ages, and coins someone dropped and never came back for */
+        for (int n = 0; n < 8; n++) {
+            uint32_t q = hash2(tx * 23 + n, ty * 29 + n, 0x5ec7);
+            floor_px(cv, v, &c, ox + (int)(q % 16) - 8, oy + (int)((q >> 8) % 12) - 6, 0x8a8478, 0.04f);
+        }
+        for (int n = 0; n < 1 + (int)((h >> 20) % 3); n++) {
+            uint32_t q = hash2(tx * 31 + n, ty * 37 + n, 0x5ec8);
+            int x = ox + (int)(q % 14) - 7, y = oy + (int)((q >> 8) % 10) - 5;
+            floor_px(cv, v, &c, x, y, 0xb08a30, 0.2f);
+            floor_px(cv, v, &c, x + 1, y, 0xd8b048, 0.25f);
+            floor_px(cv, v, &c, x, y + 1, 0x8a6a20, 0.15f);
+            floor_px(cv, v, &c, x + 1, y + 1, 0xb08a30, 0.2f);
+            if ((q >> 16) % 3 == 0) floor_px(cv, v, &c, x + 1, y - 1, 0xfff0b0, 0.6f);    /* a glint */
+        }
     } else {
         /* rust flakes and a broken blade */
         for (int n = 0; n < 7; n++) {
@@ -929,8 +1078,11 @@ static void draw_ground(Renderer *r, Canvas *cv, const View *v)
             if (tile_at(lv, tx - 1, ty) == T_CHASM) edge |= 2;
             if (tile_at(lv, tx + 1, ty) == T_CHASM) edge |= 4;
             if (tile_at(lv, tx, ty + 1) == T_CHASM) edge |= 8;
+            /* plain floor by a pit: its broken lip is drawn over the pit, and cracks run back from it */
+            bool lipped = edge && lip_ground(t);
             draw_lit(cv, sx, sy, im, TILE, TILE, &r->corner[ty][tx], &r->corner[ty][tx + 1],
-                     &r->corner[ty + 1][tx], &r->corner[ty + 1][tx + 1], 1, 1, ao, v->fog, over, edge);
+                     &r->corner[ty + 1][tx], &r->corner[ty + 1][tx + 1], 1, 1, ao, v->fog, over, lipped ? 0 : edge);
+            if (lipped) draw_rim_cracks(cv, tx, ty, sx, sy, edge);
             if (lv->scorch[ty][tx]) draw_scorch(r, cv, v, tx, ty, sx, sy);
             int rk = lv->room[ty][tx] >= 0 ? lv->rooms[lv->room[ty][tx]].kind : RK_PLAIN;
             if (rk != RK_PLAIN && t != T_DOOR_OPEN) draw_room_floor(r, cv, v, tx, ty, sx, sy, rk);

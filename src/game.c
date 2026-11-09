@@ -264,6 +264,63 @@ static MobKind pick_kind(Rng *r, int d)
 
 static int cheb(int ax, int ay, int bx, int by);
 
+/* where a band can stand: open floor in an ordinary room */
+static bool band_spot(const Level *lv, int x, int y)
+{
+    if (!in_map(x, y) || lv->t[y][x] != T_FLOOR || lv->trap[y][x] || lv->room[y][x] < 0) return false;
+    const Room *rm = &lv->rooms[lv->room[y][x]];
+    return lv->room[y][x] != lv->hall && rm->kind != RK_SECRET && rm->kind != RK_NEST;
+}
+
+/* A wandering band at (x, y) on level d, in free mob slots: its leader first, the
+ * rest about it. Returns how many it made. */
+static int spawn_band(Game *g, int d, Rng *r, int x, int y)
+{
+    Level *lv = g->lv[d];
+    Mob *ms = g->mobs[d];
+    int id = 1;
+    for (int i = 0; i < MAX_MOBS; i++)
+        if (ms[i].alive && ms[i].band >= id) id = ms[i].band + 1;
+    if (id > 255) return 0;
+    MobKind kinds[5];
+    int n = 0;
+    if (d == 1) {
+        for (int k = rng_range(r, 3, 4); k > 0; k--) kinds[n++] = MK_RAT;
+    } else {
+        if (d >= 6 && rng_chance(r, 35)) kinds[n++] = MK_OGRE;            /* an ogre at the head of it */
+        for (int k = rng_range(r, 2, d >= 8 ? 4 : 3); k > 0 && n < 4; k--) kinds[n++] = MK_GOBLIN;
+        if (d >= 3 && rng_chance(r, 55)) kinds[n++] = MK_SLINGER;
+    }
+    int made = 0;
+    for (int k = 0; k < n; k++) {
+        int slot = -1;
+        for (int i = 0; i < MAX_MOBS; i++) if (!ms[i].alive) { slot = i; break; }
+        if (slot < 0) break;
+        /* the leader where asked, the rest on free floor near it */
+        int bx = x, by = y;
+        bool ok = k == 0;
+        for (int tries = 0; tries < 60 && !ok; tries++) {
+            bx = x + rng_range(r, -2, 2);
+            by = y + rng_range(r, -2, 2);
+            if (!in_map(bx, by) || lv->t[by][bx] != T_FLOOR || lv->trap[by][bx] || (bx == x && by == y)) continue;
+            ok = true;
+            for (int i = 0; i < MAX_MOBS; i++)
+                if (ms[i].alive && ms[i].x == bx && ms[i].y == by) ok = false;
+        }
+        if (!ok) continue;
+        Mob *m = &ms[slot];
+        mob_init(m, kinds[k], bx, by);
+        m->lvl = d;
+        m->hp = m->maxhp = MOB_INFO[kinds[k]].hp + MOB_INFO[kinds[k]].hp * (d - 1) / 8;
+        m->band = (uint8_t)id;
+        m->lead = made == 0;
+        m->tx = m->ty = -1;         /* no destination yet */
+        m->flip = rng_chance(r, 50);
+        made++;
+    }
+    return made;
+}
+
 static void spawn_mobs(Game *g, int d)
 {
     Level *lv = g->lv[d];
@@ -275,6 +332,7 @@ static void spawn_mobs(Game *g, int d)
         if (abs(x - lv->upx) + abs(y - lv->upy) < 9) continue;
         if (lv->room[y][x] == lv->hall && lv->hall >= 0) continue;     /* the hall has its own (below) */
         if (lv->rooms[lv->room[y][x]].kind == RK_NEST) continue;       /* and so has a nest */
+        if (lv->rooms[lv->room[y][x]].kind == RK_SECRET) continue;     /* and nothing has found the hidden room */
         bool taken = false;
         for (int i = 0; i < placed; i++)
             if (g->mobs[d][i].x == x && g->mobs[d][i].y == y) taken = true;
@@ -331,6 +389,19 @@ static void spawn_mobs(Game *g, int d)
             m->asleep = k != MK_SHADE && rng_chance(&r, 80);
             m->flip = rng_chance(&r, 50);
             want--;
+        }
+    }
+    /* a band on the move, awake and going from room to room: rats near the top, goblins below */
+    if (d < MAX_DEPTH && rng_chance(&r, d == 1 ? 25 : 55)) {
+        for (int tries = 0; tries < 400; tries++) {
+            int x = rng_range(&r, 1, MAP_W - 2), y = rng_range(&r, 1, MAP_H - 2);
+            if (!band_spot(lv, x, y) || abs(x - lv->upx) + abs(y - lv->upy) < 16) continue;
+            bool taken = false;
+            for (int i = 0; i < placed; i++)
+                if (g->mobs[d][i].alive && cheb(g->mobs[d][i].x, g->mobs[d][i].y, x, y) <= 2) taken = true;
+            if (taken) continue;
+            placed += spawn_band(g, d, &r, x, y);
+            break;
         }
     }
     /* the last level: the Hollow broods by the cold hearth, its brood about the hall */
@@ -417,7 +488,8 @@ static void spawn_items(Game *g, int d)
     for (int rm_i = 0; rm_i < lv->nrooms; rm_i++) {
         Room *rm = &lv->rooms[rm_i];
         if (rm->kind == RK_PLAIN) continue;
-        int want = rm->kind == RK_STORE ? rng_range(&r, 3, 5) : rm->kind == RK_ARMOURY ? 2 : 1;
+        int want = rm->kind == RK_STORE ? rng_range(&r, 3, 5) : rm->kind == RK_ARMOURY ? 2 : rm->kind == RK_SECRET ? 4 : 1;
+        int got = 0;
         for (int tries = 0; tries < 2000 && want > 0 && placed < MAX_ITEMS; tries++) {
             int x = rng_range(&r, rm->x, rm->x + rm->w - 1), y = rng_range(&r, rm->y, rm->y + rm->h - 1);
             if (lv->t[y][x] != T_FLOOR || lv->room[y][x] != rm_i || lv->trap[y][x]) continue;
@@ -433,6 +505,19 @@ static void spawn_items(Game *g, int d)
                 if (k == IT_TORCH && g->torches_made + 1 > d * TORCHES_PER_LEVEL + 2.5f) k = IT_OIL;   /* a little ahead of the pace at most */
                 if (k == IT_TORCH) g->torches_made++;
                 *it = (FloorItem){ true, k, k == IT_DART ? rng_range(&r, 3, 5) : 1, x, y, false, 0 };
+            } else if (rm->kind == RK_SECRET) {
+                /* a hidden hoard, left by someone who meant to come back: fine gear, embers and supplies */
+                static const ItemKind GEAR[] = { IT_DAGGER, IT_SPEAR, IT_AXE, IT_MACE, IT_SWORD, IT_CLOAK, IT_MAIL, IT_LEATHER };
+                static const ItemKind SUP[] = { IT_POTION, IT_WARMTH, IT_FLASH, IT_OIL, IT_DART, IT_POTION };
+                if (got == 0)
+                    *it = (FloorItem){ true, GEAR[rng_range(&r, 0, 7)], 1, x, y, false, 1 + d / 5 + rng_range(&r, 0, 1) };
+                else if (got == 1)
+                    *it = (FloorItem){ true, IT_EMBERS, 3 + d / 4 + rng_range(&r, 0, 2), x, y, false, 0 };
+                else {
+                    ItemKind k = SUP[rng_range(&r, 0, 5)];
+                    if (k == IT_WARMTH && d < 2) k = IT_POTION;
+                    *it = (FloorItem){ true, k, k == IT_DART ? rng_range(&r, 4, 6) : 1, x, y, false, 0 };
+                }
             } else if (rm->kind == RK_ARMOURY) {
                 static const ItemKind GEAR[] = { IT_DAGGER, IT_SPEAR, IT_AXE, IT_MACE, IT_SWORD, IT_CLOAK, IT_MAIL, IT_LEATHER };
                 int plus = 0;
@@ -442,6 +527,7 @@ static void spawn_items(Game *g, int d)
                 *it = (FloorItem){ true, IT_EMBERS, 3 + d / 5 + rng_range(&r, 0, 2), x, y, false, 0 };
             }
             want--;
+            got++;
         }
     }
 }
@@ -682,6 +768,7 @@ static void ember(Game *g, int n, const char *why)
 }
 
 static void hearth_light(Game *g);
+static void band_alert(Game *g, const Mob *m, int x, int y);
 
 /* returns true if it hit */
 static bool attack(Game *g, Mob *a, Mob *d)
@@ -706,7 +793,7 @@ static bool attack(Game *g, Mob *a, Mob *d)
     int chance = acc - def;
     if (d->asleep || d->daze > 0 || unaware) chance = 100;
     d->asleep = false;
-    if (!pl_def) { d->hunting = true; d->tx = a->x; d->ty = a->y; }
+    if (!pl_def) { d->hunting = true; d->tx = a->x; d->ty = a->y; band_alert(g, d, a->x, a->y); }
     if ((int)(rng_u32(&g->rng) % 100) >= chance) {
         if (pl_att) game_msg(g, C_DIM, "you miss the %s.", di->name);
         else if (pl_def) game_msg(g, C_DIM, "the %s misses you.", ai->name);
@@ -816,12 +903,11 @@ static bool mob_free(Game *g, int x, int y)
 
 static void mob_go(Game *g, Mob *m, int nx, int ny);
 
-/* can this monster step from where it is to (nx, ny)? Each kind has its own ground. */
-static bool mob_can_enter(Game *g, const Mob *m, int nx, int ny)
+/* could this monster ever walk on (nx, ny), coming from (x, y)? Its own kind of ground, whoever's there */
+static bool mob_ground(Game *g, const Mob *m, int x, int y, int nx, int ny)
 {
     Level *lv = game_level(g);
-    if (!in_map(nx, ny) || !diag_ok(lv, m->x, m->y, nx - m->x, ny - m->y)) return false;
-    if ((g->player.x == nx && g->player.y == ny) || game_mob_at(g, nx, ny)) return false;
+    if (!in_map(nx, ny) || !diag_ok(lv, x, y, nx - x, ny - y)) return false;
     Tile t = lv->t[ny][nx];
     if (lv->burn[ny][nx]) return false;                                         /* nothing walks into burning oil */
     switch (m->kind) {
@@ -833,6 +919,155 @@ static bool mob_can_enter(Game *g, const Mob *m, int nx, int ny)
                     return tile_walkable(t) && t != T_DEEP;                     /* they won't swim */
     default:        return tile_walkable(t);
     }
+}
+
+/* can this monster step from where it is to (nx, ny)? Each kind has its own ground. */
+static bool mob_can_enter(Game *g, const Mob *m, int nx, int ny)
+{
+    if (!in_map(nx, ny) || (g->player.x == nx && g->player.y == ny) || game_mob_at(g, nx, ny)) return false;
+    return mob_ground(g, m, m->x, m->y, nx, ny);
+}
+
+/* how far each tile is from (tx, ty), walking as this monster would, out as far as
+ * the monster itself (or everywhere it can reach). False if it can't get there. */
+static int mob_dist[MAP_H][MAP_W];
+static bool mob_bfs(Game *g, const Mob *m, int tx, int ty)
+{
+    static int q[MAP_W * MAP_H];
+    for (int y = 0; y < MAP_H; y++)
+        for (int x = 0; x < MAP_W; x++) mob_dist[y][x] = -1;
+    if (!in_map(tx, ty)) return false;
+    int h = 0, n = 0;
+    mob_dist[ty][tx] = 0;
+    q[n++] = ty * MAP_W + tx;
+    while (h < n) {
+        int c = q[h++], x = c % MAP_W, y = c / MAP_W;
+        if (x == m->x && y == m->y) return true;
+        for (int d = 0; d < 8; d++) {
+            int nx = x + DX8[d], ny = y + DY8[d];
+            if (!in_map(nx, ny) || mob_dist[ny][nx] >= 0) continue;
+            /* the monster's own tile is always ground it can leave */
+            if (!(nx == m->x && ny == m->y) && !mob_ground(g, m, x, y, nx, ny)) continue;
+            if (nx == m->x && ny == m->y && !diag_ok(game_level(g), x, y, nx - x, ny - y)) continue;
+            mob_dist[ny][nx] = mob_dist[y][x] + 1;
+            q[n++] = ny * MAP_W + nx;
+        }
+    }
+    return false;
+}
+
+static void mob_step_toward(Game *g, Mob *m, int tx, int ty);
+
+/* a step along the way to (tx, ty), around walls and water; straight at it if
+ * there's no way round. Opens a door rather than stepping into it. */
+static void mob_path_step(Game *g, Mob *m, int tx, int ty)
+{
+    if (!mob_bfs(g, m, tx, ty)) { mob_step_toward(g, m, tx, ty); return; }
+    Level *lv = game_level(g);
+    int here = mob_dist[m->y][m->x], best = -1, bd = here;
+    for (int d = 0; d < 8; d++) {
+        int nx = m->x + DX8[d], ny = m->y + DY8[d];
+        if (!in_map(nx, ny) || mob_dist[ny][nx] < 0 || mob_dist[ny][nx] >= bd) continue;
+        if (!mob_can_enter(g, m, nx, ny)) continue;          /* someone's in the way: another way, if there is one */
+        bd = mob_dist[ny][nx];
+        best = d;
+    }
+    if (best < 0) {
+        /* a leader held up by its own band in a narrow way changes places with them
+         * (the others just queue behind each other) */
+        for (int d = 0; d < 8 && m->band && m->lead && !m->hunting; d++) {
+            int nx = m->x + DX8[d], ny = m->y + DY8[d];
+            if (!in_map(nx, ny) || mob_dist[ny][nx] < 0 || mob_dist[ny][nx] >= here) continue;
+            Mob *o = game_mob_at(g, nx, ny);
+            if (!o || o->band != m->band || !mob_ground(g, o, nx, ny, m->x, m->y) || !mob_ground(g, m, m->x, m->y, nx, ny)) continue;
+            int ox = m->x, oy = m->y;
+            start_tween(o, ox, oy);
+            mob_go(g, m, nx, ny);
+            return;
+        }
+        return;                                              /* held up: wait */
+    }
+    int nx = m->x + DX8[best], ny = m->y + DY8[best];
+    if (lv->t[ny][nx] == T_DOOR) {
+        lv->t[ny][nx] = T_DOOR_OPEN;
+        lv->light_dirty = true;
+        sfx(g, SND_DOOR, nx, ny);
+        return;
+    }
+    mob_go(g, m, nx, ny);
+}
+
+static bool band_spot(const Level *lv, int x, int y);
+static void mob_wander(Game *g, Mob *m);
+
+/* somewhere for a band's leader to head for: a room it can get to, not where it is */
+static bool band_pick_goal(Game *g, Mob *m)
+{
+    Level *lv = game_level(g);
+    int here = in_map(m->x, m->y) ? lv->room[m->y][m->x] : -1;
+    for (int tries = 0; tries < 12; tries++) {
+        int r = rng_range(&g->rng, 0, lv->nrooms - 1);
+        const Room *rm = &lv->rooms[r];
+        if (r == here || rm->w < 1) continue;
+        int x = rng_range(&g->rng, rm->x, rm->x + rm->w - 1), y = rng_range(&g->rng, rm->y, rm->y + rm->h - 1);
+        if (!band_spot(lv, x, y) || lv->room[y][x] != r || !mob_bfs(g, m, x, y)) continue;
+        m->tx = x;
+        m->ty = y;
+        return true;
+    }
+    return false;
+}
+
+/* the rest of the band hears one of them raise the cry */
+static void band_alert(Game *g, const Mob *m, int x, int y)
+{
+    if (!m->band) return;
+    Mob *ms = g->mobs[g->depth];
+    for (int i = 0; i < MAX_MOBS; i++) {
+        Mob *o = &ms[i];
+        if (o == m || !o->alive || o->band != m->band || o->hunting || cheb(o->x, o->y, m->x, m->y) > 12) continue;
+        o->asleep = false;
+        o->hunting = true;
+        o->tx = x;
+        o->ty = y;
+    }
+}
+
+/* a wandering band's turn, when it isn't after anyone: the leader goes from room
+ * to room, stopping a while in each; the others keep close behind it */
+static void band_turn(Game *g, Mob *m)
+{
+    Mob *ms = g->mobs[g->depth], *lead = NULL;
+    if (!m->lead) {
+        for (int i = 0; i < MAX_MOBS; i++)
+            if (ms[i].alive && ms[i].band == m->band && ms[i].lead) { lead = &ms[i]; break; }
+        if (!lead) { m->lead = true; m->tx = m->ty = -1; m->linger = 0; }     /* the leader's gone: this one leads now */
+    }
+    if (m->lead) {
+        if (m->linger > 0) {
+            m->linger--;
+            if (rng_chance(&g->rng, 20)) mob_wander(g, m);
+            return;
+        }
+        if (!in_map(m->tx, m->ty) || (m->x == m->tx && m->y == m->ty) || cheb(m->x, m->y, m->tx, m->ty) <= 1) {
+            /* got there (or nowhere to go yet): stop a while, then on to the next room */
+            bool first = !in_map(m->tx, m->ty);
+            if (!band_pick_goal(g, m)) { m->tx = m->ty = -1; m->linger = 6; return; }
+            m->linger = first ? 0 : (uint8_t)rng_range(&g->rng, 3, 8);
+            if (m->linger) return;
+        }
+        /* now and then wait for a straggler to catch up (but not for one that's lost the way) */
+        bool behind = false;
+        for (int i = 0; i < MAX_MOBS; i++) {
+            int dd = cheb(ms[i].x, ms[i].y, m->x, m->y);
+            if (ms[i].alive && ms[i].band == m->band && &ms[i] != m && dd > 3 && dd <= 10) behind = true;
+        }
+        if (behind && rng_chance(&g->rng, 50)) return;
+        mob_path_step(g, m, m->tx, m->ty);
+        return;
+    }
+    if (cheb(m->x, m->y, lead->x, lead->y) > 2) mob_path_step(g, m, lead->x, lead->y);
+    else if (rng_chance(&g->rng, 15)) mob_wander(g, m);
 }
 
 /* a step in a random direction (wandering, or a bat's flitting) */
@@ -1113,7 +1348,7 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
         return;
     }
     if (sees) {
-        if (!m->hunting) vocal(g, m);           /* it has spotted you */
+        if (!m->hunting) { vocal(g, m); band_alert(g, m, p->x, p->y); }     /* it has spotted you, and cries out */
         m->hunting = true;
         m->tx = p->x; m->ty = p->y;
     } else if (shade && m->hunting && dist <= 7 && rng_chance(&g->rng, 6)) {
@@ -1132,8 +1367,14 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
     }
     if (m->hunting) {
         if (bat && rng_chance(&g->rng, 40)) mob_wander(g, m);
+        else if (m->band) mob_path_step(g, m, m->tx, m->ty);   /* a band hunts you down the long way round */
         else mob_step_toward(g, m, m->tx, m->ty);
-        if (m->x == m->tx && m->y == m->ty && !sees) m->hunting = false;
+        if (m->x == m->tx && m->y == m->ty && !sees) {
+            m->hunting = false;
+            if (m->band) { m->tx = m->ty = -1; m->linger = (uint8_t)rng_range(&g->rng, 2, 5); }   /* lost you: on its way again */
+        }
+    } else if (m->band) {
+        band_turn(g, m);
     } else if (rng_chance(&g->rng, bat ? 70 : 35)) {
         mob_wander(g, m);
     }
@@ -1260,6 +1501,9 @@ static void fire_harm(Game *g)
 }
 
 static void spot_traps(Game *g);
+static void search_secrets(Game *g);
+static void wanderers_arrive(Game *g);
+static int g_search;    /* how hard you're looking this turn: 0 in passing, 1 resting, 2 searching, 3 the last turn of a search */
 
 static void end_turn(Game *g)
 {
@@ -1297,8 +1541,10 @@ static void end_turn(Game *g)
         g->regen = 0;
         if (p->hp < game_max_hp(g) && g->state != GS_DEAD) p->hp++;
     }
+    if (g->state == GS_PLAY) wanderers_arrive(g);
     compute_view(g);
-    if (g->state == GS_PLAY) spot_traps(g);
+    if (g->state == GS_PLAY) { spot_traps(g); search_secrets(g); }
+    g_search = 0;
 }
 
 /* ------------------------------------------------------------ commands */
@@ -1571,6 +1817,66 @@ static void spot_traps(Game *g)
         }
 }
 
+/* hidden doors: you might notice one in passing, more likely resting by it, and
+ * very likely if you stop and search; a torch shows the seams in the stone */
+static void search_secrets(Game *g)
+{
+    Level *lv = game_level(g);
+    Mob *p = &g->player;
+    int reach = g_search >= 2 ? 3 : g_search == 1 ? 2 : 1;
+    for (int y = p->y - reach; y <= p->y + reach; y++)
+        for (int x = p->x - reach; x <= p->x + reach; x++) {
+            if (!in_map(x, y) || !(lv->f[y][x] & F_SECRET) || !(lv->f[y][x] & (F_VIS | F_LOS))) continue;
+            int d = cheb(x, y, p->x, p->y), t = g->torch_lit;
+            int pct = g_search >= 2 ? (d <= 1 ? 30 + 15 * t : d == 2 ? 18 + 10 * t : 9 + 6 * t)
+                    : g_search == 1 ? (d <= 1 ? 15 + 10 * t : 6 + 5 * t)
+                    : (d <= 1 ? 7 + 8 * t : 0);
+            if (g_search == 3) pct *= 2;
+            if (!rng_chance(&g->rng, pct)) continue;
+            lv->f[y][x] &= (uint8_t)~F_SECRET;
+            lv->f[y][x] |= F_SEEN;
+            lv->t[y][x] = T_DOOR;
+            lv->light_dirty = true;
+            game_msg(g, C_GOOD, "you find a hidden door in the wall!");
+            sfx(g, SND_DOOR, x, y);
+            floater(g, x, y, 0xffd070, "!");
+            game_stop(g);
+        }
+}
+
+void game_search(Game *g)
+{
+    if (g->state != GS_PLAY) return;
+    game_msg(g, C_DIM, "you search the walls about you...");
+    g->autom = AUTO_SEARCH;
+    g->auto_t = 0;
+    g->pi = 0;
+}
+
+/* now and then a band comes down from the level above, or up from below, looking for food */
+static void wanderers_arrive(Game *g)
+{
+    int d = g->depth;
+    if (d < 2 || game_final(g) || !rng_chance(&g->rng, 1) || rng_range(&g->rng, 0, 2)) return;   /* about one turn in 300 */
+    Level *lv = game_level(g);
+    Mob *ms = g->mobs[d], *p = &g->player;
+    int alive = 0;
+    for (int i = 0; i < MAX_MOBS; i++) alive += ms[i].alive && ms[i].kind != MK_EEL;
+    if (alive >= 3 + d || alive >= MAX_MOBS - 6) return;
+    /* by the stairs if they're out of sight, otherwise anywhere well away from you */
+    int sx[2] = { lv->upx, lv->downx }, sy[2] = { lv->upy, lv->downy };
+    for (int tries = 0; tries < 300; tries++) {
+        int x, y;
+        if (tries < 2) { int k = rng_range(&g->rng, 0, 1); x = sx[k] + rng_range(&g->rng, -1, 1); y = sy[k] + rng_range(&g->rng, -1, 1); }
+        else { x = rng_range(&g->rng, 1, MAP_W - 2); y = rng_range(&g->rng, 1, MAP_H - 2); }
+        if (!band_spot(lv, x, y) || (lv->f[y][x] & (F_VIS | F_LOS)) || cheb(x, y, p->x, p->y) < 14 || game_mob_at(g, x, y)) continue;
+        Rng r = { rng_u32(&g->rng) | 1u };
+        if (!spawn_band(g, d, &r, x, y)) return;
+        if (rng_chance(&g->rng, 40)) game_msg(g, C_DIM, "you hear footsteps somewhere in the dark.");
+        return;
+    }
+}
+
 /* special rooms say what they are the first time you see into them */
 static void notice_rooms(Game *g)
 {
@@ -1590,6 +1896,8 @@ static void notice_rooms(Game *g)
             game_msg(g, C_INFO, "rusted blades and broken hafts litter the floor: an old armoury. Something has made it a lair.");
         else if (rm->kind == RK_NEST)
             game_msg(g, C_WARN, "bones lie strewn across the floor, and the cold has a smell to it: a shade's nest.");
+        else if (rm->kind == RK_SECRET)
+            game_msg(g, C_GOOD, "a hidden room, untouched for an age. Someone left things here they meant to come back for.");
     }
 }
 
@@ -1846,6 +2154,7 @@ bool game_move(Game *g, int dx, int dy)
 bool game_rest(Game *g)
 {
     if (g->state != GS_PLAY) return false;
+    if (g_search < 1) g_search = 1;
     end_turn(g);
     return true;
 }
@@ -2130,6 +2439,16 @@ static void auto_step(Game *g)
         }
         game_rest(g);
         return;
+    case AUTO_SEARCH:
+        g->pi++;
+        g_search = g->pi >= 5 ? 3 : 2;
+        end_turn(g);
+        if (g->autom != AUTO_SEARCH) return;                    /* found something, or something found you */
+        if (g->pi >= 5) {
+            game_msg(g, C_DIM, "you find nothing hidden here.");
+            game_stop(g);
+        }
+        return;
     case AUTO_EXPLORE: {
         int n = find_path(g, -1, -1, path, MAX_PATH);
         if (!n) {
@@ -2353,7 +2672,7 @@ void game_update(Game *g, float dt)
     if (g->autom != AUTO_NONE && g->state == GS_PLAY && !g->proj.active) {
         g->auto_t -= dt;
         if (g->auto_t <= 0 && g->player.at >= 0.85f) {
-            g->auto_t = g->autom == AUTO_REST ? 0.02f : 0.075f;
+            g->auto_t = g->autom == AUTO_REST ? 0.02f : g->autom == AUTO_SEARCH ? 0.16f : 0.075f;
             auto_step(g);
         }
     }
@@ -3083,6 +3402,44 @@ bool game_debug_depth(Game *g, int depth)
     compute_view(g);
     arrive(g);
     return true;
+}
+
+bool game_debug_to_secret_door(Game *g)
+{
+    Level *lv = game_level(g);
+    for (int y = 1; y < MAP_H - 1; y++)
+        for (int x = 1; x < MAP_W - 1; x++) {
+            if (!(lv->f[y][x] & F_SECRET)) continue;
+            for (int d = 0; d < 4; d++) {
+                int X = x + DX8[d], Y = y + DY8[d];
+                if (!tile_walkable((Tile)lv->t[Y][X]) || !mob_free(g, X, Y)) continue;
+                int r = lv->room[Y][X];
+                if (r >= 0 && lv->rooms[r].kind == RK_SECRET) continue;
+                place_player(g, X, Y);
+                for (int j = 0; j < MAP_H; j++)
+                    for (int i = 0; i < MAP_W; i++) {
+                        int rr = lv->room[j][i];
+                        bool hidden = rr >= 0 && lv->rooms[rr].kind == RK_SECRET;
+                        if (!hidden) lv->f[j][i] |= F_SEEN;
+                    }
+                compute_view(g);
+                return true;
+            }
+        }
+    return false;
+}
+
+int game_debug_count_bands(Game *g, int *members)
+{
+    Mob *ms = g->mobs[g->depth];
+    int bands = 0, n = 0;
+    for (int i = 0; i < MAX_MOBS; i++) {
+        if (!ms[i].alive || !ms[i].band) continue;
+        n++;
+        if (ms[i].lead) bands++;
+    }
+    if (members) *members = n;
+    return bands;
 }
 
 bool game_debug_to_room(Game *g, int kind)

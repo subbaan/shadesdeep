@@ -15,7 +15,7 @@ typedef enum {
     UA_JUMP_YES, UA_JUMP_NO, UA_NEW_GAME, UA_QUIT, UA_CLOSE,
     UA_INV, UA_THROW, UA_TORCH, UA_PICK, UA_ITEM_THROW, UA_ITEM_USE, UA_ITEM_DROP, UA_MENU_BACK,
     UA_MAP, UA_FORGE,
-    UA_CONTINUE, UA_FAME, UA_TITLE, UA_YES, UA_NO,
+    UA_CONTINUE, UA_FAME, UA_TITLE, UA_YES, UA_NO, UA_SEARCH,
 } UiAction;
 
 /* where the map overview sits on screen, and which tiles it shows */

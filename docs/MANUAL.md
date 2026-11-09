@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.15.2. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.16.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -47,6 +47,7 @@ Every action also has a button on screen.
 | Explore | `x` | **Explore** button |
 | Rest a turn | `z`, `.`, numpad 5 | click yourself |
 | Rest until healed | `Z` | **Rest** button |
+| Search for hidden doors (5 turns) | `s` | **Search** button |
 | Pack | `i` | **Items** button |
 | Throw | `t`, then aim | **Throw** button |
 | Use (light, drink, pour, wield, wear) | `a` | from the item card |
@@ -237,6 +238,17 @@ you warm up:
 Monsters may be asleep. Noise (splashing, a thrown torch or dart landing, mail
 jingling) wakes them and draws them to look.
 
+**Wandering bands.** Not everything waits in its room. On many levels a band
+is on the move: a pack of rats near the top, goblins further down. From depth 3
+a slinger often goes with them, and from depth 6 an ogre may lead them. They go
+from room to room, stopping a while in each, and they're awake. When one of them
+spots you, or you strike one, it cries out, and the rest of the band joins the
+hunt. They hunt the long way round corners and through doors, so a band is
+harder to shake off than a lone goblin. From depth 2 another band now and then
+comes in from the stairs while you're on a level, more so once you've thinned
+out what lives there. If you hear footsteps somewhere in the dark, something
+has arrived.
+
 **Sneak attacks.** A monster that hasn't noticed you can't defend itself. That
 means one that's asleep, dazzled, or awake but not hunting you. Your blow
 **always lands and does triple damage** with any weapon. A dagger does **five
@@ -391,7 +403,8 @@ less likely.
 - You start with **24 HP**.
 - You heal **1 HP every 9 turns**, or every 5 turns beside a fixed fire.
 - **Rest** (`z`) passes a turn. **Rest until healed** (`Z`) keeps going until
-  you're full or something turns up.
+  you're full or something turns up. While you rest you're also looking about
+  you, so you may notice a [hidden door](#hidden-doors-and-hidden-rooms) nearby.
 - **Burning oil** sears you for 2–4 a turn while you stand in it.
 - **Healing potions** restore 15 HP.
 - **Chill** lowers your maximum until you warm up by a fire (see
@@ -403,10 +416,16 @@ less likely.
 
 - **Stairs down** lead deeper. `>` travels to them and descends once you've
   seen them.
-- **Chasms** drop to the level below, and through them you can see what's down
+- **Chasms** are where the floor has fallen in: ragged holes with broken
+  flagstones and rubble round the rim, sometimes a smaller hole beside the main
+  one. They drop to the level below, and through them you can see what's down
   there. Stepping in asks first. The fall hurts (more the deeper you are),
   water below breaks it, and it can dent tempered gear. It's a quick way down,
   not a free one.
+- **Lakes** from depth 2: wide water that spreads across rooms, corridors and
+  the walls between them, deep in the middle with shallows round it. There's
+  always a dry way round to everything (or at worst a wade), never a swim you
+  can't avoid.
 - **Water:** wading through the shallows splashes, and splashing carries to
   monsters nearby. Deep water must be swum. It puts out a lit torch, swallows
   anything you drop in it, and drags you under if you wear mail. Goblins,
@@ -464,6 +483,28 @@ From depth 2, most levels have a room with a purpose, and some have two. The mes
   sconces cold, with 3 or more shades in it and a pile of **cold embers**.
   Light its sconces with the shades inside and the blaze burns them, each one
   leaving an ember of its own.
+- **Hidden room** (dust and old coins on the floor): see below.
+
+### Hidden doors and hidden rooms
+
+About a quarter of the first levels, and two levels in five below that, have a
+**hidden room** behind a secret door. The door looks like any other piece of
+wall. It's in the wall of a room or corridor, or at the end of a short passage
+that seems to go nowhere. Nothing has been in that room for an age, and what was
+left there is still there:
+
+- a piece of **tempered gear**, better than you'd expect for the depth
+  (+1 at the top, more further down);
+- a pile of **embers**;
+- two **supplies**, such as potions, flash powder, oil, darts or a warming draught.
+
+**Finding the door.** Walking past right beside it, you might notice it, more
+likely with a lit torch. Resting nearby gives you a better chance, out to two
+tiles. **Searching** (`s`, or the **Search** button) spends five turns looking
+hard at the walls within three tiles, and the last of the five turns is the most
+thorough. Beside the door with a torch lit, one search almost always finds it.
+Searching stops at once if something comes into view. A dead-end passage is
+the best place to look.
 
 ---
 
@@ -584,6 +625,12 @@ with `--no-save` aren't recorded.
   have to choose.
 - **Salt is a safe night's sleep** against shades, but not against anything
   else. Pour it in a dead end where goblins won't wander.
+- **Search the dead ends.** A short passage that stops at a blank wall often
+  has a door at the end of it. Light your torch and press `s`.
+- **Don't camp too long.** Bands of wanderers come in from the stairs now and
+  then. Rest where you can see them coming, or behind a door.
+- **Split a band at a door.** Hold a doorway or corridor so they come at you one
+  at a time, and catch the leader unawares if you can.
 - **Carry a lit torch where traps are likely**, in corridors and at the
   doors of storerooms, and you'll usually see them first.
 - **A mace and a known trapdoor** make a fine pair: knock the ogre in.

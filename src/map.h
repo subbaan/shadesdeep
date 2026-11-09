@@ -58,6 +58,7 @@ enum {
     F_CORR    = 4,      /* corridor */
     F_LOS     = 8,      /* in line of sight this turn, lit or not (eyes in the dark) */
     F_TRAP    = 16,     /* the player knows of the trap here */
+    F_SECRET  = 32,     /* a wall that is really a hidden door (becomes T_DOOR when found) */
 };
 
 /* traps, hidden in the floor (Level.trap); saved as numbers: add new kinds at the end */
@@ -66,7 +67,7 @@ const char *trap_name(int k);
 const char *trap_desc(int k);
 
 /* rooms with a purpose (Room.kind) */
-typedef enum { RK_PLAIN, RK_STORE, RK_ARMOURY, RK_NEST } RoomKind;
+typedef enum { RK_PLAIN, RK_STORE, RK_ARMOURY, RK_NEST, RK_SECRET } RoomKind;   /* saved: add at the end */
 
 typedef enum { L_SCONCE, L_BRAZIER, L_CRYSTAL, L_MOSS, L_FLOORTORCH, L_PLAYER, L_OILFIRE, L_HEART } LightKind;
 

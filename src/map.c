@@ -303,20 +303,42 @@ static void make_cave(Level *lv, Rng *rng, const uint8_t (*mask)[MAP_W])
             }
         memcpy(a, b, sizeof a);
     }
-    int r = lv->nrooms++;
-    Room *rm = &lv->rooms[r];
-    int x0 = MAP_W, y0 = MAP_H, x1 = -1, y1 = -1;
-    for (int y = 2; y < MAP_H - 2; y++)
-        for (int x = 2; x < MAP_W - 2; x++) {
-            if (!a[y][x]) continue;
-            lv->t[y][x] = T_FLOOR;
-            lv->room[y][x] = (int8_t)r;
-            if (x < x0) x0 = x;
-            if (y < y0) y0 = y;
-            if (x > x1) x1 = x;
-            if (y > y1) y1 = y;
+    /* each separate piece is a cavern of its own, so the corridors find them all
+     * (under two chasms far apart there are two caverns, not one with a gap in it) */
+    static int q[MAP_W * MAP_H];
+    for (int y = 0; y < 2; y++) memset(a[y], 0, MAP_W), memset(a[MAP_H - 1 - y], 0, MAP_W);
+    for (int y = 0; y < MAP_H; y++) a[y][0] = a[y][1] = a[y][MAP_W - 1] = a[y][MAP_W - 2] = 0;
+    for (int sy = 2; sy < MAP_H - 2; sy++)
+        for (int sx = 2; sx < MAP_W - 2; sx++) {
+            if (a[sy][sx] != 1) continue;
+            int r = lv->nrooms < MAX_ROOMS ? lv->nrooms++ : lv->nrooms - 1;
+            bool fresh = r == lv->nrooms - 1 && lv->rooms[r].w == 0;
+            int x0 = MAP_W, y0 = MAP_H, x1 = -1, y1 = -1, h = 0, n = 0;
+            a[sy][sx] = 2;
+            q[n++] = sy * MAP_W + sx;
+            while (h < n) {
+                int c = q[h++], x = c % MAP_W, y = c / MAP_W;
+                lv->t[y][x] = T_FLOOR;
+                lv->room[y][x] = (int8_t)r;
+                if (x < x0) x0 = x;
+                if (y < y0) y0 = y;
+                if (x > x1) x1 = x;
+                if (y > y1) y1 = y;
+                for (int d = 0; d < 4; d++) {
+                    int X = x + (d == 0) - (d == 1), Y = y + (d == 2) - (d == 3);
+                    if (a[Y][X] != 1) continue;
+                    a[Y][X] = 2;
+                    q[n++] = Y * MAP_W + X;
+                }
+            }
+            Room *rm = &lv->rooms[r];
+            if (!fresh) {       /* out of rooms (never in practice): grow the last one */
+                int ox1 = rm->x + rm->w - 1, oy1 = rm->y + rm->h - 1;
+                x0 = x0 < rm->x ? x0 : rm->x; y0 = y0 < rm->y ? y0 : rm->y;
+                x1 = x1 > ox1 ? x1 : ox1; y1 = y1 > oy1 ? y1 : oy1;
+            }
+            *rm = (Room){ x0, y0, x1 - x0 + 1, y1 - y0 + 1, false, true, RK_PLAIN, false };
         }
-    *rm = (Room){ x0, y0, x1 - x0 + 1, y1 - y0 + 1, false, true, RK_PLAIN, false };
 }
 
 static bool is_door_spot(const Level *lv, int x, int y)
@@ -355,6 +377,282 @@ static void pick_floor_in_room(const Level *lv, Rng *rng, int r, int *ox, int *o
         if (lv->room[y][x] == r && lv->t[y][x] == T_FLOOR) { *ox = x; *oy = y; return; }
     }
     *ox = rm->x; *oy = rm->y;
+}
+
+/* ---------------------------------------------------------------- lakes */
+
+/* can the player cross this without swimming? */
+static bool dry_way(Tile t) { return tile_walkable(t) && t != T_DEEP; }
+
+/* mark everything reachable from (sx, sy) on foot, given the tiles t */
+static int reach(const uint8_t (*t)[MAP_W], int sx, int sy, uint8_t (*seen)[MAP_W])
+{
+    static int q[MAP_W * MAP_H];
+    memset(seen, 0, sizeof(uint8_t) * MAP_W * MAP_H);
+    int h = 0, n = 0;
+    seen[sy][sx] = 1;
+    q[n++] = sy * MAP_W + sx;
+    while (h < n) {
+        int c = q[h++], x = c % MAP_W, y = c / MAP_W;
+        for (int d = 0; d < 4; d++) {
+            int X = x + (d == 0) - (d == 1), Y = y + (d == 2) - (d == 3);
+            if (!in_map(X, Y) || seen[Y][X] || !dry_way((Tile)t[Y][X])) continue;
+            seen[Y][X] = 1;
+            q[n++] = Y * MAP_W + X;
+        }
+    }
+    return n;
+}
+
+/* a lumpy blob, grown by a cellular automaton in a w x h box; returns its size */
+static int blob(Rng *rng, int w, int h, uint8_t (*b)[MAP_W])
+{
+    static uint8_t a[MAP_H][MAP_W], c[MAP_H][MAP_W];
+    memset(a, 0, sizeof a);
+    for (int y = 1; y < h - 1; y++)
+        for (int x = 1; x < w - 1; x++) a[y][x] = rng_chance(rng, 55);
+    for (int it = 0; it < 5; it++) {
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                int n = 0;
+                for (int j = -1; j <= 1; j++)
+                    for (int i = -1; i <= 1; i++)
+                        if (x + i >= 0 && y + j >= 0 && x + i < w && y + j < h) n += a[y + j][x + i];
+                c[y][x] = x > 0 && y > 0 && x < w - 1 && y < h - 1 && (n >= 5 || (a[y][x] && n >= 4));
+            }
+        memcpy(a, c, sizeof a);
+    }
+    /* keep the biggest piece */
+    static int q[MAP_W * MAP_H];
+    static uint8_t lab[MAP_H][MAP_W];
+    memset(lab, 0, sizeof lab);
+    int best = 0, best_l = 0;
+    for (int y = 0, l = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            if (!a[y][x] || lab[y][x]) continue;
+            l++;
+            int qh = 0, qn = 0;
+            lab[y][x] = (uint8_t)l;
+            q[qn++] = y * MAP_W + x;
+            while (qh < qn) {
+                int cc = q[qh++], cx = cc % MAP_W, cy = cc / MAP_W;
+                for (int d = 0; d < 4; d++) {
+                    int X = cx + (d == 0) - (d == 1), Y = cy + (d == 2) - (d == 3);
+                    if (X < 0 || Y < 0 || X >= w || Y >= h || !a[Y][X] || lab[Y][X]) continue;
+                    lab[Y][X] = (uint8_t)l;
+                    q[qn++] = Y * MAP_W + X;
+                }
+            }
+            if (qn > best) { best = qn; best_l = l; }
+        }
+    for (int y = 0; y < MAP_H; y++)
+        for (int x = 0; x < MAP_W; x++) b[y][x] = y < h && x < w && best_l && lab[y][x] == best_l;
+    return best;
+}
+
+/* Brogue-style lakes: a big blob of deep water with a wreath of shallows, laid
+ * across rooms, corridors and the walls between them, wherever it doesn't cut
+ * off any part of the level from the stairs. Returns how many were made. */
+static int make_lakes(Level *lv, Rng *rng, int want)
+{
+    static uint8_t b[MAP_H][MAP_W], nt[MAP_H][MAP_W], seen[MAP_H][MAP_W], before[MAP_H][MAP_W];
+    int made = 0;
+    for (int tries = 0; tries < 30 && made < want; tries++) {
+        int w = rng_range(rng, 10, 22), h = rng_range(rng, 7, 13);
+        if (blob(rng, w, h, b) < w * h / 4) continue;
+        int ox = rng_range(rng, 1, MAP_W - w - 1), oy = rng_range(rng, 1, MAP_H - h - 1);
+        memcpy(nt, lv->t, sizeof nt);
+        /* what may be flooded: plain ground, rubble, walls and bare rock; well away from the stairs and chasms */
+#define FLOODABLE(X, Y) ((lv->t[Y][X] == T_FLOOR || lv->t[Y][X] == T_RUBBLE || lv->t[Y][X] == T_WALL || lv->t[Y][X] == T_ROCK) \
+                         && (X) > 1 && (Y) > 1 && (X) < MAP_W - 2 && (Y) < MAP_H - 2)
+        static uint8_t keep_off[MAP_H][MAP_W];
+        memset(keep_off, 0, sizeof keep_off);
+        for (int y = 0; y < MAP_H; y++)
+            for (int x = 0; x < MAP_W; x++) {
+                Tile t = (Tile)lv->t[y][x];
+                int r = t == T_STAIRS_UP || t == T_STAIRS_DOWN ? 3 : t == T_CHASM || t == T_BRAZIER || t == T_HEARTH
+                        || t == T_DOOR || t == T_DOOR_OPEN ? 1 : -1;
+                if (lv->room[y][x] >= 0 && lv->room[y][x] == lv->hall) r = 1;
+                for (int j = -r; j <= r && r >= 0; j++)
+                    for (int i = -r; i <= r; i++)
+                        if (in_map(x + i, y + j)) keep_off[y + j][x + i] = 1;
+            }
+        int deep = 0;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                int X = ox + x, Y = oy + y;
+                if (!b[y][x] || !FLOODABLE(X, Y) || keep_off[Y][X]) continue;
+                nt[Y][X] = T_DEEP;
+                deep++;
+            }
+        if (deep < 12) continue;
+        /* it has to lie mostly over open ground, and spill across at least two places
+         * (rooms, or a room and a corridor): a lake that's all bare rock is a sealed pond */
+        {
+            int open = 0, places = 0, seen_place[MAX_ROOMS + 1] = { 0 };
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++) {
+                    int X = ox + x, Y = oy + y;
+                    if (nt[Y][X] != T_DEEP || lv->t[Y][X] == T_DEEP) continue;
+                    for (int j = -1; j <= 1; j++)
+                        for (int i = -1; i <= 1; i++) {
+                            Tile t = tile_at(lv, X + i, Y + j);
+                            if (t != T_FLOOR && t != T_RUBBLE) continue;
+                            if (!i && !j) open++;
+                            int rr = lv->room[Y + j][X + i], k = rr >= 0 ? rr : MAX_ROOMS;
+                            if (!seen_place[k]) { seen_place[k] = 1; places++; }
+                        }
+                }
+            if (open * 100 < deep * 40 || places < 2) continue;
+        }
+        /* the wreath: shallows round the deep water, a tile or two wide */
+        for (int y = 0; y < MAP_H; y++)
+            for (int x = 0; x < MAP_W; x++) {
+                if (nt[y][x] == T_DEEP || !FLOODABLE(x, y) || keep_off[y][x]) continue;
+                int dmin = 9;
+                for (int j = -2; j <= 2; j++)
+                    for (int i = -2; i <= 2; i++) {
+                        if (!in_map(x + i, y + j) || nt[y + j][x + i] != T_DEEP || lv->t[y + j][x + i] == T_DEEP) continue;
+                        int dd = abs(i) > abs(j) ? abs(i) : abs(j);
+                        if (dd < dmin) dmin = dd;
+                    }
+                if (dmin == 1 || (dmin == 2 && (hash2(x, y, lv->seed ^ 0x1a4e) % 100) < 45)) nt[y][x] = T_SHALLOW;
+            }
+        /* no slivers of water poking into the stone: where new water in what was wall or
+         * rock is mostly closed in by stone, the stone stays */
+        for (int it = 0; it < 3; it++)
+            for (int y = 1; y < MAP_H - 1; y++)
+                for (int x = 1; x < MAP_W - 1; x++) {
+                    Tile was = (Tile)lv->t[y][x];
+                    if (nt[y][x] == was || !tile_water((Tile)nt[y][x]) || (was != T_WALL && was != T_ROCK)) continue;
+                    int stone = 0;
+                    for (int d = 0; d < 4; d++) {
+                        Tile n = (Tile)nt[y + (d == 2) - (d == 3)][x + (d == 0) - (d == 1)];
+                        stone += n == T_WALL || n == T_ROCK;
+                    }
+                    if (stone >= 3) nt[y][x] = (uint8_t)was;
+                }
+        /* deep water never meets dry land without a shallow lip */
+        for (int y = 1; y < MAP_H - 1; y++)
+            for (int x = 1; x < MAP_W - 1; x++) {
+                if (nt[y][x] != T_DEEP || lv->t[y][x] == T_DEEP) continue;
+                for (int d = 0; d < 4; d++) {
+                    int X = x + (d == 0) - (d == 1), Y = y + (d == 2) - (d == 3);
+                    Tile n = (Tile)nt[Y][X];
+                    if (dry_way(n) && n != T_SHALLOW) { nt[y][x] = T_SHALLOW; break; }
+                }
+            }
+#undef FLOODABLE
+        /* nothing that could be reached on foot before may be cut off now */
+        int sx = lv->upx, sy = lv->upy;
+        reach((const uint8_t (*)[MAP_W])lv->t, sx, sy, before);
+        reach((const uint8_t (*)[MAP_W])nt, sx, sy, seen);
+        bool ok = true;
+        for (int y = 0; y < MAP_H && ok; y++)
+            for (int x = 0; x < MAP_W; x++) {
+                if (!dry_way((Tile)nt[y][x]) || seen[y][x]) continue;
+                if (before[y][x]) { ok = false; break; }
+                if (nt[y][x] == T_SHALLOW) nt[y][x] = T_DEEP;      /* a new shallow nobody can wade to: deepen it */
+            }
+        if (!ok) continue;
+        /* take it, and wall in the rock it opened */
+        for (int y = 0; y < MAP_H; y++)
+            for (int x = 0; x < MAP_W; x++)
+                if (nt[y][x] != lv->t[y][x]) {
+                    lv->t[y][x] = nt[y][x];
+                    lv->f[y][x] &= (uint8_t)~F_SECRET;
+                }
+        for (int y = 1; y < MAP_H - 1; y++)
+            for (int x = 1; x < MAP_W - 1; x++) {
+                if (lv->t[y][x] != T_ROCK) continue;
+                for (int j = -1; j <= 1; j++)
+                    for (int i = -1; i <= 1; i++)
+                        if (tile_water((Tile)lv->t[y + j][x + i])) lv->t[y][x] = T_WALL;
+            }
+        made++;
+    }
+    return made;
+}
+
+/* -------------------------------------------------------- secret rooms */
+
+/* A small room behind a hidden door: in the wall of a room or corridor, or at
+ * the end of a short dead-end passage. Returns its room index, or -1. */
+static int make_secret_room(Level *lv, Rng *rng)
+{
+    if (lv->nrooms >= MAX_ROOMS) return -1;
+    static const int DX[4] = { 1, -1, 0, 0 }, DY[4] = { 0, 0, 1, -1 };
+    for (int tries = 0; tries < 2000; tries++) {
+        int x = rng_range(rng, 2, MAP_W - 3), y = rng_range(rng, 2, MAP_H - 3);
+        if (lv->t[y][x] != T_WALL || (lv->f[y][x] & F_SECRET) || level_light_on(lv, x, y)) continue;
+        int d = rng_range(rng, 0, 3), dx = DX[d], dy = DY[d], px = dy ? 1 : 0, py = dx ? 1 : 0;
+        /* open ground behind the wall, rock beyond it, and wall to either side */
+        Tile back = tile_at(lv, x - dx, y - dy);
+        if (back != T_FLOOR || lv->trap[y - dy][x - dx]) continue;
+        if (tile_at(lv, x + dx, y + dy) != T_ROCK) continue;
+        if (tile_at(lv, x + px, y + py) != T_WALL || tile_at(lv, x - px, y - py) != T_WALL) continue;
+        int stub = rng_chance(rng, 40) ? rng_range(rng, 2, 4) : 0;
+        int doorx = x + dx * stub, doory = y + dy * stub;
+        int rw = rng_range(rng, 3, 6), rh = rng_range(rng, 3, 4);      /* along, across the way in */
+        int off = rng_range(rng, 0, rh - 1);
+        /* the room's interior, as a rectangle */
+        int ax = doorx + dx, ay = doory + dy;
+        int x0, y0, w, h;
+        if (dx) { w = rw; h = rh; x0 = dx > 0 ? ax : ax - rw + 1; y0 = doory - off; }
+        else    { w = rh; h = rw; x0 = doorx - off; y0 = dy > 0 ? ay : ay - rw + 1; }
+        if (x0 < 2 || y0 < 2 || x0 + w > MAP_W - 2 || y0 + h > MAP_H - 2) continue;
+        /* all rock where it goes, and nothing but rock or wall around it */
+        bool ok = true;
+        for (int j = y0 - 1; j <= y0 + h && ok; j++)
+            for (int i = x0 - 1; i <= x0 + w; i++) {
+                Tile t = tile_at(lv, i, j);
+                bool inside = i >= x0 && j >= y0 && i < x0 + w && j < y0 + h;
+                if (inside ? t != T_ROCK : !(t == T_ROCK || (t == T_WALL && !(lv->f[j][i] & F_SECRET))) || level_light_on(lv, i, j))
+                    { if (!(i == doorx && j == doory)) { ok = false; break; } }
+            }
+        /* the passage (and the door at its end) runs through rock, touching nothing */
+        for (int k = 1; k <= stub && ok; k++) {
+            int cx = x + dx * k, cy = y + dy * k;
+            for (int s = -1; s <= 1; s++)
+                if (tile_at(lv, cx + px * s, cy + py * s) != T_ROCK) { ok = false; break; }
+        }
+        if (!ok) continue;
+        int r = lv->nrooms++;
+        lv->rooms[r] = (Room){ x0, y0, w, h, true, false, RK_SECRET, false };
+        for (int j = y0; j < y0 + h; j++)
+            for (int i = x0; i < x0 + w; i++) { lv->t[j][i] = T_FLOOR; lv->room[j][i] = (int8_t)r; }
+        for (int k = 0; k < stub; k++) {         /* the dead end: the wall opens onto it */
+            int cx = x + dx * k, cy = y + dy * k;
+            lv->t[cy][cx] = T_FLOOR;
+            lv->f[cy][cx] |= F_CORR;
+        }
+        lv->t[doory][doorx] = T_WALL;
+        lv->f[doory][doorx] |= F_SECRET;
+        /* wall in what was opened up */
+        for (int j = y0 - 2; j <= y0 + h + 1; j++)
+            for (int i = x0 - 2; i <= x0 + w + 1; i++) {
+                if (tile_at(lv, i, j) != T_ROCK) continue;
+                for (int jj = -1; jj <= 1; jj++)
+                    for (int ii = -1; ii <= 1; ii++) {
+                        Tile n = tile_at(lv, i + ii, j + jj);
+                        if (n != T_ROCK && n != T_WALL) lv->t[j][i] = T_WALL;
+                    }
+            }
+        for (int k = 0; k < stub; k++)
+            for (int s = -1; s <= 1; s += 2) {
+                int cx = x + dx * k + px * s, cy = y + dy * k + py * s;
+                if (tile_at(lv, cx, cy) == T_ROCK) lv->t[cy][cx] = T_WALL;
+            }
+        /* a cold sconce on its far wall, for whoever finds it */
+        for (int i = x0; i < x0 + w; i++)
+            if (tile_at(lv, i, y0 - 1) == T_WALL && !(lv->f[y0 - 1][i] & F_SECRET) && tile_solid(tile_at(lv, i, y0 - 2))
+                && !(i == doorx && y0 - 1 == doory) && (hash2(i, y0, lv->seed) & 1)) {
+                level_add_light(lv, L_SCONCE, i, y0, i, y0 - 1, false, r);
+                break;
+            }
+        return r;
+    }
+    return -1;
 }
 
 void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[MAP_W], uint8_t (*holes)[MAP_W])
@@ -538,23 +836,97 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
         Room *rm = &lv->rooms[pick];
         float ex = (rm->w - 2) / 2.0f - 0.2f, ey = (rm->h - 2) / 2.0f - 0.2f;
         float ccx = rm->x + rm->w / 2.0f, ccy = rm->y + rm->h / 2.0f;
-        float ph = rng_f(&rng) * 6.28f;
-        for (int y = rm->y + 1; y < rm->y + rm->h - 1; y++)
-            for (int x = rm->x + 1; x < rm->x + rm->w - 1; x++) {
+        float ph = rng_f(&rng) * 6.28f, ph2 = rng_f(&rng) * 6.28f;
+        int x0 = rm->x + 1, x1 = rm->x + rm->w - 2, y0 = rm->y + 1, y1 = rm->y + rm->h - 2;
+        /* a lumpy hole, its rim crumbled away here and there */
+        for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++) {
                 if (lv->t[y][x] != T_FLOOR) continue;
                 float dx = (x + 0.5f - ccx) / ex, dy = (y + 0.5f - ccy) / ey;
                 float ang = atan2f(dy, dx);
-                float rr = 0.92f + 0.14f * sinf(ang * 3 + ph) + 0.08f * sinf(ang * 5 - ph);
-                if (dx * dx + dy * dy <= rr * rr) {
-                    lv->t[y][x] = T_CHASM;
-                    if (holes) holes[y][x] = 1;
+                float rr = 0.88f + 0.15f * sinf(ang * 3 + ph) + 0.10f * sinf(ang * 5 - ph) + 0.07f * sinf(ang * 7 + ph2);
+                float jit = ((float)(hash2(x, y, seed ^ 0xc4a5u) % 100) / 100.0f - 0.5f) * 0.45f;
+                if (dx * dx + dy * dy <= rr * rr + jit) lv->t[y][x] = T_CHASM;
+            }
+        /* the edge crumbles back unevenly: bites out of the rim, and the floor fallen in beside it */
+        for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++) {
+                int n = 0;
+                for (int d = 0; d < 4; d++) n += tile_at(lv, x + (d == 0) - (d == 1), y + (d == 2) - (d == 3)) == T_CHASM;
+                uint32_t hh = hash2(x, y, seed ^ 0x6b1eu) % 100;
+                if (lv->t[y][x] == T_CHASM && ((n <= 2 && hh < 60) || (n == 3 && hh < 30))) lv->t[y][x] = T_FLOOR;
+                else if (lv->t[y][x] == T_FLOOR && n >= 1 && hh < 18 && x > x0 && y > y0 && x < x1 && y < y1) lv->t[y][x] = T_CHASM;
+            }
+        /* tidy: no lone pillars of floor in it, no lone pits off it */
+        for (int it = 0; it < 2; it++)
+            for (int y = y0; y <= y1; y++)
+                for (int x = x0; x <= x1; x++) {
+                    int n = 0;
+                    for (int d = 0; d < 4; d++) n += tile_at(lv, x + (d == 0) - (d == 1), y + (d == 2) - (d == 3)) == T_CHASM;
+                    if (lv->t[y][x] == T_FLOOR && n >= 4) lv->t[y][x] = T_CHASM;
+                    else if (lv->t[y][x] == T_CHASM && n <= 1) lv->t[y][x] = T_FLOOR;
+                }
+        /* floor left as an island out in the pit falls in with it */
+        {
+            static uint8_t ok[MAP_H][MAP_W];
+            static int q[MAP_W * MAP_H];
+            memset(ok, 0, sizeof ok);
+            int qh = 0, qn = 0;
+            for (int y = rm->y; y < rm->y + rm->h; y++)
+                for (int x = rm->x; x < rm->x + rm->w; x++)
+                    if ((x < x0 || x > x1 || y < y0 || y > y1) && lv->t[y][x] != T_CHASM) { ok[y][x] = 1; q[qn++] = y * MAP_W + x; }
+            while (qh < qn) {
+                int c = q[qh++], x = c % MAP_W, y = c / MAP_W;
+                for (int d = 0; d < 4; d++) {
+                    int X = x + (d == 0) - (d == 1), Y = y + (d == 2) - (d == 3);
+                    if (X < x0 || X > x1 || Y < y0 || Y > y1 || ok[Y][X] || lv->t[Y][X] != T_FLOOR) continue;
+                    ok[Y][X] = 1;
+                    q[qn++] = Y * MAP_W + X;
                 }
             }
+            for (int y = y0; y <= y1; y++)
+                for (int x = x0; x <= x1; x++)
+                    if (lv->t[y][x] == T_FLOOR && !ok[y][x]) lv->t[y][x] = T_CHASM;
+        }
+        /* where the floor gave way around it: a pit or two more, just off the edge */
+        for (int k2 = 0, tries = 0; k2 < rng_range(&rng, 1, 3) && tries < 60; tries++) {
+            int x = rng_range(&rng, x0, x1), y = rng_range(&rng, y0, y1);
+            if (lv->t[y][x] != T_FLOOR) continue;
+            bool clear = true, near = false;
+            for (int j = -1; j <= 1 && clear; j++)
+                for (int i = -1; i <= 1; i++) {
+                    Tile t = tile_at(lv, x + i, y + j);
+                    if (t == T_CHASM) clear = false;
+                    else if (t != T_FLOOR) clear = false;
+                }
+            for (int j = -2; j <= 2 && clear; j++)
+                for (int i = -2; i <= 2; i++) if (tile_at(lv, x + i, y + j) == T_CHASM) near = true;
+            if (!clear || !near) continue;
+            lv->t[y][x] = T_CHASM;
+            k2++;
+        }
+        /* and the broken floor all round the rim */
+        for (int y = rm->y; y < rm->y + rm->h; y++)
+            for (int x = rm->x; x < rm->x + rm->w; x++) {
+                if (lv->t[y][x] != T_FLOOR) continue;
+                bool rim = false;
+                for (int j = -1; j <= 1; j++)
+                    for (int i = -1; i <= 1; i++) if (tile_at(lv, x + i, y + j) == T_CHASM) rim = true;
+                if (rim && hash2(x, y, seed ^ 0x2b2bu) % 100 < 35) lv->t[y][x] = T_RUBBLE;
+            }
+        for (int y = rm->y; y < rm->y + rm->h; y++)
+            for (int x = rm->x; x < rm->x + rm->w; x++)
+                if (lv->t[y][x] == T_CHASM && holes) holes[y][x] = 1;
     }
+
+    /* lakes, from depth 2: wide water spreading over rooms and the walls between them */
+    Rng lrng = { seed * 4513u + 3 };
+    int nlakes = final || depth < 2 ? 0 : rng_chance(&lrng, 60) ? (rng_chance(&lrng, depth >= 5 ? 35 : 15) ? 2 : 1) : 0;
+    nlakes = make_lakes(lv, &lrng, nlakes);
 
     /* pools of water in some rooms (own generator, so the rest of the layout stays put) */
     Rng prng = { seed * 7919u + 13 };
-    int npool = (rng_chance(&prng, 70) ? 1 : 0) + (depth >= 2) + (depth >= 5 && rng_chance(&prng, 50));
+    int npool = (rng_chance(&prng, 70) ? 1 : 0) + (depth >= 2) + (depth >= 5 && rng_chance(&prng, 50)) - nlakes;
     for (int k = 0, tries = 0; k < npool && tries < 60; tries++) {
         int r = rng_range(&prng, 0, lv->nrooms - 1);
         Room *rm = &lv->rooms[r];
@@ -707,6 +1079,10 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
         }
     }
 
+    /* a hidden room behind a secret door, on some levels: whatever was hidden there is still there */
+    Rng hrng = { seed * 9001u + 61 };
+    if (!final && rng_chance(&hrng, depth >= 2 ? 40 : 20)) make_secret_room(lv, &hrng);
+
     /* traps, from depth 2: a few in the corridors and rooms, and at the way into a storeroom */
     Rng trng = { seed * 3779u + 41 };
     if (depth >= 2) {
@@ -716,6 +1092,7 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
             int x = rng_range(&trng, 1, MAP_W - 2), y = rng_range(&trng, 1, MAP_H - 2);
             if (lv->t[y][x] != T_FLOOR || lv->trap[y][x]) continue;
             if (abs(x - lv->upx) + abs(y - lv->upy) < 7 || (lv->room[y][x] >= 0 && lv->room[y][x] == lv->hall)) continue;
+            if (lv->room[y][x] >= 0 && lv->rooms[lv->room[y][x]].kind == RK_SECRET) continue;
             bool near = false;
             for (int j = -1; j <= 1 && !near; j++)
                 for (int i = -1; i <= 1; i++) {

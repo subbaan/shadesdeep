@@ -7,7 +7,7 @@ hover descriptions and clickable actions.
 
 ![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
 
-Version: 0.15.2 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.16.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -36,13 +36,23 @@ sound; if no audio device opens, the game runs silent.
   vents, trapdoors and snares (a lit torch helps you spot them; known ones are
   marked and travel goes around them), and now and then a trapped storeroom,
   a guarded armoury or a shade's nest with a hoard of embers.
+- **Hidden rooms:** some levels hide a room behind a secret door, with fine
+  tempered gear, embers and supplies left in it. You may notice the door
+  walking past or resting nearby; `s` (or the Search button) spends five turns
+  searching the walls close by. Dead-end passages are a good place to look.
+- **Wandering bands:** rats near the top, goblins (with a slinger, or an ogre
+  at their head, deeper down) going from room to room. When one spots you, the
+  whole band comes, and more arrive from the stairs now and then.
+- **Lakes and ruins:** from depth 2, wide lakes spread across rooms, corridors
+  and the walls between them, and chasms are ragged holes where the floor has
+  fallen in.
 - **Mouse:** hover anything for a description; click to travel (the path is
   previewed), click a monster to attack it, click a cold sconce to walk over
   and light it, click yourself to rest. The wheel zooms. Descriptions fade
   after a few seconds, and pressing a key hides the hover marker until the
   mouse moves again.
 - **Keys:** arrows / numpad / `h j k l y u b n` move and attack; `x` explore;
-  `z` or `.` rest a turn, `Z` rest until healed (explore and travel go round
+  `z` or `.` rest a turn, `Z` rest until healed, `s` search for hidden doors (explore and travel go round
   shallow water when there's a dry way); `>` travel to the stairs
   down and descend, `<` climb; `i` items, `t` throw, `a` / `q` use,
   `d` drop, `T` light or snuff your torch; `m` map; `+` / `-` zoom;
@@ -182,6 +192,10 @@ and `SHADESDEEP_DUMP_FAMEADD=FILE` writes a finished run into FILE (with
 `SHADESDEEP_DUMP_WADE=1` reports how many of the `--steps` tour's steps waded. A `~` after a creature's name in `SHADESDEEP_DUMP_MOBS` puts it there
 asleep, `SHADESDEEP_DUMP_STRIKE=dx,dy[,N]` steps (attacks) that way N times, and
 `SHADESDEEP_DUMP_WIELD=1` wields the last piece `SHADESDEEP_DUMP_GEAR` added.
+`SHADESDEEP_DUMP_ROOM=store|armoury|nest|hidden` stands in such a room (`hidden-door`:
+outside a hidden room's secret door, with the rest of the level shown),
+`SHADESDEEP_DUMP_SEARCH=N` searches N times over, and `SHADESDEEP_DUMP_BANDS=1` reports
+the wandering bands on the level.
 
 The title picture is `assets/title.png`, any size (16:9 such as 1920x1080 is
 best). It's scaled to cover the window, cropped evenly if the shapes differ,

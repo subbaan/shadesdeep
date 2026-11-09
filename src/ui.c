@@ -357,16 +357,29 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     for (int i = 0; i < g->ninv; i++) if (g->inv[i].kind == IT_TORCH) has_torch = true;
     const char *tl = g->torch_lit ? "Snuff" : "Torch";
     struct { const char *k, *l; UiAction a; bool en; } B[] = {
-        { "x", "Explore", UA_EXPLORE, true }, { "Z", "Rest", UA_REST, true }, { "t", "Throw", UA_THROW, g->ninv > 0 },
+        { "x", "Explore", UA_EXPLORE, true }, { "Z", "Rest", UA_REST, true }, { "s", "Search", UA_SEARCH, true },
+        { "t", "Throw", UA_THROW, g->ninv > 0 },
         { "i", "Items", UA_INV, true }, { "T", tl, UA_TORCH, has_torch || g->torch_lit },
         { ">", game_final(g) ? "Hearth" : "Descend", UA_STAIRS, true },
         { "m", "Map", UA_MAP, true }, { NULL, "?", UA_HELP, true },
     };
-    int nb = 8, gap = ui->px / 2, tw_full = 0, tw_compact = 0;
+    int nb = (int)(sizeof B / sizeof *B), gap = ui->px / 2, tw_full = 0, tw_compact = 0;
     for (int i = 0; i < nb; i++) {
         tw_full += button_width(ui, B[i].k, B[i].l) + gap;
         tw_compact += button_width(ui, NULL, B[i].l) + gap;
     }
+    /* a very narrow window: leave out the buttons that have another way in
+     * (searching has its key; throwing is on every item's card too) */
+    static const UiAction SPARE[] = { UA_SEARCH, UA_THROW };
+    for (int k = 0; k < (int)(sizeof SPARE / sizeof *SPARE) && tw_compact + pad > cv->w; k++)
+        for (int i = 0; i < nb; i++) {
+            if (B[i].a != SPARE[k]) continue;
+            tw_full -= button_width(ui, B[i].k, B[i].l) + gap;
+            tw_compact -= button_width(ui, NULL, B[i].l) + gap;
+            for (int j = i; j < nb - 1; j++) B[j] = B[j + 1];
+            nb--;
+            break;
+        }
     /* the readouts on the left: health, depth, torch, embers */
     snprintf(buf, sizeof buf, "HP %d/%d", p->hp > 0 ? p->hp : 0, game_max_hp(g));
     int need = pad + font_width(hf, buf) + pad / 2 + ui->px * 5 + pad;
@@ -721,6 +734,7 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Travel", "click a place; click a monster to attack it" },
         { "Explore", "x  (stops when something comes into view)" },
         { "Rest", "z or . a turn,  Z until healed" },
+        { "Search", "s  five turns searching the walls close by for hidden doors (resting helps a little)" },
         { "Stairs", ">  travel to and descend,  <  climb" },
         { "Items", "i  your pack: pick an item to use, wield, throw or drop it  (a use, d drop)" },
         { "Throw", "t  then aim with the mouse or keys, Tab to cycle targets" },

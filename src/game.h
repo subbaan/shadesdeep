@@ -46,6 +46,10 @@ typedef struct {
     int bdx, bdy;
     float flash;        /* hit flash timer */
     bool flip;
+    /* (these three sit in what was padding, so saves keep their layout) */
+    uint8_t band;       /* a wandering band it travels with (0: none) */
+    bool lead;          /* it leads its band: picks where they go */
+    uint8_t linger;     /* turns the band stays put where it has got to */
     float idle;         /* phase for idle bob */
     bool known;         /* the player has seen it before */
     int stun;           /* turns a shade is held by a sudden blaze */
@@ -150,7 +154,7 @@ typedef struct {
 } Floater;
 
 typedef enum { GS_PLAY, GS_JUMP_PROMPT, GS_DEAD, GS_WON } GameState;
-typedef enum { AUTO_NONE, AUTO_TRAVEL, AUTO_EXPLORE, AUTO_REST, AUTO_STAIRS } AutoMode;
+typedef enum { AUTO_NONE, AUTO_TRAVEL, AUTO_EXPLORE, AUTO_REST, AUTO_STAIRS, AUTO_SEARCH } AutoMode;   /* saved: add at the end */
 
 typedef struct {
     uint32_t seed;
@@ -246,6 +250,7 @@ static inline bool game_end_shown(const Game *g)
 bool game_move(Game *g, int dx, int dy);
 bool game_rest(Game *g);
 void game_rest_long(Game *g);
+void game_search(Game *g);      /* five turns spent searching the walls nearby for hidden doors */
 void game_explore(Game *g);
 void game_to_stairs(Game *g);
 bool game_descend(Game *g);
@@ -263,6 +268,8 @@ bool game_debug_to_forge(Game *g);     /* developer: stand by the forge */
 bool game_debug_depth(Game *g, int depth);     /* developer: go straight to that depth */
 bool game_debug_kindle(Game *g, int times);    /* developer: at the hearth with a lit torch, kindle it */
 bool game_debug_to_room(Game *g, int kind);    /* developer: stand in a room of that RoomKind, traps shown */
+bool game_debug_to_secret_door(Game *g);       /* developer: stand by a hidden door, its room still unseen */
+int game_debug_count_bands(Game *g, int *members);   /* developer: wandering bands on this level */
 bool game_debug_to_spot(Game *g, int kind);   /* developer: 0 corridor, 1 side door, 2 south wall,
                                                  * 3 by a cold sconce with a shade near, 4 and light it,
                                                  * 5 in the Heartflame's hall, near the hearth */

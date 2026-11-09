@@ -409,8 +409,10 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     /* SHADESDEEP_DUMP_ROOM=store|armoury|nest: stand in such a room, with the level and its traps shown */
     if (getenv("SHADESDEEP_DUMP_ROOM")) {
         const char *k = getenv("SHADESDEEP_DUMP_ROOM");
-        int rk = !strcmp(k, "store") ? RK_STORE : !strcmp(k, "armoury") ? RK_ARMOURY : !strcmp(k, "nest") ? RK_NEST : -1;
-        if (rk < 0 || !game_debug_to_room(g, rk)) fprintf(stderr, "%s: no %s room on this level\n", SHADESDEEP_NAME, k);
+        int rk = !strcmp(k, "store") ? RK_STORE : !strcmp(k, "armoury") ? RK_ARMOURY : !strcmp(k, "nest") ? RK_NEST
+               : !strcmp(k, "hidden") ? RK_SECRET : -1;
+        bool ok = !strcmp(k, "hidden-door") ? game_debug_to_secret_door(g) : rk >= 0 && game_debug_to_room(g, rk);
+        if (!ok) fprintf(stderr, "%s: no %s room on this level\n", SHADESDEEP_NAME, k);
     }
     /* SHADESDEEP_DUMP_SPOT=0..5: an east-west corridor, a side-wall door, a room's south wall,
      * a cold sconce with a shade near (4: and light it), the Heartflame's hall (5). After SHADESDEEP_DUMP_JUMP */
@@ -543,6 +545,17 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     for (int n = getenv("SHADESDEEP_DUMP_REST") ? atoi(getenv("SHADESDEEP_DUMP_REST")) : 0; n > 0 && g->state == GS_PLAY; n--) {
         game_rest(g);
         for (int i = 0; i < 30 && game_busy(g); i++) game_update(g, 1.0f / 30);
+    }
+    /* SHADESDEEP_DUMP_SEARCH=N: search N times over (five turns each, stopping when something turns up) */
+    for (int n = getenv("SHADESDEEP_DUMP_SEARCH") ? atoi(getenv("SHADESDEEP_DUMP_SEARCH")) : 0; n > 0 && g->state == GS_PLAY; n--) {
+        game_search(g);
+        for (int i = 0; i < 400 && g->autom == AUTO_SEARCH; i++) game_update(g, 1.0f / 30);
+        if (getenv("SHADESDEEP_DUMP_BANDS")) break;
+    }
+    /* SHADESDEEP_DUMP_BANDS=1: say how many wandering bands are on the level */
+    if (getenv("SHADESDEEP_DUMP_BANDS")) {
+        int mem = 0, b = game_debug_count_bands(g, &mem);
+        fprintf(stderr, "bands %d, members %d, turn %d\n", b, mem, g->turn);
     }
     /* SHADESDEEP_DUMP_FAMEADD=FILE: if the run is over, write it into that hall of fame */
     if (getenv("SHADESDEEP_DUMP_FAMEADD") && (g->state == GS_DEAD || g->state == GS_WON)) {
@@ -1012,7 +1025,7 @@ int main(int argc, char **argv)
         bool map_click = g_input.mclick[0] && click == UA_NONE && hv.hx >= 0 && !ui_over_panel(ui, mx, my);
         /* the status bar buttons work from any menu */
         if (click == UA_INV || click == UA_THROW || click == UA_TORCH || click == UA_EXPLORE || click == UA_REST ||
-            click == UA_STAIRS || click == UA_HELP || click == UA_MAP) {
+            click == UA_SEARCH || click == UA_STAIRS || click == UA_HELP || click == UA_MAP) {
             bool same = (click == UA_INV && ctl.menu == MENU_INV) || (click == UA_THROW && ctl.menu == MENU_THROW)
                      || (click == UA_MAP && ctl.map);
             ctl.menu = MENU_NONE;
@@ -1148,7 +1161,9 @@ int main(int argc, char **argv)
                 if (!busy || dir_key(pr, &dx, &dy)) game_move(g, dx, dy);
             } else if (SHIFTED('z') || click == UA_REST) {
                 game_rest_long(g);
-            } else if (PLAIN('z') || (pr['.'] && !SHIFTED('.')) || pr[K_KP5] || PLAIN('s')) {
+            } else if (PLAIN('s') || click == UA_SEARCH) {
+                game_search(g);
+            } else if (PLAIN('z') || (pr['.'] && !SHIFTED('.')) || pr[K_KP5]) {
                 if (!busy) game_rest(g);
             } else if (PLAIN('x') || click == UA_EXPLORE) {
                 game_explore(g);
