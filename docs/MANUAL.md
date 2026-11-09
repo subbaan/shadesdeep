@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.16.0. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.16.1. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -231,7 +231,7 @@ you warm up:
 | **Shade** | From depth 2. See [above](#shades-and-the-chill). |
 | **Bat** | From depth 2. Quick (it moves twice a turn) and erratic: it flits in, bites, and flits off again, so it's hard to pin down. Light draws it from a long way off; in the dark it only finds you up close. It flies, so chasms and deep water don't stop it, but it can't open doors. Silent on the wing. |
 | **Goblin slinger** | From depth 3. If it can see you clearly **in the light**, it stays back and slings stones at you from up to 7 tiles away (a little less accurate than a blow). In the dark, or with something in the way, it has to come close and fight with a knife. Snuff your torch, or step out of the lamplight, and it loses its aim. Won't swim. |
-| **Ogre** | From depth 4. Big, tough and hits very hard, but **slow**: it moves and swings only every other turn, so you can always outrun it, and you get two blows for each of its. Far too heavy for a mace to knock back. Won't swim. |
+| **Ogre** | From depth 8. Big, tough and hits very hard, but **slow**: it moves and swings only every other turn, so you can always outrun it, and you get two blows for each of its. Far too heavy for a mace to knock back. Won't swim. |
 | **The Hollow** | Only on depth 26, by the cold hearth. See [the Heartflame](#the-hollow). |
 | **Eel** | From depth 2, in pools of deep water. It lurks **unseen** under the surface (now and then a ripple gives it away) and lunges at anything swimming near it or standing **on the bank beside it**. Once it has bitten it stays up for a turn or two, long enough to hit back, then slips under again. It never leaves the water. |
 
@@ -239,15 +239,18 @@ Monsters may be asleep. Noise (splashing, a thrown torch or dart landing, mail
 jingling) wakes them and draws them to look.
 
 **Wandering bands.** Not everything waits in its room. On many levels a band
-is on the move: a pack of rats near the top, goblins further down. From depth 3
-a slinger often goes with them, and from depth 6 an ogre may lead them. They go
+is on the move: a pack of two or three rats down to depth 3, small goblin
+packs below that (often just a pair at first). From depth 7 a slinger may go
+with them, from depth 12 the packs grow to four, and from depth 15 an ogre may
+lead them. They go
 from room to room, stopping a while in each, and they're awake. When one of them
 spots you, or you strike one, it cries out, and the rest of the band joins the
 hunt. They hunt the long way round corners and through doors, so a band is
-harder to shake off than a lone goblin. From depth 2 another band now and then
-comes in from the stairs while you're on a level, more so once you've thinned
-out what lives there. If you hear footsteps somewhere in the dark, something
-has arrived.
+harder to shake off than a lone goblin. Only one band roams a level at a time.
+From depth 3, once the first band is dead and you've thinned out most of what
+lives there, another may come in from the stairs, though rarely (about once in
+a thousand turns). If you hear footsteps somewhere in the dark, something has
+arrived.
 
 **Sneak attacks.** A monster that hasn't noticed you can't defend itself. That
 means one that's asleep, dazzled, or awake but not hunting you. Your blow
@@ -478,7 +481,7 @@ From depth 2, most levels have a room with a purpose, and some have two. The mes
   darts, potions, flash powder, salt, a warming draught, now and then a torch.
   Its keeper often left a trap just inside the way in.
 - **Armoury** (rusted blades on the floor): two pieces of gear, often
-  tempered, guarded by goblins (or slingers) or an ogre, likely asleep.
+  tempered, guarded by goblins (or slingers) or, from depth 8, an ogre, likely asleep.
 - **Shade's nest** (from depth 3, bones on the floor): a dark room, its
   sconces cold, with 3 or more shades in it and a pile of **cold embers**.
   Light its sconces with the shades inside and the blaze burns them, each one

@@ -251,7 +251,7 @@ static MobKind pick_kind(Rng *r, int d)
     w[MK_GOBLIN] = 30 + d * 5;
     if (d >= 2) w[MK_BAT] = 15 + d * 2;
     if (d >= 3) w[MK_SLINGER] = 10 + d * 3;
-    if (d >= 4) w[MK_OGRE] = 4 + d * 2;
+    if (d >= 8) w[MK_OGRE] = 2 + (d - 7) * 2;      /* ogres are a deep-level thing */
     int sum = 0;
     for (int k = 0; k < MK_COUNT; k++) sum += w[k];
     int roll = rng_range(r, 0, sum - 1);
@@ -284,12 +284,15 @@ static int spawn_band(Game *g, int d, Rng *r, int x, int y)
     if (id > 255) return 0;
     MobKind kinds[5];
     int n = 0;
-    if (d == 1) {
-        for (int k = rng_range(r, 3, 4); k > 0; k--) kinds[n++] = MK_RAT;
+    /* the ladder is spread over all 26 levels: rats at the top, small goblin packs in
+     * the middle, slingers from 7, bigger packs from 12, an ogre at the head from 15 */
+    if (d <= 3) {
+        for (int k = rng_range(r, 2, 3); k > 0; k--) kinds[n++] = MK_RAT;
     } else {
-        if (d >= 6 && rng_chance(r, 35)) kinds[n++] = MK_OGRE;            /* an ogre at the head of it */
-        for (int k = rng_range(r, 2, d >= 8 ? 4 : 3); k > 0 && n < 4; k--) kinds[n++] = MK_GOBLIN;
-        if (d >= 3 && rng_chance(r, 55)) kinds[n++] = MK_SLINGER;
+        if (d >= 15 && rng_chance(r, d >= 21 ? 50 : 30)) kinds[n++] = MK_OGRE;
+        for (int k = rng_range(r, 2, d >= 12 ? 4 : 3); k > 0 && n < 4; k--) kinds[n++] = MK_GOBLIN;
+        if (d >= 7 && rng_chance(r, d >= 12 ? 55 : 35)) kinds[n++] = MK_SLINGER;
+        if (d < 7 && n > 2 && rng_chance(r, 50)) n = 2;                   /* the first goblin packs are pairs as often as not */
     }
     int made = 0;
     for (int k = 0; k < n; k++) {
@@ -372,7 +375,7 @@ static void spawn_mobs(Game *g, int d)
     for (int rm_i = 0; rm_i < lv->nrooms; rm_i++) {
         Room *rm = &lv->rooms[rm_i];
         if (rm->kind != RK_NEST && rm->kind != RK_ARMOURY) continue;
-        MobKind guard = d >= 4 && rng_chance(&r, 50) ? MK_OGRE : MK_GOBLIN;
+        MobKind guard = d >= 8 && rng_chance(&r, 50) ? MK_OGRE : MK_GOBLIN;
         int want = rm->kind == RK_NEST ? 3 + d / 8 : guard == MK_OGRE ? 1 : 2;
         for (int tries = 0; tries < 2000 && want > 0 && placed < MAX_MOBS; tries++) {
             int x = rng_range(&r, rm->x, rm->x + rm->w - 1), y = rng_range(&r, rm->y, rm->y + rm->h - 1);
@@ -392,7 +395,7 @@ static void spawn_mobs(Game *g, int d)
         }
     }
     /* a band on the move, awake and going from room to room: rats near the top, goblins below */
-    if (d < MAX_DEPTH && rng_chance(&r, d == 1 ? 25 : 55)) {
+    if (d < MAX_DEPTH && rng_chance(&r, d <= 2 ? 20 : d <= 6 ? 30 : d <= 13 ? 40 : 50)) {
         for (int tries = 0; tries < 400; tries++) {
             int x = rng_range(&r, 1, MAP_W - 2), y = rng_range(&r, 1, MAP_H - 2);
             if (!band_spot(lv, x, y) || abs(x - lv->upx) + abs(y - lv->upy) < 16) continue;
@@ -1857,12 +1860,15 @@ void game_search(Game *g)
 static void wanderers_arrive(Game *g)
 {
     int d = g->depth;
-    if (d < 2 || game_final(g) || !rng_chance(&g->rng, 1) || rng_range(&g->rng, 0, 2)) return;   /* about one turn in 300 */
+    if (d < 3 || game_final(g) || !rng_chance(&g->rng, 1) || rng_range(&g->rng, 0, 9)) return;   /* about one turn in 1000 */
     Level *lv = game_level(g);
     Mob *ms = g->mobs[d], *p = &g->player;
     int alive = 0;
-    for (int i = 0; i < MAX_MOBS; i++) alive += ms[i].alive && ms[i].kind != MK_EEL;
-    if (alive >= 3 + d || alive >= MAX_MOBS - 6) return;
+    for (int i = 0; i < MAX_MOBS; i++) {
+        if (ms[i].alive && ms[i].band) return;          /* one band about the level at a time */
+        alive += ms[i].alive && ms[i].kind != MK_EEL;
+    }
+    if (alive >= (3 + d) / 2 || alive >= MAX_MOBS - 6) return;   /* only once the level is well thinned out */
     /* by the stairs if they're out of sight, otherwise anywhere well away from you */
     int sx[2] = { lv->upx, lv->downx }, sy[2] = { lv->upy, lv->downy };
     for (int tries = 0; tries < 300; tries++) {
