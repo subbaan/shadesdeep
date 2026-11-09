@@ -159,6 +159,155 @@ static void diamond(Canvas *cv, int cx, int cy, int r, uint32_t c)
             if (abs(i) + abs(j) <= r) cv_blend_rect(cv, cx + i, cy + j, 1, 1, c, abs(i) + abs(j) == r ? 140 : 255);
 }
 
+/* ------------------------------------------------------------ stone */
+
+static uint32_t h32(uint32_t a)
+{
+    a ^= a >> 16; a *= 0x7feb352du;
+    a ^= a >> 15; a *= 0x846ca68bu;
+    return a ^ (a >> 16);
+}
+
+static uint32_t str_hash(const char *s)
+{
+    uint32_t h = 2166136261u;
+    for (; s && *s; s++) h = (h ^ (uint8_t)*s) * 16777619u;
+    return h;
+}
+
+typedef enum { STONE_PLAIN, STONE_HOT, STONE_DIM } StoneLook;
+
+/* a slab's outline: how far each column's top and bottom, and each row's left
+ * and right, are worn in from the box, in runs like weathered stone */
+#define SLAB_MAX 400
+typedef struct {
+    int gw, gh;
+    int8_t top[SLAB_MAX], bot[SLAB_MAX], lft[SLAB_MAX], rgt[SLAB_MAX];
+    int c[4];               /* chipped corners */
+} Slab;
+
+static void slab_edge(int8_t *e, int n, uint32_t seed)
+{
+    int i = 0, k = 0;
+    while (i < n) {
+        uint32_t r = h32(seed ^ (uint32_t)k++ * 0x9e3779b9u);
+        int len = 3 + (int)(r % 8), off = r >> 8 & 7;
+        int depth = off < 5 ? 0 : off < 7 ? 1 : 2;
+        if (depth == 2 && len > 3) len = 2 + (int)(r >> 12 & 1);    /* a deep chip is a short one */
+        for (int j = 0; j < len && i < n; j++) e[i++] = (int8_t)depth;
+    }
+}
+
+static void slab_make(Slab *sl, int gw, int gh, uint32_t seed)
+{
+    sl->gw = gw;
+    sl->gh = gh;
+    slab_edge(sl->top, gw, seed ^ 0x1111);
+    slab_edge(sl->bot, gw, seed ^ 0x2222);
+    slab_edge(sl->lft, gh, seed ^ 0x3333);
+    slab_edge(sl->rgt, gh, seed ^ 0x4444);
+    for (int i = 0; i < gh; i++) {          /* the short sides wear less */
+        if (sl->lft[i] > 1) sl->lft[i] = 1;
+        if (sl->rgt[i] > 1) sl->rgt[i] = 1;
+    }
+    bool small = gh < 14;                   /* a small slab: lighter wear, or it turns into a pebble */
+    if (small) {
+        for (int i = 0; i < gw; i++) {
+            if (sl->top[i] > 1) sl->top[i] = 1;
+            if (sl->bot[i] > 1) sl->bot[i] = 1;
+        }
+        for (int i = 0; i < gh; i++) sl->lft[i] = sl->rgt[i] = 0;
+    }
+    for (int k = 0; k < 4; k++) sl->c[k] = (small ? 1 : 2) + (int)(h32(seed ^ (uint32_t)(k + 5) * 0x51ed27u) % (small ? 2 : 3));
+}
+
+static bool slab_in(const Slab *sl, int i, int j)
+{
+    int gw = sl->gw, gh = sl->gh;
+    if (i < 0 || j < 0 || i >= gw || j >= gh) return false;
+    if (i + j < sl->c[0] || (gw - 1 - i) + j < sl->c[1] || i + (gh - 1 - j) < sl->c[2]
+        || (gw - 1 - i) + (gh - 1 - j) < sl->c[3]) return false;
+    return j >= sl->top[i] && j < gh - sl->bot[i] && i >= sl->lft[j] && i < gw - sl->rgt[j];
+}
+
+/* smooth-ish value noise over cells, -1..1 */
+static float slab_blotch(int i, int j, uint32_t seed)
+{
+    int ci = i / 5, cj = j / 3;
+    float fx = (i % 5) / 5.0f, fy = (j % 3) / 3.0f;
+#define V(a, b) ((float)(h32(seed ^ (uint32_t)(a) * 73856093u ^ (uint32_t)(b) * 19349663u) & 1023) / 511.5f - 1)
+    float top = V(ci, cj) + (V(ci + 1, cj) - V(ci, cj)) * fx;
+    float bot = V(ci, cj + 1) + (V(ci + 1, cj + 1) - V(ci, cj + 1)) * fx;
+#undef V
+    return top + (bot - top) * fy;
+}
+
+/* A slab of dressed stone in the box (x, y, w, h), drawn in chunky pixels like
+ * the dungeon's own art: ragged chipped edges, a lit lip along the top and left,
+ * a shadowed one along the bottom and right, a carved groove inside, the odd
+ * crack. seed keeps each slab's wear the same from frame to frame. */
+static void stone_slab(UI *ui, Canvas *cv, int x, int y, int w, int h, uint32_t seed, StoneLook look)
+{
+    int P = ui->px / 7;                     /* the stone's "pixel", like the dungeon art's */
+    if (P > h / 14) P = h / 14;
+    if (P < 2) P = 2;
+    int gw = w / P, gh = h / P;
+    if (gw < 6 || gh < 4) { cv_blend_rect(cv, x, y, w, h, 0x2e2b27, 230); return; }
+    if (gw > SLAB_MAX) gw = SLAB_MAX;
+    if (gh > SLAB_MAX) gh = SLAB_MAX;
+    int ox = x + (w - gw * P) / 2, oy = y + (h - gh * P) / 2;
+    Slab sl;
+    slab_make(&sl, gw, gh, seed);
+    /* its shadow on whatever is behind */
+    for (int j = 0; j < gh; j++)
+        for (int i = 0; i < gw; i++)
+            if (slab_in(&sl, i, j) && !slab_in(&sl, i + 1, j + 1))
+                cv_blend_rect(cv, ox + (i + 1) * P, oy + (j + 1) * P, P, P, 0x000000, 150);
+    uint32_t base = look == STONE_HOT ? 0x4e4439 : look == STONE_DIM ? 0x22242a : 0x353840;
+    uint32_t lip = look == STONE_HOT ? 0xc9a45c : 0x6a6e7a;
+    bool groove = gh >= 9;
+    /* a crack or two, as runs of cells */
+    int crack_n = (int)(h32(seed ^ 0x77) % 3);
+    int ck[2][8][2];
+    for (int c = 0; c < crack_n && c < 2; c++) {
+        uint32_t r = h32(seed ^ (uint32_t)(c + 1) * 0x1234567u);
+        int ci = 3 + (int)(r % (uint32_t)(gw > 8 ? gw - 6 : 1)), cj = (r >> 8) & 1 ? 0 : gh - 1, dj = cj ? -1 : 1;
+        for (int k = 0; k < 8; k++) {
+            ck[c][k][0] = ci;
+            ck[c][k][1] = cj;
+            cj += dj;
+            ci += (int)((r >> (10 + k * 2)) % 3) - 1;
+        }
+    }
+    for (int j = 0; j < gh; j++) {
+        for (int i = 0; i < gw; i++) {
+            if (!slab_in(&sl, i, j)) continue;
+            /* how far in from each edge (0 = on it), up to 3 */
+            int dt = 0, db = 0, dl = 0, dr = 0;
+            while (dt < 3 && slab_in(&sl, i, j - dt - 1)) dt++;
+            while (db < 3 && slab_in(&sl, i, j + db + 1)) db++;
+            while (dl < 3 && slab_in(&sl, i - dl - 1, j)) dl++;
+            while (dr < 3 && slab_in(&sl, i + dr + 1, j)) dr++;
+            uint32_t n = h32(seed ^ (uint32_t)i * 0x632be5abu ^ (uint32_t)j * 0x85157af5u);
+            int v = (int)(slab_blotch(i, j, seed) * 9) + (int)(n % 9) - 4;
+            uint32_t c = add_sat(base, v, v, v + 1);
+            if (dt == 0 || dl == 0) c = mix(c, lip, dt == 0 && dl == 0 ? 200 : 150);
+            else if (dt == 1 || dl == 1) c = add_sat(c, 12, 11, 9);
+            if (db == 0 || dr == 0) c = add_sat(c, -30, -30, -28);
+            else if (db == 1 || dr == 1) c = add_sat(c, -13, -13, -12);
+            if (groove) {
+                int d = dt < db ? dt : db, e = dl < dr ? dl : dr, m = d < e ? d : e;
+                if (m == 2) c = (dt == 2 || dl == 2) && !(db == 2 || dr == 2) ? add_sat(c, -16, -16, -15) : add_sat(c, 9, 8, 7);
+            }
+            for (int k = 0; k < crack_n && k < 2; k++)
+                for (int q = 0; q < 5 + (int)(seed >> (k * 3) & 3); q++)
+                    if (ck[k][q][0] == i && ck[k][q][1] == j) c = add_sat(c, -24, -24, -22);
+            if (look == STONE_HOT) c = add_sat(c, 6 + (int)(n >> 12 & 3), 2, -4);    /* firelight on it */
+            cv_fill(cv, ox + i * P, oy + j * P, P, P, c);
+        }
+    }
+}
+
 /* a button: key hint in gold, label in parchment */
 static int button(UI *ui, Canvas *cv, int x, int y, int h, const char *key, const char *label, UiAction a,
                   int mx, int my, bool enabled)
@@ -168,11 +317,10 @@ static int button(UI *ui, Canvas *cv, int x, int y, int h, const char *key, cons
     int kw = key ? font_width(fk, key) + pad : 0;
     int w = kw + font_width(f, label) + pad * 2;
     bool hov = mx >= x && my >= y && mx < x + w && my < y + h;
-    cv_blend_rect(cv, x, y, w, h, hov ? 0x3a2c18 : 0x15110c, hov ? 235 : 210);
-    cv_frame(cv, x, y, w, h, hov ? GOLD : GOLD_DIM, 255);
+    stone_slab(ui, cv, x, y, w, h, str_hash(label) ^ (uint32_t)w * 31u, !enabled ? STONE_DIM : hov ? STONE_HOT : STONE_PLAIN);
     int base = y + (h + font_ascent(f) * 7 / 10) / 2;
-    if (key) font_draw(fk, cv, x + pad, base, key, enabled ? GOLD : GOLD_DIM, 255);
-    font_draw(f, cv, x + pad + kw, base, label, enabled ? (hov ? 0xfff2d0 : 0xe2d4b4) : 0x6a6050, 255);
+    if (key) font_draw_shadow(fk, cv, x + pad, base, key, enabled ? GOLD : GOLD_DIM, 255);
+    font_draw_shadow(f, cv, x + pad + kw, base, label, enabled ? (hov ? 0xfff2d0 : 0xe2d4b4) : 0x6a6050, 255);
     add_btn(ui, x, y, w, h, a);
     return w;
 }
@@ -1012,13 +1160,11 @@ static void menu_button(UI *ui, Canvas *cv, int x, int y, int w, int h, const ch
                         UiAction a, int mx, int my, bool hot)
 {
     bool hov = hot || (mx >= x && my >= y && mx < x + w && my < y + h);
-    cv_blend_rect(cv, x, y, w, h, hov ? 0x3a2c18 : 0x110d09, hov ? 235 : 200);
-    cv_frame(cv, x, y, w, h, hov ? GOLD : GOLD_DIM, 255);
-    if (hov) cv_frame(cv, x + 2, y + 2, w - 4, h - 4, 0x5a4626, 200);
+    stone_slab(ui, cv, x, y, w, h, str_hash(label) ^ 0x5eed, hov ? STONE_HOT : STONE_PLAIN);
     int base = y + (h + font_ascent(ui->head) * 7 / 10) / 2;
     int lw = font_width(ui->head, label);
-    font_draw(ui->head, cv, x + (w - lw) / 2, base, label, hov ? 0xfff2d0 : 0xe2d4b4, 255);
-    if (key) font_draw(ui->small, cv, x + ui->px / 2, base, key, hov ? GOLD : GOLD_DIM, 255);
+    font_draw_shadow(ui->head, cv, x + (w - lw) / 2, base, label, hov ? 0xfff2d0 : 0xe2d4b4, 255);
+    if (key) font_draw_shadow(ui->small, cv, x + ui->px, base, key, hov ? GOLD : GOLD_DIM, 255);
     if (hov) {
         diamond(cv, x + (w - lw) / 2 - ui->px * 3 / 4, y + h / 2, ui->px / 5 + 1, GOLD);
         diamond(cv, x + (w + lw) / 2 + ui->px * 3 / 4, y + h / 2, ui->px / 5 + 1, GOLD);

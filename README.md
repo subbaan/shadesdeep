@@ -7,7 +7,7 @@ hover descriptions and clickable actions.
 
 ![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
 
-Version: 0.15.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.15.1 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -49,7 +49,8 @@ sound; if no audio device opens, the game runs silent.
   (breathing, a swaying lantern, a whirling sling, flapping wings), dust
   glitters in the torchlight, and at zoom 2 and up everything is drawn from the
   full-detail art so it stays sharp; `--classic-art` brings back the original
-  built-in sprites.
+  built-in sprites. The buttons are slabs of worn, carved slate in the same
+  chunky pixels, warming to firelight under the mouse.
 - **Saving:** quitting (or closing the window) saves the game, and the next
   start carries on where you left off; it's also saved on every new level.
   Death (or winning) deletes the save. It lives in `~/.local/share/shadesdeep/save.gz`;

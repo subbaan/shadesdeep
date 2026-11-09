@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.15.0. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.15.1. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -84,7 +84,9 @@ healing potion, warming draught and embers glow. Dust drifts in the air and
 glitters where the light catches it. Zoomed in (`+`, or the mouse wheel)
 creatures and items are drawn from the full-detail art rather than blown up, so
 they stay sharp at any zoom. Start with `--classic-art` to play with the
-game's original blocky sprites instead (it doesn't still the dust). Shades and
+game's original blocky sprites instead (it doesn't still the dust). The
+buttons are worn slabs of carved slate. The one under the mouse, or the one
+picked with the keys on the title screen, glows with firelight. Shades and
 the Hollow are always drawn live, as moving darkness.
 
 ### The title screen
