@@ -59,6 +59,7 @@ typedef struct {
     int surfaced;       /* an eel: turns it stays above the water after a lunge (0: hidden) */
     bool rest;          /* an ogre: sits out this turn (it acts every other turn) */
     bool startled;      /* (padding) came through a door onto you: caught off guard until its next turn */
+    uint8_t trail;      /* (padding) a goblin or ogre that has lost sight of you: steps it still follows your tracks */
     int daze;           /* turns it reels, dazzled by flash powder: it can't act, and can't see you */
 } Mob;
 
@@ -208,6 +209,7 @@ typedef struct {
     int heart;                          /* times you've fed the forge for max HP */
     int lantern;                        /* times you've trimmed your lantern */
     bool forge_req;                     /* bumped a forge: the front end opens its menu */
+    uint8_t poison;                     /* (padding) turns of an eel's venom left: 1 HP a turn, and no healing */
     int warm_left;                      /* turns a warming draught keeps the chill off */
     int fire_x, fire_y;                 /* burning oil the player was warned about (move again to walk in) */
     int kindle;                         /* the Heartflame: 0 cold, 1-2 kindling, 3 burning again (the game is won) */

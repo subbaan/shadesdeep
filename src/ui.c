@@ -431,7 +431,7 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     int x = pad;
     int mhp = game_max_hp(g);
     bool hurt = p->hp * 3 <= mhp && g->state == GS_PLAY;
-    uint32_t hc = hurt ? mix(0xff6a50, 0xffe0d0, (int)(128 + 127 * sinf(g->time * 7))) : g->chill ? 0xb8e0ff : g->warm_left > 0 ? 0xffc890 : 0xe2d4b4;
+    uint32_t hc = hurt ? mix(0xff6a50, 0xffe0d0, (int)(128 + 127 * sinf(g->time * 7))) : g->poison ? 0xa8e070 : g->chill ? 0xb8e0ff : g->warm_left > 0 ? 0xffc890 : 0xe2d4b4;
     snprintf(buf, sizeof buf, "HP %d/%d", p->hp > 0 ? p->hp : 0, mhp);
     x = font_draw(hf, cv, x, base, buf, hc, 255) + pad / 2;
     int bw = ui->px * 5, hbh = ui->px / 3 + 2, byy = base - font_ascent(hf) * 6 / 10;
@@ -581,6 +581,11 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
             size_t dn = strlen(desc);
             snprintf(desc + dn, sizeof desc - dn, " A snare holds your ankle: each step you try is a turn spent tearing at "
                      "it (%d more). You can still fight, throw and use things.", g->snare);
+        }
+        if (g->poison) {
+            size_t dn = strlen(desc);
+            snprintf(desc + dn, sizeof desc - dn, " An eel's venom burns in you: 1 HP a turn for %d more turn%s, and no "
+                     "healing until it's gone. A healing potion burns it out.", g->poison, g->poison == 1 ? "" : "s");
         }
         if (lv->burn[y][x]) {
             size_t dn = strlen(desc);

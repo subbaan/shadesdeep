@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.19.0. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.20.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -149,7 +149,8 @@ their walls. Dark rooms have cold ones.
   nearby without being seen.
 - **In the light,** whether from a sconce, a burning torch on the floor or a
   torch in your hand, monsters can see you from much further away.
-- Goblins see well in the dark, but even better in the light.
+- Goblins (and slingers) see well in the dark, about three or four tiles
+  where anything else sees two, but even better in the light.
 - Light is the only thing that holds off shades (see below).
 
 So light keeps the shades away while it shows you to everything else. Most of
@@ -232,13 +233,13 @@ you warm up:
 | Monster | Notes |
 |---|---|
 | **Rat** | Weak and quick to die. Often asleep. Can't open doors. |
-| **Goblin** | A real fight early on. Sees well in the dark and better in the light. Won't swim, so deep water is a refuge from goblins. |
+| **Goblin** | A real fight early on. Sees well in the dark and better in the light. It hunts you the long way round corners and through doors, and if it loses sight of you it follows your tracks a few steps before it gives up (a door you've shut ends the trail). Won't swim, so deep water is a refuge from goblins. |
 | **Shade** | From depth 2. See [above](#shades-and-the-chill). |
 | **Bat** | From depth 2. Quick (it moves twice a turn) and erratic: it flits in, bites, and flits off again, so it's hard to pin down. Light draws it from a long way off; in the dark it only finds you up close. It flies, so chasms and deep water don't stop it, but it can't open doors. Silent on the wing. |
 | **Goblin slinger** | From depth 3. If it can see you clearly **in the light**, it stays back and slings stones at you from up to 7 tiles away (a little less accurate than a blow). In the dark, or with something in the way, it has to come close and fight with a knife. Snuff your torch, or step out of the lamplight, and it loses its aim. Won't swim. |
 | **Ogre** | From depth 8. Big, tough and hits very hard, but **slow**: it moves and swings only every other turn, so you can always outrun it, and you get two blows for each of its. Far too heavy for a mace to knock back. Won't swim. |
 | **The Hollow** | Only on depth 26, by the cold hearth. See [the Heartflame](#the-hollow). |
-| **Eel** | From depth 2, in pools of deep water. It lurks **unseen** under the surface (now and then a ripple gives it away) and lunges at anything swimming near it or standing **on the bank beside it**. Once it has bitten it stays up for a turn or two, long enough to hit back, then slips under again. It never leaves the water. |
+| **Eel** | From depth 2, in pools of deep water. It lurks **unseen** under the surface (now and then a ripple gives it away) and lunges at anything swimming near it or standing **on the bank beside it**. Once it has bitten it stays up for a turn or two, long enough to hit back, then slips under again. **Its bite is often venomous** (about 2 in 5): you're **poisoned**, losing 1 HP a turn for 3 turns (more bites add more, up to 5), and you don't heal until it wears off. A healing potion burns the venom out. It never leaves the water. |
 
 Monsters may be asleep. Noise (splashing, a thrown torch or dart landing, mail
 jingling) wakes them and draws them to look.
@@ -250,8 +251,9 @@ with them, from depth 12 the packs grow to four, and from depth 15 an ogre may
 lead them. They go
 from room to room, stopping a while in each, and they're awake. When one of them
 spots you, or you strike one, it cries out, and the rest of the band joins the
-hunt. They hunt the long way round corners and through doors, so a band is
-harder to shake off than a lone goblin. Only one band roams a level at a time.
+hunt. They hunt the long way round corners and through doors, and follow your
+tracks further than a lone goblin does, so a band is harder to shake off. Only
+one band roams a level at a time.
 From depth 3, once the first band is dead and you've thinned out most of what
 lives there, another may come in from the stairs, though rarely (about once in
 a thousand turns). If you hear footsteps somewhere in the dark, something has
@@ -291,7 +293,7 @@ can keep up all the way down.
 |---|---|
 | **Torch** | Light it to carry, or throw it to light a place from afar. See [Torches](#torches). |
 | **Dart** | Throw it for 2–4 damage at range. It can usually be picked up again, though it sometimes snaps. Passes through shades. |
-| **Healing potion** | Drink it to heal 15 HP (not past your chilled maximum). |
+| **Healing potion** | Drink it to heal 15 HP (not past your chilled maximum). It also burns out an eel's venom. |
 | **Oil flask** | Throw it and it bursts into a pool of [burning oil](#burning-oil). Or **soak your torch** with it (from the item card): +50 turns of fuel on the torch you have going. You start with one. |
 | **Flash powder** | Throw it for a [blinding flash](#flash-powder). Lands in water and it fizzles, spoilt. |
 | **Salt** | **Pour** it to lay a [ring of salt](#salt) around you that shades can't cross. From depth 2. |
@@ -441,7 +443,9 @@ less likely.
   you're full or something turns up. While you rest you're also looking about
   you, so you may notice a [hidden door](#hidden-doors-and-hidden-rooms) nearby.
 - **Burning oil** sears you for 2–4 a turn while you stand in it.
-- **Healing potions** restore 15 HP.
+- **Poison** from an eel's bite takes 1 HP a turn for a few turns, and you
+  don't heal at all while it lasts. Your HP shows green while you're poisoned.
+- **Healing potions** restore 15 HP, and burn out any poison.
 - **Chill** lowers your maximum until you warm up by a fire (see
   [the chill](#shades-and-the-chill)).
 
@@ -673,7 +677,7 @@ Every run that ends goes into the hall of fame: won, killed, or given up
 from the title screen. Each entry records:
 
 - how it ended ("Killed by a goblin", "Drowned, dragged down by mail",
-  "Rekindled the Heartflame")
+  "Poisoned by an eel's bite", "Rekindled the Heartflame")
 - the deepest level you reached
 - the turns it took
 - the embers you gathered

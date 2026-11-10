@@ -23,7 +23,8 @@ const MobInfo MOB_INFO[MK_COUNT] = {
     [MK_OGRE]   = { "ogre", "A hulking brute, slow but terribly strong. It moves and swings only every other turn, and it "
                     "is far too heavy to knock back.", 18, 70, 3, 8, 5, 6 },
     [MK_EEL]    = { "eel", "A long, pale-eyed eel that lurks unseen in deep water and lunges at anything in it or beside "
-                    "it. It never leaves the water.", 12, 80, 2, 5, 10, 7 },
+                    "it. Its bite is often venomous: the wound burns for a few turns and won't heal until it stops. "
+                    "It never leaves the water.", 12, 80, 2, 5, 10, 7 },
     [MK_HOLLOW] = { "Hollow", "The thing that put out the Heartflame: a shade grown vast on the warmth of everyone who ever "
                     "came down here. Your torch doesn't frighten it and salt won't stop it. A fixed fire burns it but can't "
                     "drive it off, a flash of powder dazzles it, darts pass through it, and its touch is bitterly cold. "
@@ -42,7 +43,7 @@ const ItemInfo ITEM_INFO[IT_COUNT] = {
                     "A small iron dart balanced for throwing. It can usually be picked up again. "
                     "Anything that hears it land may come to look.", 9, false },
     [IT_POTION] = { "healing potion", "healing potions",
-                    "A flask of ruby liquid that knits wounds closed when drunk.", 7, true },
+                    "A flask of ruby liquid that knits wounds closed when drunk (15 HP), and burns out an eel's venom.", 7, true },
     [IT_SWORD]  = { "short sword", "short swords",
                     "A plain, well-balanced blade. It does nothing clever and nothing badly.",
                     0, true, GEAR_WEAPON, 85, 2, 5, 0 },
@@ -722,6 +723,10 @@ void game_resume(Game *g)
     g->level_changed = true;
     g->lower_dirty = true;
     memset(g->fl, 0, sizeof g->fl);
+    /* fields that sit in what was padding: an older save might hold anything there */
+    if (g->poison > 5) g->poison = 0;
+    for (int d = 0; d < MAX_DEPTH + 2; d++)
+        for (int i = 0; i < MAX_MOBS; i++) if (g->mobs[d][i].trail > 8) g->mobs[d][i].trail = 0;
     Mob *ms = g->mobs[g->depth];
     for (int i = 0; i <= MAX_MOBS; i++) {
         Mob *m = i < MAX_MOBS ? &ms[i] : &g->player;
@@ -883,6 +888,10 @@ static bool attack(Game *g, Mob *a, Mob *d)
     }
     if (pl_def) hurt_note(g, a->kind, dmg);
     d->hp -= dmg;
+    /* an eel's bite is venomous, now and then: 1 HP a turn for a few turns, and no healing meanwhile */
+    bool venom = a->kind == MK_EEL && pl_def && d->hp > 0 && rng_chance(&g->rng, 40);
+    int venom_was = g->poison;
+    if (venom) g->poison = (uint8_t)(g->poison + 3 > 5 ? 5 : g->poison + 3);
     d->flash = 1.0f;
     sfx_ex(g, pl_def ? SND_HURT : SND_HIT, d->x, d->y, false, 0.06f, 1);
     char t[16];
@@ -903,6 +912,10 @@ static bool attack(Game *g, Mob *a, Mob *d)
             g->state = GS_DEAD;
             g->end_t = g->time;
             sfx_ex(g, SND_DIE, d->x, d->y, true, 0.25f, 1);
+        } else if (venom) {
+            if (venom_was) game_msg(g, C_BAD, "the eel bites you again, and more venom burns in the wound (poisoned, %d turns).", g->poison);
+            else game_msg(g, C_BAD, "the eel bites you, and its venom burns in the wound (poisoned: 1 HP a turn for %d turns).", g->poison);
+            floater(g, d->x, d->y, 0x8fd85a, "venom");
         } else if (chill) {
             game_msg(g, C_BAD, "the %s's touch chills you to the bone (max HP -%d until a fire warms you).", ai->name, chill);
             floater(g, d->x, d->y, 0x9ad8ff, "chill");
@@ -1110,6 +1123,7 @@ static void band_alert(Game *g, const Mob *m, int x, int y)
         o->hunting = true;
         o->tx = x;
         o->ty = y;
+        o->trail = o->band ? 8 : 5;     /* it knows which way to go looking */
     }
 }
 
@@ -1391,6 +1405,39 @@ static void eel_turn(Game *g, Mob *m)
     }
 }
 
+/* goblins, slingers and ogres hunt the long way round, and follow your tracks */
+static bool tracker(const Mob *m)
+{
+    return m->kind == MK_GOBLIN || m->kind == MK_SLINGER || m->kind == MK_OGRE;
+}
+
+/* how many steps it follows your tracks once it has lost sight of you: a band longer */
+static uint8_t trail_steps(const Mob *m) { return m->band ? 8 : 5; }
+
+/* A tracker has reached the spot it last saw you, and you're gone: it follows your
+ * tracks one step further, a few steps at most, if you're not far off and no shut
+ * door is in the way. False: it has lost you. */
+static bool follow_tracks(Game *g, Mob *m)
+{
+    Mob *p = &g->player;
+    if (!m->trail || !mob_bfs(g, m, p->x, p->y) || mob_dist[m->y][m->x] > 12) return false;
+    int bd = mob_dist[m->y][m->x], best = -1;
+    for (int d = 0; d < 8; d++) {
+        int nx = m->x + DX8[d], ny = m->y + DY8[d];
+        if (!in_map(nx, ny) || mob_dist[ny][nx] < 0 || mob_dist[ny][nx] >= bd) continue;
+        if (!mob_ground(g, m, m->x, m->y, nx, ny)) continue;
+        bd = mob_dist[ny][nx];
+        best = d;
+    }
+    if (best < 0) return false;
+    int nx = m->x + DX8[best], ny = m->y + DY8[best];
+    if (game_level(g)->t[ny][nx] == T_DOOR) return false;     /* a shut door: your trail ends at it */
+    m->trail--;
+    m->tx = nx;
+    m->ty = ny;
+    return true;
+}
+
 /* one monster's turn; pb is how brightly the player stands out */
 static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
 {
@@ -1410,7 +1457,8 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
     int dist = cheb(m->x, m->y, p->x, p->y);
     bool cloak = g->armour.kind == IT_CLOAK;
     bool lit = pb > 0.30f;
-    float range = lit ? (float)mi->perception : cloak ? 1.5f : 2.5f;
+    bool goblin = m->kind == MK_GOBLIN || m->kind == MK_SLINGER;     /* goblins see well in the dark */
+    float range = lit ? (float)mi->perception : goblin ? (cloak ? 2.0f : 3.5f) : cloak ? 1.5f : 2.5f;
     bool shade = shadeish(m->kind), bat = m->kind == MK_BAT;
     if (shade) {
         /* a shade within your torch's glow gnaws at the flame (the Hollow, greedily) */
@@ -1423,7 +1471,7 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
     bool sees = dist <= range && los(lv, m->x, m->y, p->x, p->y);
     if (m->asleep) {
         /* a sleeper stirs as you come near, more surely in the light; a shadow cloak muffles you */
-        int pct = !sees ? 0 : dist <= 1 ? (lit ? 30 : 12) : dist <= 2 ? (lit ? 22 : 8) : 10;
+        int pct = !sees ? 0 : dist <= 1 ? (lit ? 30 : 12) : dist <= 2 ? (lit ? 22 : 8) : lit ? 10 : 0;
         if (cloak) pct /= 2;
         if (pct && (int)(rng_u32(&g->rng) % 100) < pct) {
             m->asleep = false;
@@ -1438,6 +1486,7 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
         if (!m->hunting) { vocal(g, m); band_alert(g, m, p->x, p->y); }     /* it has spotted you, and cries out */
         m->hunting = true;
         m->tx = p->x; m->ty = p->y;
+        m->trail = trail_steps(m);              /* fresh tracks to follow, if it loses sight of you */
     } else if (shade && m->hunting && dist <= 7 && rng_chance(&g->rng, 6)) {
         vocal(g, m);                            /* whispering in the dark */
     }
@@ -1459,9 +1508,9 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
     }
     if (m->hunting) {
         if (bat && rng_chance(&g->rng, 40)) mob_wander(g, m);
-        else if (m->band) mob_path_step(g, m, m->tx, m->ty);   /* a band hunts you down the long way round */
+        else if (m->band || tracker(m)) mob_path_step(g, m, m->tx, m->ty);   /* the long way round corners */
         else mob_step_toward(g, m, m->tx, m->ty);
-        if (m->x == m->tx && m->y == m->ty && !sees) {
+        if (m->x == m->tx && m->y == m->ty && !sees && !(tracker(m) && follow_tracks(g, m))) {
             m->hunting = false;
             if (m->band) { m->tx = m->ty = -1; m->linger = (uint8_t)rng_range(&g->rng, 2, 5); }   /* lost you: on its way again */
         }
@@ -1756,9 +1805,26 @@ static void end_turn(Game *g)
             if (!g->chill) game_msg(g, C_GOOD, "the last of the chill leaves your bones.");
         }
     }
+    if (g->poison && g->state != GS_DEAD) {
+        g->poison--;
+        hurt_note(g, MK_EEL, 1);
+        p->hp--;
+        p->flash = 1.0f;
+        floater(g, p->x, p->y, 0x8fd85a, "-1");
+        if (p->hp <= 0) {
+            game_msg(g, C_BAD, "the eel's venom is the end of you...");
+            set_cause("Poisoned by an eel's bite");
+            g->state = GS_DEAD;
+            g->end_t = g->time;
+            sfx_ex(g, SND_DIE, p->x, p->y, true, 0.25f, 1);
+            game_stop(g);
+        } else if (!g->poison) {
+            game_msg(g, C_GOOD, "the venom has run its course.");
+        }
+    }
     if (++g->regen >= (game_by_fire(g) ? 5 : 9)) {
         g->regen = 0;
-        if (p->hp < game_max_hp(g) && g->state != GS_DEAD) p->hp++;
+        if (p->hp < game_max_hp(g) && g->state != GS_DEAD && !g->poison) p->hp++;   /* not while the venom burns */
     }
     if (g->state == GS_PLAY) wanderers_arrive(g);
     compute_view(g);
@@ -3221,6 +3287,7 @@ static void make_noise(Game *g, int x, int y, int radius)
         m->hunting = true;      /* goes to look */
         m->tx = x;
         m->ty = y;
+        m->trail = 0;           /* at the noise, not after you */
     }
 }
 
@@ -3339,6 +3406,7 @@ static void flash_burst(Game *g, int x, int y)
         }
         m->asleep = false;
         m->hunting = false;             /* it has lost sight of everything */
+        m->trail = 0;
         m->daze = m->kind == MK_OGRE ? 2 : rng_range(&g->rng, 3, 4);
         floater(g, m->x, m->y, 0xfff0c0, "dazed");
         dazed++;
@@ -3636,7 +3704,9 @@ bool game_use(Game *g, int slot)
         char t[16];
         snprintf(t, sizeof t, "+%d", heal);
         floater(g, p->x, p->y, 0x8ee070, t);
-        game_msg(g, C_GOOD, "you drink the potion. Warmth floods through you.");
+        game_msg(g, C_GOOD, g->poison ? "you drink the potion. Warmth floods through you and burns the venom out."
+                                      : "you drink the potion. Warmth floods through you.");
+        g->poison = 0;
         sfx(g, SND_DRINK, p->x, p->y);
         end_turn(g);
         return true;
