@@ -433,7 +433,7 @@ static void draw_chasm_lip(Renderer *r, Canvas *cv, const View *v, int tx, int t
     for (int k = 0; k < 4; k++) if (oc[k]) ro[k] = 20 + (int)(hash2(tx * 2 + (k & 1), ty * 2 + (k >> 1), 0x70c0u) % 10);
     const CF *c00 = &r->corner[ty][tx], *c10 = &r->corner[ty][tx + 1];
     const CF *c01 = &r->corner[ty + 1][tx], *c11 = &r->corner[ty + 1][tx + 1];
-#define LIP_IM(X, Y) (&r->t.floor[hash2((X), (Y), lv->seed) % N_FLOOR])
+#define LIP_IM(X, Y) (&r->t.floor[depth_theme(lv->depth)][hash2((X), (Y), lv->seed) % N_FLOOR])
     for (int j = 0; j < TILE; j++) {
         int y = sy + j;
         if ((unsigned)y >= (unsigned)cv->h) continue;
@@ -820,7 +820,7 @@ static void draw_water(Renderer *r, Canvas *cv, const View *v, int tx, int ty, i
 {
     const Level *lv = v->lv;
     uint32_t h = hash2(tx, ty, lv->seed);
-    const Image *bed = &r->t.floor[h % N_FLOOR];
+    const Image *bed = &r->t.floor[depth_theme(lv->depth)][h % N_FLOOR];
     /* water presence and depth at the corners, averaged over the four tiles
      * around each, so shores round off and the deep fades in */
     float wc[2][2], dc[2][2];
@@ -1059,13 +1059,13 @@ static void draw_ground(Renderer *r, Canvas *cv, const View *v)
             if (t == T_CHASM) { draw_chasm(r, cv, v, tx, ty, sx, sy); continue; }
             if (tile_water(t)) { draw_water(r, cv, v, tx, ty, sx, sy); continue; }
             uint32_t h = hash2(tx, ty, lv->seed);
-            const Image *im = &r->t.floor[h % N_FLOOR];
+            const Image *im = &r->t.floor[depth_theme(lv->depth)][h % N_FLOOR];
             const Image *over = NULL;
-            if (t == T_STAIRS_DOWN) im = &r->t.stairs_dn;
-            else if (t == T_STAIRS_UP) im = &r->t.stairs_up;
+            if (t == T_STAIRS_DOWN) im = &r->t.stairs_dn[depth_theme(lv->depth)];
+            else if (t == T_STAIRS_UP) im = &r->t.stairs_up[depth_theme(lv->depth)];
             else if (t == T_DOOR_OPEN)
-                im = tile_solid(tile_at(lv, tx, ty - 1)) && tile_solid(tile_at(lv, tx, ty + 1)) ? &r->t.door_open_side
-                                                                                              : &r->t.door_open;
+                im = tile_solid(tile_at(lv, tx, ty - 1)) && tile_solid(tile_at(lv, tx, ty + 1)) ? &r->t.door_open_side[depth_theme(lv->depth)]
+                                                                                              : &r->t.door_open[depth_theme(lv->depth)];
             else if (t == T_RUBBLE) over = &r->t.rubble[(h >> 8) % 3];
             int ao = 0;
             if (tile_solid(tile_at(lv, tx, ty - 1)) || tile_at(lv, tx, ty - 1) == T_DOOR) ao |= AO_N;
@@ -1125,7 +1125,7 @@ static void draw_wall(Renderer *r, Canvas *cv, const View *v, int tx, int ty)
     /* the top, with a bevelled rim along every open side */
     static Image top;
     if (!top.px) image_alloc(&top, TILE, TILE);
-    const Image *src = &r->t.wtop[h % N_WALL];
+    const Image *src = &r->t.wtop[depth_theme(v->lv->depth)][h % N_WALL];
     for (int j = 0; j < TILE; j++)
         for (int i = 0; i < TILE; i++) {
             uint32_t c = src->px[j * TILE + i];
@@ -1144,7 +1144,7 @@ static void draw_wall(Renderer *r, Canvas *cv, const View *v, int tx, int ty)
         /* the front face takes the light of the floor in front of it; a cut-down
          * wall shows only the foot of it */
         CF a = *c01, b = *c11;
-        Image face = image_rows(&r->t.wface[(h >> 4) % N_WALL], WALL_R - rz, rz);
+        Image face = image_rows(&r->t.wface[depth_theme(v->lv->depth)][(h >> 4) % N_WALL], WALL_R - rz, rz);
         draw_lit(cv, sx, sy + TILE - rz, &face, TILE, rz, &a, &b, &a, &b, 0.7f, 1.0f, 0, v->fog, NULL, 0);
     }
 }

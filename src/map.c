@@ -43,6 +43,13 @@ const char *tile_desc(Tile t)
     }
 }
 
+const char *theme_name(int th)
+{
+    static const char *N[N_THEME] = { "The Upper Halls", "The Mossed Works", "The Brick Vaults", "The Drowned Slate",
+                                      "The Black Deeps", "The Hearth of the World" };
+    return th >= 0 && th < N_THEME ? N[th] : N[0];
+}
+
 const char *trap_name(int k)
 {
     static const char *n[TR_COUNT] = { "", "alarm plate", "draught vent", "trapdoor", "snare" };

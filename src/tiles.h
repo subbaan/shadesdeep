@@ -15,16 +15,16 @@
 
 /* nothing but Images: tiles_free walks it as an array of them */
 typedef struct {
-    Image floor[N_FLOOR];
-    Image wtop[N_WALL];
-    Image wface[N_WALL];    /* TILE x WALL_R */
+    Image floor[N_THEME][N_FLOOR];      /* by depth_theme() */
+    Image wtop[N_THEME][N_WALL];
+    Image wface[N_THEME][N_WALL];       /* TILE x WALL_R */
     Image cliff;
-    Image stairs_dn, stairs_up;
+    Image stairs_dn[N_THEME], stairs_up[N_THEME];
     Image door;             /* TILE x (TILE + WALL_R), drawn raised */
     Image door_low;         /* TILE x (TILE + LOW_R): a door in a cut-down front wall */
     Image door_side;        /* TILE x (TILE + WALL_R): a door in a north-south wall, seen edge on */
-    Image door_open;        /* the doorway floor, an oak sill across it */
-    Image door_open_side;
+    Image door_open[N_THEME];        /* the doorway floor, an oak sill across it */
+    Image door_open_side[N_THEME];
     Image door_leaf;        /* TILE x (TILE + WALL_R): an open door swung back against its left post, edge on */
     Image door_leaf_low;    /* TILE x (TILE + LOW_R): the same in a cut-down front wall */
     Image door_leaf_side;   /* TILE x (WALL_R + 4): an open door in a north-south wall, back against its north post */

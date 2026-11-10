@@ -82,47 +82,186 @@ static void crack(Image *im, uint32_t seed)
     }
 }
 
-static void build_floor(Image *im, int v)
+/* What each stretch of the dungeon is built of. */
+typedef enum { LAY_FLAGS, LAY_BRICK, LAY_SLAB, LAY_COBBLE } Lay;
+typedef enum { DECO_NONE, DECO_MOSS, DECO_DAMP, DECO_VEIN, DECO_GOLD } Deco;
+typedef struct {
+    uint32_t floor, fmort, face, wmort, top, tmort;
+    Lay lay;
+    Deco deco;
+    float rough;
+} Look;
+
+static const Look LOOKS[N_THEME] = {
+    [TH_HALLS]  = { 0x857a68, 0x3a332c, 0x7a6d5d, 0x2c2620, 0x5f574d, 0x24201b, LAY_FLAGS,  DECO_NONE, 1.0f },
+    [TH_MOSS]   = { 0x768268, 0x2b3226, 0x687260, 0x222a20, 0x515a4a, 0x1c221a, LAY_FLAGS,  DECO_MOSS, 1.25f },
+    [TH_BRICK]  = { 0x94614c, 0x35221c, 0x8c5844, 0x2a1a16, 0x674438, 0x221511, LAY_BRICK,  DECO_NONE, 0.9f },
+    [TH_SLATE]  = { 0x5876a4, 0x1c2638, 0x4e6892, 0x162034, 0x3c4e70, 0x121a2a, LAY_SLAB,   DECO_DAMP, 0.8f },
+    [TH_BASALT] = { 0x5a5682, 0x14121e, 0x4c4872, 0x100e1a, 0x363252, 0x0c0a16, LAY_COBBLE, DECO_VEIN, 1.1f },
+    [TH_HEARTH] = { 0xa89e8a, 0x4c4236, 0x9c917c, 0x3a3228, 0x766c5c, 0x2c261e, LAY_SLAB,   DECO_GOLD, 0.7f },
+};
+
+/* moss creeping over the stone, thickest in the joints */
+static void deco_moss(Image *im, uint32_t seed, bool face)
 {
+    for (int y = 0; y < im->h; y++)
+        for (int x = 0; x < im->w; x++) {
+            /* wraps, so tiles join up */
+            float a = x * 6.2832f / im->w, b = y * 6.2832f / TILE;
+            float n = fbm(2.0f + cosf(a) * 1.3f + (seed & 7), 2.0f + sinf(a) * 1.3f + cosf(b) * 1.3f, seed + 50)
+                    + (face ? y * 0.02f : 0) + (float)(hash2(x, y, seed + 7) % 100) * 0.0016f;
+            if (n < 0.60f) continue;
+            uint32_t c = get(im, x, y) & 0xffffff;
+            uint32_t m = (hash2(x, y, seed + 3) & 3) ? 0x4f6a34 : 0x6a8440;
+            put(im, x, y, A(mix(c, m, n > 0.68f ? 190 : 110)));
+        }
+}
+
+/* a dark stain of wet, and the odd bright bead of water */
+static void deco_damp(Image *im, uint32_t seed)
+{
+    for (int y = 0; y < im->h; y++)
+        for (int x = 0; x < im->w; x++) {
+            float a = x * 6.2832f / im->w, b = y * 6.2832f / TILE;
+            float n = fbm(3.0f + cosf(a) * 1.1f, 3.0f + sinf(a) * 1.1f + sinf(b) * 1.4f + (seed & 3), seed + 80);
+            uint32_t c = get(im, x, y) & 0xffffff;
+            if (n > 0.62f) c = mix(c, 0x1c2838, 36);
+            if (hash2(x, y, seed + 11) % 211 == 0) c = add_sat(c, 46, 52, 60);
+            put(im, x, y, A(c));
+        }
+}
+
+/* a wandering vein through the stone */
+static void deco_vein(Image *im, uint32_t seed, uint32_t col, int n)
+{
+    Rng r = { seed };
+    for (int k = 0; k < n; k++) {
+        float x = rng_range(&r, 2, im->w - 3), y = rng_range(&r, 2, im->h - 3), a = rng_f(&r) * 6.28f;
+        int len = rng_range(&r, 7, 16);
+        for (int i = 0; i < len; i++) {
+            int xi = (int)x, yi = (int)y;
+            if (xi > 0 && yi > 0 && xi < im->w - 1 && yi < im->h - 1)
+                put(im, xi, yi, A(mix(get(im, xi, yi) & 0xffffff, col, i == 0 || i == len - 1 ? 90 : 170)));
+            a += (rng_f(&r) - 0.5f) * 1.0f;
+            x += cosf(a);
+            y += sinf(a) * 0.8f;
+        }
+    }
+}
+
+static void deco(Image *im, const Look *lk, uint32_t seed, bool face, int v)
+{
+    switch (lk->deco) {
+    case DECO_MOSS: deco_moss(im, seed, face); break;
+    case DECO_DAMP: deco_damp(im, seed); break;
+    case DECO_VEIN: if (v & 1) deco_vein(im, seed, 0x9a86c8, 1); break;
+    case DECO_GOLD: if (!face && (v & 1)) deco_vein(im, seed, 0xd8b060, 1); break;
+    default: break;
+    }
+}
+
+/* rounded cobbles: each pixel belongs to the nearest of a jittered grid of stones (wrapping at the tile's edge) */
+static void cobbles(Image *im, uint32_t base, uint32_t mort, uint32_t seed, float rough)
+{
+    int n = 4, cell = TILE / n;
+    for (int y = 0; y < im->h; y++)
+        for (int x = 0; x < im->w; x++) {
+            float d1 = 1e9f, d2 = 1e9f;
+            int who = 0;
+            for (int gj = -1; gj <= n; gj++)
+                for (int gi = -1; gi <= n; gi++) {
+                    int wi = (gi + n) % n, wj = (gj + n) % n;
+                    uint32_t hh = hash2(wi, wj, seed);
+                    float px = gi * cell + 1.5f + (hh & 255) / 255.0f * (cell - 3), py = gj * cell + 1.5f + (hh >> 8 & 255) / 255.0f * (cell - 3);
+                    float d = (x - px) * (x - px) + (y - py) * (y - py);
+                    if (d < d1) { d2 = d1; d1 = d; who = wj * n + wi; }
+                    else if (d < d2) d2 = d;
+                }
+            float edge = sqrtf(d2) - sqrtf(d1);
+            if (edge < 1.0f) { put(im, x, y, A(mix(base, mort, 190))); continue; }
+            int tone = (int)(hash2(who, 9, seed) % 17) - 8;
+            float nz = fbm(x * 0.3f, y * 0.3f, seed + (uint32_t)who);
+            int vv = tone + (int)((nz - 0.5f) * 30 * rough) + (edge < 2.2f ? -9 : edge > 5 ? 6 : 0);
+            put(im, x, y, A(jitter(base, vv)));
+        }
+}
+
+static void build_floor(Image *im, int v, int th)
+{
+    const Look *lk = &LOOKS[th];
     image_alloc(im, TILE, TILE);
-    const uint32_t base = 0x857a68, mort = 0x3a332c;
-    mortar(im, mort);
-    uint32_t seed = 1000 + (uint32_t)v * 17;
+    mortar(im, lk->fmort);
+    uint32_t seed = 1000 + (uint32_t)v * 17 + (uint32_t)th * 7919;
     static const Rect L[4][4] = {
         { { 0, 0, 15, 15 }, { 16, 0, 16, 15 }, { 0, 16, 15, 16 }, { 16, 16, 16, 16 } },
         { { 0, 0, 31, 15 }, { 0, 16, 11, 16 }, { 12, 16, 20, 16 }, { 0, 0, 0, 0 } },
         { { 0, 0, 13, 31 }, { 14, 0, 18, 13 }, { 14, 14, 18, 18 }, { 0, 0, 0, 0 } },
         { { 0, 0, 20, 11 }, { 21, 0, 11, 20 }, { 0, 12, 20, 20 }, { 21, 21, 11, 11 } },
     };
-    const Rect *lay = L[v % 4];
-    for (int i = 0; i < 4; i++)
-        if (lay[i].w > 0) {
-            Rect r = lay[i];
-            /* mortar gaps on the right and bottom */
-            if (r.x + r.w >= TILE) r.w = TILE - r.x;
-            if (r.y + r.h >= TILE) r.h = TILE - r.y;
-            stone_block(im, r, base, seed + (uint32_t)i * 31, 1.0f);
+    static const Rect SL[4][4] = {      /* great slabs */
+        { { 0, 0, 32, 32 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 } },
+        { { 0, 0, 32, 15 }, { 0, 16, 32, 16 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 } },
+        { { 0, 0, 15, 32 }, { 16, 0, 16, 32 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 } },
+        { { 0, 0, 32, 32 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 } },
+    };
+    if (lk->lay == LAY_COBBLE) {
+        cobbles(im, lk->floor, lk->fmort, seed, lk->rough);
+    } else if (lk->lay == LAY_BRICK) {
+        /* courses of brick, every other one on its side for a basket weave in half the tiles */
+        bool weave = v & 2;
+        for (int q = 0; q < 4; q++) {
+            int qx = (q & 1) * 16, qy = (q >> 1) * 16;
+            bool upright = weave && ((q & 1) ^ (q >> 1));
+            for (int k = 0; k < 2; k++) {
+                Rect r = upright ? (Rect){ qx + k * 8, qy, 7, 15 } : (Rect){ qx, qy + k * 8, 15, 7 };
+                if (!weave) {            /* running bond: shift alternate courses half a brick */
+                    r = (Rect){ ((q & 1) * 16 + (((q >> 1) * 2 + k) & 1) * 8) % TILE, qy + k * 8, 15, 7 };
+                    stone_block(im, r, lk->floor, seed + (uint32_t)(q * 2 + k) * 31, lk->rough);
+                    if (r.x + r.w > TILE) {     /* the brick that runs off the right comes back in on the left */
+                        Rect r2 = { 0, r.y, r.x + r.w - TILE, r.h };
+                        stone_block(im, r2, lk->floor, seed + (uint32_t)(q * 2 + k) * 31, lk->rough);
+                    }
+                    continue;
+                }
+                stone_block(im, r, lk->floor, seed + (uint32_t)(q * 2 + k) * 31, lk->rough);
+            }
         }
+    } else {
+        const Rect *lay = lk->lay == LAY_SLAB ? SL[v % 4] : L[v % 4];
+        for (int i = 0; i < 4; i++)
+            if (lay[i].w > 0) {
+                Rect r = lay[i];
+                /* mortar gaps on the right and bottom */
+                int gap = lk->lay == LAY_SLAB;
+                if (r.x + r.w >= TILE) r.w = TILE - gap - r.x;
+                if (r.y + r.h >= TILE) r.h = TILE - gap - r.y;
+                stone_block(im, r, lk->floor, seed + (uint32_t)i * 31, lk->rough);
+            }
+    }
     if (v >= 4) crack(im, seed + 5);
+    deco(im, lk, seed, false, v);
 }
 
 /* ------------------------------------------------------------- walls */
 
-static void build_wall_face(Image *im, int v)
+static void build_wall_face(Image *im, int v, int th)
 {
+    const Look *lk = &LOOKS[th];
     image_alloc(im, TILE, WALL_R);
-    const uint32_t base = 0x7a6d5d, mort = 0x2c2620;
-    mortar(im, mort);
-    uint32_t seed = 2000 + (uint32_t)v * 13;
-    int rowh = WALL_R / 2;
-    for (int row = 0; row < 2; row++) {
-        int off = ((row + v) & 1) ? 8 : 0;
-        for (int bx = -16 + off; bx < TILE; bx += 16) {
-            Rect r = { bx < 0 ? 0 : bx, row * rowh, (bx < 0 ? bx + 15 : 15), rowh - 1 };
+    mortar(im, lk->wmort);
+    uint32_t seed = 2000 + (uint32_t)v * 13 + (uint32_t)th * 7919;
+    /* two courses of big blocks, or three of brick; the slate and marble walls are single tall blocks */
+    int rows = lk->lay == LAY_BRICK ? 3 : lk->lay == LAY_SLAB ? 1 : 2, bw = lk->lay == LAY_BRICK ? 11 : 16;
+    int rowh = WALL_R / rows;
+    for (int row = 0; row < rows; row++) {
+        int off = ((row + v) & 1) ? bw / 2 : 0;
+        for (int bx = -bw + off; bx < TILE; bx += bw) {
+            Rect r = { bx < 0 ? 0 : bx, row * rowh, (bx < 0 ? bx + bw - 1 : bw - 1), rowh - 1 };
             if (r.x + r.w > TILE) r.w = TILE - r.x;
-            if (r.w > 0) stone_block(im, r, base, seed + (uint32_t)(bx + 40) * 3 + (uint32_t)row, 1.2f);
+            if (r.w > 0) stone_block(im, r, lk->face, seed + (uint32_t)(bx + 40) * 3 + (uint32_t)row, lk->rough * 1.2f);
         }
     }
+    deco(im, lk, seed, true, v);
     /* soot near the bottom, darker toward the floor */
     for (int y = 0; y < WALL_R; y++)
         for (int x = 0; x < TILE; x++) {
@@ -131,12 +270,12 @@ static void build_wall_face(Image *im, int v)
         }
 }
 
-static void build_wall_top(Image *im, int v)
+static void build_wall_top(Image *im, int v, int th)
 {
+    const Look *lk = &LOOKS[th];
     image_alloc(im, TILE, TILE);
-    const uint32_t base = 0x5f574d, mort = 0x24201b;
-    mortar(im, mort);
-    uint32_t seed = 3000 + (uint32_t)v * 11;
+    mortar(im, lk->tmort);
+    uint32_t seed = 3000 + (uint32_t)v * 11 + (uint32_t)th * 7919;
     static const Rect L[2][4] = {
         { { 0, 0, 15, 15 }, { 16, 0, 16, 15 }, { 0, 16, 15, 16 }, { 16, 16, 16, 16 } },
         { { 0, 0, 20, 15 }, { 21, 0, 11, 15 }, { 0, 16, 11, 16 }, { 12, 16, 20, 16 } },
@@ -145,7 +284,7 @@ static void build_wall_top(Image *im, int v)
         Rect r = L[v & 1][i];
         if (r.x + r.w >= TILE) r.w = TILE - r.x;
         if (r.y + r.h >= TILE) r.h = TILE - r.y;
-        stone_block(im, r, base, seed + (uint32_t)i * 7, 1.3f);
+        stone_block(im, r, lk->top, seed + (uint32_t)i * 7, lk->rough * 1.3f);
     }
 }
 
@@ -168,9 +307,9 @@ static void build_cliff(Image *im)
 
 /* ------------------------------------------------------------- features */
 
-static void build_stairs(Image *im, bool down)
+static void build_stairs(Image *im, bool down, int th)
 {
-    build_floor(im, 1);
+    build_floor(im, 1, th);
     int x0 = 5, x1 = 27, y0 = 4, y1 = 29;
     for (int y = y0; y < y1; y++)
         for (int x = x0; x < x1; x++) {
@@ -265,15 +404,15 @@ static void build_door_side(Image *im)
 
 /* The floor of an open doorway: stone posts at either end and a worn oak sill
  * across the middle, where the door closes down on it. */
-static void build_door_open(Image *im, bool side)
+static void build_door_open(Image *im, bool side, int th)
 {
-    build_floor(im, 2);
+    build_floor(im, 2, th);
     for (int y = 0; y < TILE; y++)
         for (int x = 0; x < TILE; x++) {
             uint32_t c = get(im, x, y) & 0xffffff;
             int across = side ? y : x, along = side ? x : y;      /* across the doorway / along the way through */
             if (across < 3 || across >= TILE - 3) {
-                c = jitter(0x7a6d5d, (int)((fbm(x * 0.4f, y * 0.4f, 5) - 0.5f) * 30));   /* stone posts */
+                c = jitter(LOOKS[th].face, (int)((fbm(x * 0.4f, y * 0.4f, 5) - 0.5f) * 30));   /* stone posts */
             } else if (along >= 12 && along < 20) {
                 int a = along - 12;
                 float g = fbm(across * 0.12f, a * 0.7f, 41);                        /* grain runs across */
@@ -1027,19 +1166,23 @@ static const Pal I_EMBERS_PAL[] = {
 void tiles_build(Tiles *t)
 {
     memset(t, 0, sizeof *t);
-    for (int i = 0; i < N_FLOOR; i++) build_floor(&t->floor[i], i);
-    for (int i = 0; i < N_WALL; i++) {
-        build_wall_top(&t->wtop[i], i);
-        build_wall_face(&t->wface[i], i);
+    for (int th = 0; th < N_THEME; th++) {
+        for (int i = 0; i < N_FLOOR; i++) build_floor(&t->floor[th][i], i, th);
+        for (int i = 0; i < N_WALL; i++) {
+            build_wall_top(&t->wtop[th][i], i, th);
+            build_wall_face(&t->wface[th][i], i, th);
+        }
     }
     build_cliff(&t->cliff);
-    build_stairs(&t->stairs_dn, true);
-    build_stairs(&t->stairs_up, false);
+    for (int th = 0; th < N_THEME; th++) {
+        build_stairs(&t->stairs_dn[th], true, th);
+        build_stairs(&t->stairs_up[th], false, th);
+        build_door_open(&t->door_open[th], false, th);
+        build_door_open(&t->door_open_side[th], true, th);
+    }
     build_door(&t->door, WALL_R);
     build_door(&t->door_low, LOW_R);
     build_door_side(&t->door_side);
-    build_door_open(&t->door_open, false);
-    build_door_open(&t->door_open_side, true);
     build_door_leaf(&t->door_leaf, WALL_R);
     build_door_leaf(&t->door_leaf_low, LOW_R);
     build_door_leaf_side(&t->door_leaf_side);

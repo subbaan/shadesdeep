@@ -14,6 +14,17 @@
 #define LIGHT_MAXR 9
 #define CONTRIB_MAX ((2 * LIGHT_MAXR + 1) * (2 * LIGHT_MAXR + 1))
 
+/* The dungeon changes character every five levels: its stone, and the shape of its rooms. */
+#define N_THEME 6
+typedef enum { TH_HALLS, TH_MOSS, TH_BRICK, TH_SLATE, TH_BASALT, TH_HEARTH } Theme;
+static inline int depth_theme(int d)
+{
+    if (d >= FINAL_DEPTH) return TH_HEARTH;
+    int t = (d - 1) / 5;
+    return t < 0 ? 0 : t > TH_BASALT ? TH_BASALT : t;
+}
+const char *theme_name(int th);
+
 typedef struct { uint64_t s; } Rng;
 
 static inline uint32_t rng_u32(Rng *r)
