@@ -1,6 +1,8 @@
 CC      ?= cc
 CFLAGS  ?= -O2 -g
 CFLAGS  += -std=gnu11 -Wall -Wextra -D_GNU_SOURCE
+# keep the build folder's path out of the binary's debug info
+CFLAGS  += -ffile-prefix-map=$(CURDIR)=.
 CFLAGS  += $(shell pkg-config --cflags libpng freetype2 sdl3 vorbisfile)
 LDLIBS  += $(shell pkg-config --libs libpng freetype2 sdl3 vorbisfile) -lm -lz
 

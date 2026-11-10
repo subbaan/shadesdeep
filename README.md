@@ -7,7 +7,7 @@ hover descriptions and clickable actions.
 
 ![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
 
-Version: 0.23.1 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.25.1 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -83,8 +83,7 @@ sound, and libvorbis for the music; if no audio device opens, the game runs sile
   with a gold mark on runs that slew the Hollow. A win ends on an epilogue
   telling what the rekindled fire did for the kingdom above.
   The closing screen tells you where the run stands, and
-  `shadesdeep --hall-of-fame` prints the table in the terminal. Put a picture
-  at `assets/title.png` and the title screen uses it. A run log for balance
+  `shadesdeep --hall-of-fame` prints the table in the terminal. A run log for balance
   tuning (`runlog.txt`, same folder) gets a line of stats on each new depth and
   at the end of each run.
 - **Map:** `m` (or the Map button) shows the whole explored level, drawn
@@ -257,3 +256,9 @@ its still, keeps the eyes, and adds a dark rim; `spritecook-assets.json` records
 the SpriteCook asset ids. The floors, walls, shades and the Hollow are still
 procedural (`src/tiles.c`, `src/render.c`). Fonts: Cinzel and Alegreya (SIL Open Font License, see
 `assets/fonts/`).
+
+## Licence
+
+Shadesdeep is released under the [MIT License](LICENSE). The fonts in
+`assets/fonts/` (Cinzel and Alegreya) are under the SIL Open Font License;
+their licence texts are kept beside them.
