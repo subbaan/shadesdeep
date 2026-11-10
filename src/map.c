@@ -662,6 +662,170 @@ static int make_secret_room(Level *lv, Rng *rng)
     return -1;
 }
 
+/* ---------------------------------------------------------- room shapes */
+
+/* Not every room is a box. The shape is only known while the level is made (Room has
+ * no field for it, so saves stay as they are): what's left outside the shape is rock. */
+typedef enum { RS_RECT, RS_CHAMFER, RS_OVAL, RS_CROSS, RS_PILLARS, RS_RUINED, RS_COUNT } RoomShape;
+
+/* how often each shape turns up, in each stretch of the deep */
+static const uint8_t SHAPE_W[N_THEME][RS_COUNT] = {
+    /*              rect chamfer oval cross pillars ruined */
+    [TH_HALLS]  = { 60,  15,     5,   10,   10,     0 },
+    [TH_MOSS]   = { 30,  10,     15,  5,    10,     30 },
+    [TH_BRICK]  = { 30,  10,     5,   20,   30,     5 },
+    [TH_SLATE]  = { 25,  20,     30,  5,    10,     10 },
+    [TH_BASALT] = { 20,  15,     25,  10,   10,     20 },
+    [TH_HEARTH] = { 40,  20,     0,   10,   30,     0 },
+};
+
+static RoomShape pick_shape(Rng *rng, int depth, int w, int h)
+{
+    const uint8_t *wt = SHAPE_W[depth_theme(depth)];
+    int sum = 0;
+    for (int k = 0; k < RS_COUNT; k++) sum += wt[k];
+    int roll = rng_range(rng, 0, sum - 1), k = 0;
+    while (k < RS_COUNT - 1 && roll >= wt[k]) roll -= wt[k++];
+    /* the small rooms can't carry the fancier shapes */
+    if ((k == RS_CHAMFER && (w < 6 || h < 5)) || (k == RS_OVAL && (w < 7 || h < 5)) ||
+        (k == RS_CROSS && (w < 7 || h < 6)) || (k == RS_PILLARS && (w < 7 || h < 6)) ||
+        (k == RS_RUINED && (w < 6 || h < 5)))
+        k = RS_RECT;
+    return (RoomShape)k;
+}
+
+static bool in_shape(RoomShape s, int i, int j, int w, int h, int cut)
+{
+    switch (s) {
+    case RS_CHAMFER: {
+        int dx = i < w - 1 - i ? i : w - 1 - i, dy = j < h - 1 - j ? j : h - 1 - j;
+        return dx + dy >= cut;
+    }
+    case RS_OVAL: {
+        float u = (i + 0.5f - w / 2.0f) / (w / 2.0f), v = (j + 0.5f - h / 2.0f) / (h / 2.0f);
+        return u * u + v * v <= 1.08f;
+    }
+    case RS_CROSS: {
+        int ax = w / 4, ay = h / 4;
+        return (i >= ax && i < w - ax) || (j >= ay && j < h - ay);
+    }
+    default: return true;
+    }
+}
+
+/* floor in room r that can't be walked to from its middle goes back to rock */
+static void room_trim(Level *lv, int r)
+{
+    const Room *rm = &lv->rooms[r];
+    static uint8_t ok[MAP_H][MAP_W];
+    static int q[MAP_W * MAP_H];
+    memset(ok, 0, sizeof ok);
+    int qh = 0, qn = 0, x = rm->x + rm->w / 2, y = rm->y + rm->h / 2;
+    if (lv->room[y][x] != r) return;
+    ok[y][x] = 1;
+    q[qn++] = y * MAP_W + x;
+    while (qh < qn) {
+        int c = q[qh++];
+        x = c % MAP_W;
+        y = c / MAP_W;
+        for (int d = 0; d < 4; d++) {
+            int X = x + (d == 0) - (d == 1), Y = y + (d == 2) - (d == 3);
+            if (ok[Y][X] || lv->room[Y][X] != r || lv->t[Y][X] != T_FLOOR) continue;
+            ok[Y][X] = 1;
+            q[qn++] = Y * MAP_W + X;
+        }
+    }
+    for (int j = rm->y; j < rm->y + rm->h; j++)
+        for (int i = rm->x; i < rm->x + rm->w; i++)
+            if (lv->room[j][i] == r && lv->t[j][i] == T_FLOOR && !ok[j][i]) { lv->t[j][i] = T_ROCK; lv->room[j][i] = -1; }
+}
+
+/* can all the walkable ground of room r be walked between, and every way in (a corridor or
+ * door touching it) still reach that ground? Walking may use the ground right round the room. */
+static bool room_joined(const Level *lv, int r)
+{
+    const Room *rm = &lv->rooms[r];
+    static uint8_t ok[MAP_H][MAP_W];
+    static int q[MAP_W * MAP_H];
+    memset(ok, 0, sizeof ok);
+    int x0 = rm->x - 1, y0 = rm->y - 1, x1 = rm->x + rm->w, y1 = rm->y + rm->h, qh = 0, qn = 0;
+    for (int y = rm->y; y < rm->y + rm->h && !qn; y++)
+        for (int x = rm->x; x < rm->x + rm->w; x++)
+            if (lv->room[y][x] == r && tile_walkable((Tile)lv->t[y][x])) { ok[y][x] = 1; q[qn++] = y * MAP_W + x; break; }
+    while (qh < qn) {
+        int c = q[qh++], x = c % MAP_W, y = c / MAP_W;
+        for (int d = 0; d < 4; d++) {
+            int X = x + (d == 0) - (d == 1), Y = y + (d == 2) - (d == 3);
+            if (X < x0 || X > x1 || Y < y0 || Y > y1 || ok[Y][X] || !tile_walkable((Tile)lv->t[Y][X])) continue;
+            ok[Y][X] = 1;
+            q[qn++] = Y * MAP_W + X;
+        }
+    }
+    for (int y = y0; y <= y1; y++)
+        for (int x = x0; x <= x1; x++) {
+            if (ok[y][x] || !tile_walkable((Tile)lv->t[y][x])) continue;
+            if (lv->room[y][x] == r) return false;          /* ground of its own, cut off */
+            for (int d = 0; d < 4; d++)                     /* a way in that leads nowhere now */
+                if (tile_at(lv, x + (d == 0) - (d == 1), y + (d == 2) - (d == 3)) != T_ROCK
+                    && lv->room[y + (d == 2) - (d == 3)][x + (d == 0) - (d == 1)] == r) return false;
+        }
+    return true;
+}
+
+static void carve_room(Level *lv, Rng *rng, int r, RoomShape s)
+{
+    const Room *rm = &lv->rooms[r];
+    int cut = rm->w >= 9 && rm->h >= 7 && rng_chance(rng, 50) ? 2 : 1;
+    for (int j = 0; j < rm->h; j++)
+        for (int i = 0; i < rm->w; i++)
+            if (in_shape(s, i, j, rm->w, rm->h, cut)) carve(lv, rm->x + i, rm->y + j, r);
+    if (s == RS_RUINED) {
+        /* the walls have slumped in here and there: bites out of the edge, a tile or two deep */
+        int bites = rng_range(rng, 2, 4);
+        for (int b = 0; b < bites; b++) {
+            int side = rng_range(rng, 0, 3), len = rng_range(rng, 1, 3);
+            int along = side < 2 ? rm->w : rm->h, at = rng_range(rng, 0, along - len);
+            for (int k = 0; k < len; k++) {
+                int deep = (k == 0 || k == len - 1) ? 1 : rng_range(rng, 1, 2);
+                if ((side < 2 ? rm->h : rm->w) < 6) deep = 1;
+                for (int dd = 0; dd < deep; dd++) {
+                    int x = side == 0 ? rm->x + at + k : side == 1 ? rm->x + at + k : side == 2 ? rm->x + dd : rm->x + rm->w - 1 - dd;
+                    int y = side == 0 ? rm->y + dd : side == 1 ? rm->y + rm->h - 1 - dd : rm->y + at + k;
+                    if (abs(x - (rm->x + rm->w / 2)) <= 1 && abs(y - (rm->y + rm->h / 2)) <= 1) continue;
+                    if (lv->room[y][x] == r) { lv->t[y][x] = T_ROCK; lv->room[y][x] = -1; }
+                }
+            }
+        }
+        room_trim(lv, r);
+    }
+}
+
+/* Pillars in a room: two rows down its long sides (a nave and its aisles), or a grid of
+ * them in a big hall. Each stands clear, with floor on all eight sides, so it can never
+ * cut the room in two, and never in the middle, where corridors and braziers go. They
+ * break line of sight: cover from slingers, and a place to lose what hunts you. */
+static void room_pillars(Level *lv, Rng *rng, int r)
+{
+    const Room *rm = &lv->rooms[r];
+    int cx = rm->x + rm->w / 2, cy = rm->y + rm->h / 2;
+    bool grid = rm->w >= 9 && rm->h >= 7 && rng_chance(rng, 50), wide = rm->w >= rm->h;
+    for (int y = rm->y + 1; y < rm->y + rm->h - 1; y++)
+        for (int x = rm->x + 1; x < rm->x + rm->w - 1; x++) {
+            int i = x - rm->x, j = y - rm->y;
+            bool want = grid ? (i % 3 == 1 && j % 3 == 1)
+                      : wide ? ((j == 1 || j == rm->h - 2) && (i & 1))
+                             : ((i == 1 || i == rm->w - 2) && (j & 1));
+            if (!want || (abs(x - cx) <= 1 && abs(y - cy) <= 1)) continue;
+            bool clear = true;
+            for (int dj = -1; dj <= 1 && clear; dj++)
+                for (int di = -1; di <= 1; di++)
+                    if (lv->t[y + dj][x + di] != T_FLOOR || lv->room[y + dj][x + di] != r) { clear = false; break; }
+            if (clear) lv->t[y][x] = T_WALL;
+        }
+}
+
+/* ------------------------------------------------------------- the level */
+
 void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[MAP_W], uint8_t (*holes)[MAP_W])
 {
     memset(lv, 0, sizeof *lv);
@@ -693,6 +857,9 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
         break;
     }
 
+    /* room shapes have their own generator, so the rest of the layout is as it was */
+    uint8_t shape[MAX_ROOMS] = { 0 };
+    Rng shrng = { seed * 5167u + 19 };
     int want = rng_range(&rng, 10, 14);
     for (int tries = 0; tries < 600 && lv->nrooms < want && lv->nrooms < MAX_ROOMS; tries++) {
         int w = rng_range(&rng, 5, 12), h = rng_range(&rng, 4, 8);
@@ -700,9 +867,11 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
         if (!rect_clear(lv, x, y, w, h, 3)) continue;
         int r = lv->nrooms++;
         lv->rooms[r] = (Room){ x, y, w, h, false, false, RK_PLAIN, false };
-        for (int j = y; j < y + h; j++)
-            for (int i = x; i < x + w; i++) carve(lv, i, j, r);
+        shape[r] = pick_shape(&shrng, depth, w, h);
+        carve_room(lv, &shrng, r, shape[r]);
     }
+    for (int r = 0; r < lv->nrooms; r++)
+        if (shape[r] == RS_PILLARS) room_pillars(lv, &shrng, r);
 
     /* connect: a spanning tree over the room centres, plus a few loops */
     int cx[MAX_ROOMS], cy[MAX_ROOMS];
@@ -826,11 +995,12 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
     /* chasms: open the middle of a big room onto the level below (none on the last level: there is no below) */
     if (holes) memset(holes, 0, sizeof(uint8_t) * MAP_W * MAP_H);
     int nch = final ? 0 : depth >= 2 ? rng_range(&rng, 1, 2) : 1;
-    for (int k = 0; k < nch; k++) {
+    bool no_pit[MAX_ROOMS] = { false };
+    for (int k = 0, tries = 0; k < nch && tries < 8; k++, tries++) {
         int pick = -1, area = 0;
         for (int r = 0; r < lv->nrooms; r++) {
             Room *rm = &lv->rooms[r];
-            if (rm->cave || r == start || r == lv->hall || rm->w < 7 || rm->h < 6) continue;
+            if (rm->cave || r == start || r == lv->hall || rm->w < 7 || rm->h < 6 || shape[r] == RS_PILLARS || no_pit[r]) continue;
             if (lv->room[lv->downy][lv->downx] == r) continue;
             bool has = false;
             for (int y = rm->y; y < rm->y + rm->h && !has; y++)
@@ -841,6 +1011,8 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
         }
         if (pick < 0) break;
         Room *rm = &lv->rooms[pick];
+        uint8_t was[MAP_H][MAP_W];      /* to put back if the pit would cut the room in two */
+        for (int y = rm->y; y < rm->y + rm->h; y++) memcpy(&was[y][rm->x], &lv->t[y][rm->x], (size_t)rm->w);
         float ex = (rm->w - 2) / 2.0f - 0.2f, ey = (rm->h - 2) / 2.0f - 0.2f;
         float ccx = rm->x + rm->w / 2.0f, ccy = rm->y + rm->h / 2.0f;
         float ph = rng_f(&rng) * 6.28f, ph2 = rng_f(&rng) * 6.28f;
@@ -881,7 +1053,7 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
             int qh = 0, qn = 0;
             for (int y = rm->y; y < rm->y + rm->h; y++)
                 for (int x = rm->x; x < rm->x + rm->w; x++)
-                    if ((x < x0 || x > x1 || y < y0 || y > y1) && lv->t[y][x] != T_CHASM) { ok[y][x] = 1; q[qn++] = y * MAP_W + x; }
+                    if ((x < x0 || x > x1 || y < y0 || y > y1) && lv->t[y][x] != T_CHASM && tile_walkable((Tile)lv->t[y][x])) { ok[y][x] = 1; q[qn++] = y * MAP_W + x; }
             while (qh < qn) {
                 int c = q[qh++], x = c % MAP_W, y = c / MAP_W;
                 for (int d = 0; d < 4; d++) {
@@ -921,6 +1093,14 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
                     for (int i = -1; i <= 1; i++) if (tile_at(lv, x + i, y + j) == T_CHASM) rim = true;
                 if (rim && hash2(x, y, seed ^ 0x2b2bu) % 100 < 35) lv->t[y][x] = T_RUBBLE;
             }
+        /* a box keeps its ring of floor round the pit, but the other shapes may not: all the
+         * room's ground must still join up, or the floor goes back and another room is tried */
+        if (!room_joined(lv, pick)) {
+            for (int y = rm->y; y < rm->y + rm->h; y++) memcpy(&lv->t[y][rm->x], &was[y][rm->x], (size_t)rm->w);
+            no_pit[pick] = true;
+            k--;
+            continue;
+        }
         for (int y = rm->y; y < rm->y + rm->h; y++)
             for (int x = rm->x; x < rm->x + rm->w; x++)
                 if (lv->t[y][x] == T_CHASM && holes) holes[y][x] = 1;
@@ -1138,7 +1318,8 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
     /* scattered rubble */
     for (int y = 1; y < MAP_H - 1; y++)
         for (int x = 1; x < MAP_W - 1; x++)
-            if (lv->t[y][x] == T_FLOOR && (hash2(x, y, seed) % 100) < 3) lv->t[y][x] = T_RUBBLE;
+            if (lv->t[y][x] == T_FLOOR && (hash2(x, y, seed) % 100) < (lv->room[y][x] >= 0 && shape[lv->room[y][x]] == RS_RUINED ? 16 : 3))
+                lv->t[y][x] = T_RUBBLE;
 
     level_relight(lv);
 }

@@ -1772,6 +1772,17 @@ static void arrive(Game *g)
     g->player.hp += gain;
     game_msg(g, C_GOOD, "you have come deeper than ever before, and feel the hardier for it (+%d max HP, %d now).",
              gain, game_max_hp(g));
+    /* the first level of a new stretch of the deep: say what has changed */
+    static const char *ZONE[N_THEME] = {
+        NULL,
+        "the stone grows green and soft underfoot. Moss has the run of these old works.",
+        "the walls turn to red brick, laid by someone who meant the place to last.",
+        "dark slate, sweating cold water. The deep has been drowned here once.",
+        "black stone, veined with a dull violet. Few have come this far down.",
+        NULL,
+    };
+    int th = depth_theme(g->depth);
+    if (ZONE[th] && depth_theme(g->deepest) != th) game_msg(g, C_DIM, "%s", ZONE[th]);
     g->deepest = g->depth;
     g->hp_low = g->player.hp;
     if (game_final(g)) {

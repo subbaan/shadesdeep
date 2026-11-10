@@ -7,6 +7,7 @@
 #include "gfx.h"
 
 #define WALL_R 18           /* how far wall tops are raised (= front face height) */
+#define PILLAR_R 22         /* how far a pillar stands up over the tile to its north */
 #define LOW_R  5            /* "front" walls (open floor to the north) are cut down to a lip this tall,
                              * so they never hide the row behind them */
 #define N_FLOOR 8
@@ -32,7 +33,8 @@ typedef struct {
     Image brazier;          /* forge brazier on its legs, 28 x 26; feet at the bottom */
     Image brazier_glow;     /* its coals (emissive) */
     Image crystal;          /* emissive */
-    Image rubble[3];
+    Image rubble[N_THEME][3];
+    Image pillar[N_THEME];  /* TILE x (TILE + PILLAR_R): a stone column on its plinth, with its shadow */
     Image mob[MK_COUNT];    /* TILE x TILE, feet at the bottom */
     Image mob_glow[MK_COUNT];   /* emissive parts (lantern, eyes) */
     Image mob_hi[MK_COUNT];     /* the same at full resolution (square, laid out like mob[]),

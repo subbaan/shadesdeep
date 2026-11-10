@@ -1053,7 +1053,7 @@ static void draw_ground(Renderer *r, Canvas *cv, const View *v)
         for (int tx = tx0; tx <= tx1; tx++) {
             if (!in_map(tx, ty)) continue;
             Tile t = (Tile)lv->t[ty][tx];
-            if (t == T_ROCK || t == T_WALL) continue;
+            if (t == T_ROCK || (t == T_WALL && !is_pillar(lv, tx, ty))) continue;
             if (v->fog && !(lv->f[ty][tx] & F_SEEN)) continue;
             int sx = tx * TILE - v->camx, sy = ty * TILE - v->camy;
             if (t == T_CHASM) { draw_chasm(r, cv, v, tx, ty, sx, sy); continue; }
@@ -1061,12 +1061,17 @@ static void draw_ground(Renderer *r, Canvas *cv, const View *v)
             uint32_t h = hash2(tx, ty, lv->seed);
             const Image *im = &r->t.floor[depth_theme(lv->depth)][h % N_FLOOR];
             const Image *over = NULL;
+            if (t == T_WALL) {                       /* the floor a pillar stands on: the pillar comes with the walls */
+                draw_lit(cv, sx, sy, im, TILE, TILE, &r->corner[ty][tx], &r->corner[ty][tx + 1],
+                         &r->corner[ty + 1][tx], &r->corner[ty + 1][tx + 1], 1, 1, 0, v->fog, NULL, 0);
+                continue;
+            }
             if (t == T_STAIRS_DOWN) im = &r->t.stairs_dn[depth_theme(lv->depth)];
             else if (t == T_STAIRS_UP) im = &r->t.stairs_up[depth_theme(lv->depth)];
             else if (t == T_DOOR_OPEN)
                 im = tile_solid(tile_at(lv, tx, ty - 1)) && tile_solid(tile_at(lv, tx, ty + 1)) ? &r->t.door_open_side[depth_theme(lv->depth)]
                                                                                               : &r->t.door_open[depth_theme(lv->depth)];
-            else if (t == T_RUBBLE) over = &r->t.rubble[(h >> 8) % 3];
+            else if (t == T_RUBBLE) over = &r->t.rubble[depth_theme(lv->depth)][(h >> 8) % 3];
             int ao = 0;
             if (tile_solid(tile_at(lv, tx, ty - 1)) || tile_at(lv, tx, ty - 1) == T_DOOR) ao |= AO_N;
             if (tile_solid(tile_at(lv, tx - 1, ty))) ao |= AO_W;
@@ -1110,6 +1115,14 @@ static void draw_wall(Renderer *r, Canvas *cv, const View *v, int tx, int ty)
 {
     const Level *lv = v->lv;
     int sx = tx * TILE - v->camx, sy = ty * TILE - v->camy;
+    if (is_pillar(lv, tx, ty)) {
+        /* a column standing up into the row behind, lit by the floor it stands on */
+        const CF *c01 = &r->corner[ty + 1][tx], *c11 = &r->corner[ty + 1][tx + 1];
+        const CF *c00 = &r->corner[ty][tx], *c10 = &r->corner[ty][tx + 1];
+        draw_lit(cv, sx, sy - PILLAR_R, &r->t.pillar[depth_theme(lv->depth)], TILE, TILE + PILLAR_R,
+                 c00, c10, c01, c11, 0.8f, 1.0f, 0, v->fog, NULL, 0);
+        return;
+    }
     uint32_t h = hash2(tx, ty, lv->seed + 1);
     bool nN = !tile_solid(tile_at(lv, tx, ty - 1)), nS = !tile_solid(tile_at(lv, tx, ty + 1));
     bool nW = !tile_solid(tile_at(lv, tx - 1, ty)), nE = !tile_solid(tile_at(lv, tx + 1, ty));

@@ -95,8 +95,8 @@ typedef struct {
 static const Look LOOKS[N_THEME] = {
     [TH_HALLS]  = { 0x857a68, 0x3a332c, 0x7a6d5d, 0x2c2620, 0x5f574d, 0x24201b, LAY_FLAGS,  DECO_NONE, 1.0f },
     [TH_MOSS]   = { 0x768268, 0x2b3226, 0x687260, 0x222a20, 0x515a4a, 0x1c221a, LAY_FLAGS,  DECO_MOSS, 1.25f },
-    [TH_BRICK]  = { 0x94614c, 0x35221c, 0x8c5844, 0x2a1a16, 0x674438, 0x221511, LAY_BRICK,  DECO_NONE, 0.9f },
-    [TH_SLATE]  = { 0x5876a4, 0x1c2638, 0x4e6892, 0x162034, 0x3c4e70, 0x121a2a, LAY_SLAB,   DECO_DAMP, 0.8f },
+    [TH_BRICK]  = { 0x705246, 0x2e1f1a, 0x6c4a3e, 0x241814, 0x563a31, 0x1c1210, LAY_BRICK,  DECO_NONE, 0.9f },
+    [TH_SLATE]  = { 0x445a7c, 0x161e2c, 0x3e5272, 0x121a28, 0x2e3c56, 0x0e1420, LAY_SLAB,   DECO_DAMP, 0.8f },
     [TH_BASALT] = { 0x5a5682, 0x14121e, 0x4c4872, 0x100e1a, 0x363252, 0x0c0a16, LAY_COBBLE, DECO_VEIN, 1.1f },
     [TH_HEARTH] = { 0xa89e8a, 0x4c4236, 0x9c917c, 0x3a3228, 0x766c5c, 0x2c261e, LAY_SLAB,   DECO_GOLD, 0.7f },
 };
@@ -110,10 +110,10 @@ static void deco_moss(Image *im, uint32_t seed, bool face)
             float a = x * 6.2832f / im->w, b = y * 6.2832f / TILE;
             float n = fbm(2.0f + cosf(a) * 1.3f + (seed & 7), 2.0f + sinf(a) * 1.3f + cosf(b) * 1.3f, seed + 50)
                     + (face ? y * 0.02f : 0) + (float)(hash2(x, y, seed + 7) % 100) * 0.0016f;
-            if (n < 0.60f) continue;
+            if (n < 0.66f) continue;
             uint32_t c = get(im, x, y) & 0xffffff;
             uint32_t m = (hash2(x, y, seed + 3) & 3) ? 0x4f6a34 : 0x6a8440;
-            put(im, x, y, A(mix(c, m, n > 0.68f ? 190 : 110)));
+            put(im, x, y, A(mix(c, m, n > 0.74f ? 180 : 100)));
         }
 }
 
@@ -122,11 +122,12 @@ static void deco_damp(Image *im, uint32_t seed)
 {
     for (int y = 0; y < im->h; y++)
         for (int x = 0; x < im->w; x++) {
-            float a = x * 6.2832f / im->w, b = y * 6.2832f / TILE;
-            float n = fbm(3.0f + cosf(a) * 1.1f, 3.0f + sinf(a) * 1.1f + sinf(b) * 1.4f + (seed & 3), seed + 80);
+            /* slabs are bordered by mortar, so the stain needn't wrap */
+            float n = fbm(x * 0.09f + (seed % 13), y * 0.11f + (seed % 7), seed + 80);
             uint32_t c = get(im, x, y) & 0xffffff;
-            if (n > 0.62f) c = mix(c, 0x1c2838, 36);
-            if (hash2(x, y, seed + 11) % 211 == 0) c = add_sat(c, 46, 52, 60);
+            if (n > 0.58f) c = mix(c, 0x141c2a, n > 0.66f ? 80 : 44);
+            else if (n > 0.55f) c = add_sat(c, 10, 14, 20);        /* the sheen at a wet patch's edge */
+            if (hash2(x, y, seed + 11) % 151 == 0) c = add_sat(c, 50, 58, 70);
             put(im, x, y, A(c));
         }
 }
@@ -307,8 +308,17 @@ static void build_cliff(Image *im)
 
 /* ------------------------------------------------------------- features */
 
+/* recolour a colour drawn for the upper halls' stone to another theme's */
+static uint32_t tint(uint32_t c, uint32_t to)
+{
+    const uint32_t from = 0x857a68;
+    return RGB(clampi(CR(c) * CR(to) / CR(from), 0, 255), clampi(CG(c) * CG(to) / CG(from), 0, 255),
+               clampi(CB(c) * CB(to) / CB(from), 0, 255));
+}
+
 static void build_stairs(Image *im, bool down, int th)
 {
+    const Look *lk = &LOOKS[th];
     build_floor(im, 1, th);
     int x0 = 5, x1 = 27, y0 = 4, y1 = 29;
     for (int y = y0; y < y1; y++)
@@ -322,16 +332,16 @@ static void build_stairs(Image *im, bool down, int th)
             float n = fbm(x * 0.3f, y * 0.3f, down ? 77 : 78);
             b += (int)((n - 0.5f) * 16);
             b = clampi(b, 0, 255);
-            put(im, x, y, A(RGB(b, b * 92 / 100, b * 80 / 100)));
+            put(im, x, y, A(tint(RGB(b, b * 92 / 100, b * 80 / 100), lk->floor)));
         }
     /* side walls */
     for (int y = y0 - 1; y < y1 + 1; y++) {
-        put(im, x0 - 1, y, A(0x2a241e));
-        put(im, x1, y, A(0x2a241e));
-        put(im, x0 - 2, y, A(0x9a8c76));
-        put(im, x1 + 1, y, A(0x6a5e50));
+        put(im, x0 - 1, y, A(tint(0x2a241e, lk->floor)));
+        put(im, x1, y, A(tint(0x2a241e, lk->floor)));
+        put(im, x0 - 2, y, A(tint(0x9a8c76, lk->floor)));
+        put(im, x1 + 1, y, A(tint(0x6a5e50, lk->floor)));
     }
-    for (int x = x0 - 2; x < x1 + 2; x++) put(im, x, y0 - 1, A(down ? 0xa89a82 : 0x2a241e));
+    for (int x = x0 - 2; x < x1 + 2; x++) put(im, x, y0 - 1, A(tint(down ? 0xa89a82 : 0x2a241e, lk->floor)));
 }
 
 static void build_door(Image *im, int raise)
@@ -601,17 +611,22 @@ static void build_crystal(Image *im)
     }
 }
 
-static void build_rubble(Image *im, int v)
+/* fallen stones off the walls, the walls' own stone: brick falls as broken bricks */
+static void build_rubble(Image *im, int v, int th)
 {
+    const Look *lk = &LOOKS[th];
     image_alloc(im, TILE, TILE);
-    Rng r = { 5000u + (uint32_t)v };
+    Rng r = { 5000u + (uint32_t)v + (uint32_t)th * 101 };
     int n = rng_range(&r, 4, 7);
+    bool brick = lk->lay == LAY_BRICK;
     for (int i = 0; i < n; i++) {
         float cx = rng_range(&r, 5, 26), cy = rng_range(&r, 6, 27), rad = 1.5f + rng_f(&r) * 2.8f;
-        uint32_t base = jitter(0x7a6e5e, rng_range(&r, -14, 14));
+        uint32_t base = jitter(lk->face, rng_range(&r, -14, 14));
+        float bw = 1.6f + rng_f(&r) * 1.6f, bh = 1.0f + rng_f(&r) * 0.8f;
         for (int y = (int)(cy - rad - 2); y <= (int)(cy + rad + 2); y++)
             for (int x = (int)(cx - rad - 2); x <= (int)(cx + rad + 2); x++) {
                 float dx = x - cx, dy = (y - cy) * 1.3f, d = sqrtf(dx * dx + dy * dy);
+                if (brick) d = fmaxf(fabsf(dx) * rad / (bw * 1.3f), fabsf(dy) * rad / (bh * 1.3f));
                 if (d <= rad) {
                     int sh = (int)((-dx - dy) / rad * 18);
                     put(im, x, y, A(jitter(base, sh)));
@@ -620,6 +635,59 @@ static void build_rubble(Image *im, int v)
                 }
             }
     }
+}
+
+/* A column of the theme's stone, drawn standing up out of its tile: a square plinth, a
+ * round shaft built of drums, and a capital. Shaded as a cylinder lit from the upper left. */
+static void build_pillar(Image *im, int th)
+{
+    const Look *lk = &LOOKS[th];
+    const int H = TILE + PILLAR_R;
+    image_alloc(im, TILE, H);
+    const int base = H - 3;                     /* the foot of the plinth, near the tile's bottom */
+    const int pl_top = base - 8, cap_bot = 9, cap_top = 2;
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < TILE; x++) {
+            float cx = x + 0.5f - TILE / 2.0f;
+            uint32_t c = 0;
+            bool on = false;
+            if (y >= pl_top && y < base && fabsf(cx) <= 13) {
+                /* the plinth: a top face, then its front */
+                bool topf = y < pl_top + 3;
+                c = topf ? jitter(lk->top, 18) : jitter(lk->face, (int)((fbm(x * 0.4f, y * 0.4f, 31 + th) - 0.5f) * 26) - 8);
+                if (fabsf(cx) > 12) c = jitter(c, -30);
+                if (y == base - 1) c = jitter(c, -36);
+                on = true;
+            } else if (y >= cap_bot && y < pl_top && fabsf(cx) <= 8.5f) {
+                /* the shaft: round, so light falls off toward the right */
+                float u = cx / 8.5f;
+                float shade = 0.55f + 0.6f * (1.0f - fabsf(u + 0.35f) / 1.35f);
+                float n = fbm(x * 0.35f, y * 0.18f, 40 + th);
+                c = lk->face;
+                int sh = (int)((shade - 1.0f) * 120 + 14 + (n - 0.5f) * 24);
+                c = jitter(c, sh);
+                if ((y - cap_bot) % 11 == 10) c = jitter(lk->wmort, (int)((shade - 1) * 40));    /* a joint between drums */
+                if (fabsf(cx) > 7.8f) c = jitter(c, -24);
+                on = true;
+            } else if (y >= cap_top && y < cap_bot && fabsf(cx) <= 11.5f) {
+                /* the capital, its top catching the light */
+                bool topf = y < cap_top + 3;
+                c = topf ? jitter(lk->top, 26) : jitter(lk->face, -4 + (int)((fbm(x * 0.4f, y * 0.4f, 50 + th) - 0.5f) * 20));
+                if (fabsf(cx) > 10.5f) c = jitter(c, -28);
+                if (y == cap_bot - 1) c = jitter(c, -30);
+                on = true;
+            }
+            if (on) {
+                if (lk->deco == DECO_MOSS && y > pl_top - 8 && hash2(x, y, 77) % 100 < (unsigned)(y - pl_top + 8) * 6)
+                    c = mix(c, (hash2(x, y, 78) & 1) ? 0x4f6a34 : 0x6a8440, 140);
+                put(im, x, y, A(c));
+            } else if (y >= pl_top + 2 && y <= base + 2) {
+                /* its shadow on the floor, thrown down and to the right */
+                float dx = cx - 3, dy = (y - (base - 2)) * 2.2f;
+                float d = sqrtf(dx * dx + dy * dy);
+                if (d < 16) put(im, x, y, (uint32_t)(int)(120 * (1 - d / 16)) << 24);
+            }
+        }
 }
 
 /* ------------------------------------------------------------- sprites */
@@ -1189,7 +1257,9 @@ void tiles_build(Tiles *t)
     build_sconce(&t->sconce);
     build_brazier(&t->brazier, &t->brazier_glow);
     build_crystal(&t->crystal);
-    for (int i = 0; i < 3; i++) build_rubble(&t->rubble[i], i);
+    for (int th = 0; th < N_THEME; th++)
+        for (int i = 0; i < 3; i++) build_rubble(&t->rubble[th][i], i, th);
+    for (int th = 0; th < N_THEME; th++) build_pillar(&t->pillar[th], th);
     build_sprite(&t->mob[MK_PLAYER], &t->mob_glow[MK_PLAYER], HERO, HERO_PAL, sizeof HERO_PAL / sizeof *HERO_PAL);
     build_sprite(&t->mob[MK_RAT], &t->mob_glow[MK_RAT], RAT, RAT_PAL, sizeof RAT_PAL / sizeof *RAT_PAL);
     build_sprite(&t->mob[MK_GOBLIN], &t->mob_glow[MK_GOBLIN], GOBLIN, GOBLIN_PAL, sizeof GOBLIN_PAL / sizeof *GOBLIN_PAL);

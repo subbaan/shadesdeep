@@ -673,9 +673,10 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         if (tile_walkable(t)) snprintf(hint, sizeof hint, "Click to travel here");
     } else {
         if (t == T_ROCK) return;
-        snprintf(title, sizeof title, "%s", tile_name(t));
+        snprintf(title, sizeof title, "%s", is_pillar(lv, x, y) ? "stone pillar" : tile_name(t));
         if (title[0] >= 'a' && title[0] <= 'z') title[0] = (char)(title[0] - 32);
-        snprintf(desc, sizeof desc, "%s", tile_desc(t));
+        snprintf(desc, sizeof desc, "%s", is_pillar(lv, x, y) ? "A column holding up the roof. Nothing sees through it: "
+                 "a slinger can't hit what it can't see, and a hunter has to come round." : tile_desc(t));
         if (t == T_CHASM) snprintf(hint, sizeof hint, "Click to jump down to depth %d", g->depth + 1);
         else if (t == T_DEEP) snprintf(hint, sizeof hint, g->torch_lit ? "Click to swim here (your torch will go out)" : "Click to swim here");
         else if (t == T_DOOR_OPEN && abs(x - g->player.x) + abs(y - g->player.y) == 1)
@@ -1168,6 +1169,9 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
         int y = cv->h / 5;
         font_draw_shadow(ui->big, cv, (cv->w - w) / 2, y, buf, GOLD, (int)(255 * a));
         cv_blend_rect(cv, (cv->w - w * 3 / 2) / 2, y + ui->px / 2, w * 3 / 2, 1, GOLD, (int)(200 * a));
+        /* and which stretch of the deep it is */
+        const char *zone = theme_name(depth_theme(g->depth));
+        font_draw_shadow(ui->head, cv, (cv->w - font_width(ui->head, zone)) / 2, y + ui->px * 2, zone, 0xd8ccb0, (int)(220 * a));
     }
 
     /* the health warning: big, in the middle, where you're looking */

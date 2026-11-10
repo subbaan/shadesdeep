@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.17.0. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.18.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -448,6 +448,32 @@ less likely.
 
 ## The dungeon
 
+### Five stretches of stone
+
+The dungeon changes every five levels. The stone is different in each stretch,
+and so are the shapes of the rooms. When you come down into a new one, the
+depth banner names it and a line in the log tells you what's changed.
+
+| Depths | Stretch | What it's like |
+|---|---|---|
+| 1–5 | **The Upper Halls** | Worn grey-brown flagstones. Mostly plain square rooms, now and then one with its corners cut off, a cross-shaped one or a few pillars. |
+| 6–10 | **The Mossed Works** | Old green-stained flagstones overgrown with moss. Many rooms are **ruined**: the walls have slumped in at the edges and the floor is strewn with rubble. |
+| 11–15 | **The Brick Vaults** | Red brick, some of it laid in a basket weave. Lots of **pillared** halls and cross-shaped rooms. |
+| 16–20 | **The Drowned Slate** | Great dark slabs of slate, wet and stained with damp. Round and oval rooms, rooms with their corners cut off. |
+| 21–25 | **The Black Deeps** | Black cobbles veined with a dull violet. Every kind of room shape, often ruined. |
+| 26 | **The Hearth of the World** | Pale stone slabs with gold veins, around the [Heartflame's](#the-heartflame) hall. |
+
+- **Pillars** stand on their own inside a room, with floor all round them.
+  You can't walk or see through them, so they break line of sight: a slinger
+  can't sling at you from behind one, and a monster hunting you has to come
+  round it. You can always walk round a pillar, and they never block a way
+  through.
+- **Ruined rooms** have ragged edges where the walls have caved in, and
+  rubble all over the floor. Rubble is just broken stone underfoot: you can
+  walk on it.
+
+### What else is down there
+
 - **Stairs down** lead deeper. `>` travels to them and descends once you've
   seen them.
 - **Chasms** are where the floor has fallen in: ragged holes with broken
@@ -666,6 +692,8 @@ the difficulty can be tuned from real runs. It's safe to delete.
 - **Fight slingers in the dark.** Snuff your torch and close in through the
   shadows; they can't aim at what they can't see. Or duck round a corner and
   make them come to you.
+- **Use the pillars.** In a pillared hall, put a pillar between you and a
+  slinger and it can't sling at you. Close in from one pillar to the next.
 - **Never stand and trade blows with an ogre** in the open if you're hurt.
   It's slow: step back, throw darts, and step back again.
 - **Give still, dark pools a wide berth.** If you must walk the bank, keep a

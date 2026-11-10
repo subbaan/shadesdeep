@@ -130,6 +130,11 @@ typedef struct {
 
 static inline bool in_map(int x, int y) { return x >= 0 && y >= 0 && x < MAP_W && y < MAP_H; }
 static inline Tile tile_at(const Level *lv, int x, int y) { return in_map(x, y) ? (Tile)lv->t[y][x] : T_ROCK; }
+/* a wall standing inside a room, with floor all round it */
+static inline bool is_pillar(const Level *lv, int x, int y)
+{
+    return tile_at(lv, x, y) == T_WALL && lv->room[y][x] >= 0;
+}
 bool tile_opaque(Tile t);       /* blocks sight and light */
 bool tile_walkable(Tile t);     /* can stand on without falling */
 bool tile_solid(Tile t);        /* drawn as a raised block */
