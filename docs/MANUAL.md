@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.23.0. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.23.1. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -71,7 +71,8 @@ water, step into a chasm or fire, or walk onto a trap you know about.
 `Tab` cycles through the monsters you can see. Click or press `Enter` to
 throw, and `Esc` cancels.
 
-**Hovering** the mouse over anything shows a card describing it. Cards fade
+**Hovering** the mouse over anything shows a card describing it (a monster's
+card ends with its health, such as "Health 37 of 150"). Cards fade
 after a few seconds. Pressing any key hides the hover marker and path until
 you move the mouse again, so things scrolling under a resting pointer won't
 pop up cards.

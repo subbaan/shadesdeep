@@ -607,6 +607,8 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
                  : m->startled ? " It has come through the door right onto you, and is caught off guard."
                  : m->hunting ? " It is hunting you."
                  : game_mob_back_to(g, m) ? " It hasn't noticed you, and its back is to you." : " It hasn't noticed you.");
+        size_t dn = strlen(desc);
+        snprintf(desc + dn, sizeof desc - dn, " Health %d of %d.", m->hp, m->maxhp);
         snprintf(hint, sizeof hint, "Click to attack");
     } else if (m && game_mob_noticed(g, m) && m->kind != MK_SHADE && m->kind != MK_HOLLOW) {
         snprintf(title, sizeof title, "Eyes in the dark");

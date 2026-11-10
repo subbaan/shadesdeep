@@ -189,6 +189,17 @@ Game *save_read(const char *path, bool *incompatible, char *err, size_t n)
         snprintf(err, n, "the save %s is damaged", path);
         return NULL;
     }
+    /* a Hollow from before 0.22.0 was made with 50 HP: bring it up to its full strength now,
+     * keeping how wounded it was */
+    for (int d = 0; d < MAX_DEPTH + 2; d++)
+        for (int i = 0; i < MAX_MOBS; i++) {
+            Mob *m = &g->mobs[d][i];
+            int full = MOB_INFO[MK_HOLLOW].hp;
+            if (!m->alive || m->kind != MK_HOLLOW || m->maxhp <= 0 || m->maxhp >= full) continue;
+            m->hp = (int)((long)m->hp * full / m->maxhp);
+            if (m->hp < 1) m->hp = 1;
+            m->maxhp = full;
+        }
     return g;
 }
 
