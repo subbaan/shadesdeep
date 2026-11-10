@@ -44,7 +44,8 @@ const ItemInfo ITEM_INFO[IT_COUNT] = {
                     "A small iron dart balanced for throwing. It can usually be picked up again. "
                     "Anything that hears it land may come to look.", 9, false },
     [IT_POTION] = { "healing potion", "healing potions",
-                    "A flask of ruby liquid that knits wounds closed when drunk (15 HP), and burns out an eel's venom.", 7, true },
+                    "A flask of ruby liquid that knits wounds closed when drunk, and burns out an eel's venom. It heals two "
+                    "fifths of your max HP, never less than 15, so it does more as you grow hardier.", 7, true },
     [IT_SWORD]  = { "short sword", "short swords",
                     "A plain, well-balanced blade. It does nothing clever and nothing badly.",
                     0, true, GEAR_WEAPON, 85, 2, 5, 0 },
@@ -230,6 +231,14 @@ float game_firelight(Game *g, int x, int y)
 {
     if (!in_map(x, y)) return 0;
     return level_fire(game_level(g), x, y) + (g->torch_lit ? g->plight[y][x] : 0);
+}
+
+/* a healing potion's worth: two fifths of your max HP, never less than 15, so it
+ * keeps pace as the deep hardens you */
+int game_potion_heal(const Game *g)
+{
+    int h = g->player.maxhp * 2 / 5;
+    return h < 15 ? 15 : h;
 }
 
 int game_max_hp(const Game *g)
@@ -1494,9 +1503,21 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
         /* a shade within your torch's glow gnaws at the flame (the Hollow, greedily) */
         if (g->torch_lit && g->plight[m->y][m->x] > 0 && dist <= 8) *gnaw += m->kind == MK_HOLLOW ? 2 : 1;
         if (shade_burns(g, m) || !m->alive) return;
-        range = (float)mi->perception * (cloak ? 0.5f : 1.0f);   /* it feels your warmth, lit or not */
+        /* it feels your warmth, lit or not; a shadow cloak muffles it from a shade, but the
+         * Hollow has fed on too much warmth to be fooled, and it has no back to creep up on */
+        range = (float)mi->perception * (cloak && m->kind != MK_HOLLOW ? 0.5f : 1.0f);
     }
-    if (game_mob_back_to(g, m)) range = fmaxf(range * 0.5f, 1.0f);   /* you're behind it */
+    if (m->kind != MK_HOLLOW && game_mob_back_to(g, m)) range = fmaxf(range * 0.5f, 1.0f);   /* you're behind it */
+    if (m->kind == MK_HOLLOW && game_final(g) && lv->hall >= 0 && lv->room[p->y][p->x] == lv->hall) {
+        /* 2. its hall is its own: set foot in it and it knows, wherever you are */
+        if (!m->hunting) {
+            game_msg(g, C_BAD, "the cold in the hall thickens. The Hollow has felt you come into its hall, and it comes for you.");
+            vocal(g, m);
+        }
+        m->hunting = true;
+        m->tx = p->x; m->ty = p->y;
+        if (m->sensed < 2) m->sensed = 2;
+    }
     if (m->moving) m->moving--;
     bool sees = dist <= range && los(lv, m->x, m->y, p->x, p->y);
     if (m->asleep) {
@@ -2018,6 +2039,9 @@ static void arrive(Game *g)
     if (game_final(g)) {
         game_msg(g, C_WARN, "the cold here bites to the bone. This is the bottom of the world: somewhere on this level "
                  "lies the Heartflame's hearth.");
+        game_msg(g, C_BAD, "far off, something vast stirs in the dark: the Hollow has tasted your warmth.");
+        game_msg(g, C_BAD, g->armour.kind == IT_CLOAK ? "it waits for you by the hearth, and no shadow cloak will hide you from it."
+                                                      : "it waits for you by the hearth.");
         game_msg(g, C_DIM, "light a torch and walk into the hearth to kindle it. It takes three turns.");
     }
 }
@@ -3736,7 +3760,7 @@ bool game_use(Game *g, int slot)
     case IT_POTION: {
         take_one(g, slot);
         g->potions_drunk++;
-        int heal = 15;
+        int heal = game_potion_heal(g);
         if (p->hp + heal > game_max_hp(g)) heal = game_max_hp(g) - p->hp;
         p->hp += heal;
         char t[16];

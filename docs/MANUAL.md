@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.22.0. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.23.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -304,7 +304,7 @@ can keep up all the way down.
 |---|---|
 | **Torch** | Light it to carry, or throw it to light a place from afar. See [Torches](#torches). |
 | **Dart** | Throw it for 2–4 damage at range. It can usually be picked up again, though it sometimes snaps. Passes through shades. |
-| **Healing potion** | Drink it to heal 15 HP (not past your chilled maximum). It also burns out an eel's venom. |
+| **Healing potion** | Drink it to heal **two fifths of your max HP**, never less than 15 (not past your chilled maximum), so it keeps pace as you grow hardier: 15 HP at the start, about 30 by the time you have 75 max HP. The item card shows what it heals you for now. It also burns out an eel's venom. |
 | **Oil flask** | Throw it and it bursts into a pool of [burning oil](#burning-oil). Or **soak your torch** with it (from the item card): +50 turns of fuel on the torch you have going. You start with one. |
 | **Flash powder** | Throw it for a [blinding flash](#flash-powder). Lands in water and it fizzles, spoilt. |
 | **Salt** | **Pour** it to lay a [ring of salt](#salt) around you that shades can't cross. From depth 2. |
@@ -395,7 +395,7 @@ card shows the piece's numbers next to yours.
 | Armour | Armour value | Special |
 |---|---|---|
 | **Leather jerkin** *(you start in it)* | 10 | Some protection, no drawbacks. |
-| **Shadow cloak** | 4 | In the dark, things must be **right next to you** to notice you, and shades sense your warmth from **half as far**. |
+| **Shadow cloak** | 4 | In the dark, things must be **right next to you** to notice you, and shades sense your warmth from **half as far** (but not the Hollow). |
 | **Mail coat** | 22 | Strong, but it **jingles as you walk** (waking sleepers nearby), and in **deep water it drags you under** (2–3 damage a turn while swimming; you're warned first). |
 
 Armour value is taken straight off a monster's chance to hit you.
@@ -456,7 +456,8 @@ less likely.
 - **Burning oil** sears you for 2–4 a turn while you stand in it.
 - **Poison** from an eel's bite takes 1 HP a turn for a few turns, and you
   don't heal at all while it lasts. Your HP shows green while you're poisoned.
-- **Healing potions** restore 15 HP, and burn out any poison.
+- **Healing potions** restore two fifths of your max HP (at least 15), and burn
+  out any poison.
 - **Chill** lowers your maximum until you warm up by a fire (see
   [the chill](#shades-and-the-chill)).
 
@@ -669,7 +670,11 @@ Heartflame used to burn. Lighting it again wins the game.
 The thing that put the Heartflame out. It's a shade grown huge, and it waits
 by the hearth.
 
-- It hunts by your warmth, like any shade, from up to 10 tiles away.
+- It hunts by your warmth, like any shade, from up to 10 tiles away. A
+  **shadow cloak doesn't hide you from it**, and you can't creep up behind it.
+- **The hall is its own.** The moment you set foot in the hearth's hall, it
+  knows you're there and comes for you, wherever you are in it. You won't
+  reach the hearth unnoticed: plan how you'll hold it off before you go in.
 - Your **torch doesn't frighten it**, and **salt doesn't stop it** (it sweeps
   the salt aside). It eats your torch's fuel twice as fast as a shade does.
 - A **fixed fire burns it** (3–5 a turn: a lit sconce, a torch on the floor,

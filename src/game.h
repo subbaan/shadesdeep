@@ -246,6 +246,7 @@ bool game_busy(const Game *g);                      /* the player's move is stil
 /* firelight on a tile (sconces, burning torches, a torch in your hand): what shades fear */
 float game_firelight(Game *g, int x, int y);
 int   game_max_hp(const Game *g);                 /* max HP less the chill */
+int   game_potion_heal(const Game *g);            /* what a healing potion heals you now */
 bool  game_by_fire(Game *g);                      /* standing in a fixed fire's warmth */
 bool  game_mob_noticed(Game *g, const Mob *m);    /* in view, or a shade's eyes in the dark */
 bool  game_mob_back_to(const Game *g, const Mob *m);  /* on the move with its back to you: sees you half as far */

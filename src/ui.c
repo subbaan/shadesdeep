@@ -960,6 +960,8 @@ static void gear_text(Game *g, const Slot *sl, const char *desc, char *out, size
         snprintf(out, n, "%s Hit %d, damage %d-%d (yours: %d, %d-%d).", desc, a, lo, hi, ca, clo, chi);
     } else if (ii->gear == GEAR_ARMOUR) {
         snprintf(out, n, "%s Armour %d (yours: %d).", desc, game_armour_def(sl), game_armour_def(&g->armour));
+    } else if (sl->kind == IT_POTION) {
+        snprintf(out, n, "%s For you now: %d HP.", desc, game_potion_heal(g));
     } else {
         snprintf(out, n, "%s", desc);
     }
