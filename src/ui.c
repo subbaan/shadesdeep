@@ -29,6 +29,8 @@ struct UI {
     int banner_depth;
     float banner_t;
     float last_time;
+    int hurt_step;          /* how badly hurt you were last frame: 0 fine, 1 under half, 2 under a third, 3 under a sixth */
+    float hurt_t;           /* the warning banner's time left */
     /* the title screen */
     const Image *title_art; /* not owned */
     Canvas title_cv;        /* title_art scaled to the screen */
@@ -136,21 +138,7 @@ bool ui_over_panel(const UI *ui, int mx, int my)
     return ui_hit(ui, mx, my, NULL) != UA_NONE;
 }
 
-static void panel(UI *ui, Canvas *cv, int x, int y, int w, int h, int alpha, bool hit)
-{
-    cv_blend_rect(cv, x, y, w, h, INK, alpha);
-    /* soft vertical sheen */
-    for (int j = 0; j < h / 3; j++) cv_blend_rect(cv, x + 1, y + 1 + j, w - 2, 1, 0x3a2e1c, 40 * (h / 3 - j) / (h / 3 + 1));
-    cv_frame(cv, x, y, w, h, GOLD_DIM, 230);
-    cv_frame(cv, x + 2, y + 2, w - 4, h - 4, 0x2a2214, 200);
-    /* corner studs */
-    int s = ui->px / 5 + 2;
-    cv_fill(cv, x - 1, y - 1, s, s, GOLD);
-    cv_fill(cv, x + w - s + 1, y - 1, s, s, GOLD);
-    cv_fill(cv, x - 1, y + h - s + 1, s, s, GOLD);
-    cv_fill(cv, x + w - s + 1, y + h - s + 1, s, s, GOLD);
-    if (hit) add_panel(ui, x, y, w, h);
-}
+static void panel(UI *ui, Canvas *cv, int x, int y, int w, int h, int alpha, bool hit);
 
 static void diamond(Canvas *cv, int cx, int cy, int r, uint32_t c)
 {
@@ -179,7 +167,7 @@ typedef enum { STONE_PLAIN, STONE_HOT, STONE_DIM } StoneLook;
 
 /* a slab's outline: how far each column's top and bottom, and each row's left
  * and right, are worn in from the box, in runs like weathered stone */
-#define SLAB_MAX 400
+#define SLAB_MAX 1400
 typedef struct {
     int gw, gh;
     int8_t top[SLAB_MAX], bot[SLAB_MAX], lft[SLAB_MAX], rgt[SLAB_MAX];
@@ -308,6 +296,30 @@ static void stone_slab(UI *ui, Canvas *cv, int x, int y, int w, int h, uint32_t 
     }
 }
 
+/* how thick a panel's stone frame is */
+static int frame_t(const UI *ui)
+{
+    int P = ui->px / 7;
+    return (P < 2 ? 2 : P) * 6;
+}
+
+/* A panel: a dark field framed in the same worn slate as the buttons. Two posts
+ * stand at the sides and a lintel and a sill lie across them. The frame sits
+ * just outside the box, so what's written inside keeps its margins. */
+static void panel(UI *ui, Canvas *cv, int x, int y, int w, int h, int alpha, bool hit)
+{
+    int t = frame_t(ui), in = t / 4;
+    cv_blend_rect(cv, x, y, w, h, INK, alpha);
+    for (int j = 0; j < h / 3; j++) cv_blend_rect(cv, x, y + j, w, 1, 0x3a2e1c, 40 * (h / 3 - j) / (h / 3 + 1));
+    uint32_t seed = (uint32_t)w * 2654435761u ^ (uint32_t)h * 40503u;
+    int fx = x - t + in, fy = y - t + in, fw = w + (t - in) * 2, fh = h + (t - in) * 2;
+    stone_slab(ui, cv, fx, fy + t / 2, t, fh - t, seed ^ 0xa1, STONE_PLAIN);
+    stone_slab(ui, cv, fx + fw - t, fy + t / 2, t, fh - t, seed ^ 0xb2, STONE_PLAIN);
+    stone_slab(ui, cv, fx - in, fy, fw + in * 2, t, seed ^ 0xc3, STONE_PLAIN);
+    stone_slab(ui, cv, fx - in, fy + fh - t, fw + in * 2, t, seed ^ 0xd4, STONE_PLAIN);
+    if (hit) add_panel(ui, fx, fy, fw, fh);
+}
+
 /* a button: key hint in gold, label in parchment */
 static int button(UI *ui, Canvas *cv, int x, int y, int h, const char *key, const char *label, UiAction a,
                   int mx, int my, bool enabled)
@@ -411,15 +423,15 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     int y = cv->h - h * rows;
     *top = y;
     cv_blend_rect(cv, 0, y, cv->w, h * rows, INK, 225);
-    cv_fill(cv, 0, y, cv->w, 1, GOLD_DIM);
-    cv_fill(cv, 0, y + 2, cv->w, 1, 0x2a2214);
+    { int t = frame_t(ui); stone_slab(ui, cv, -t, y - t / 2, cv->w + t * 2, t, 0x51ab5 ^ (uint32_t)cv->w, STONE_PLAIN); }
     add_panel(ui, 0, y, cv->w, h * rows);
     int base = y + (h + font_ascent(hf) * 7 / 10) / 2;
 
     /* left: health */
     int x = pad;
     int mhp = game_max_hp(g);
-    uint32_t hc = p->hp * 3 <= p->maxhp ? 0xff6a50 : g->chill ? 0xb8e0ff : g->warm_left > 0 ? 0xffc890 : 0xe2d4b4;
+    bool hurt = p->hp * 3 <= mhp && g->state == GS_PLAY;
+    uint32_t hc = hurt ? mix(0xff6a50, 0xffe0d0, (int)(128 + 127 * sinf(g->time * 7))) : g->chill ? 0xb8e0ff : g->warm_left > 0 ? 0xffc890 : 0xe2d4b4;
     snprintf(buf, sizeof buf, "HP %d/%d", p->hp > 0 ? p->hp : 0, mhp);
     x = font_draw(hf, cv, x, base, buf, hc, 255) + pad / 2;
     int bw = ui->px * 5, hbh = ui->px / 3 + 2, byy = base - font_ascent(hf) * 6 / 10;
@@ -706,6 +718,54 @@ static void floaters(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
     }
 }
 
+/* a small health bar over anything wounded that you can see, and over you */
+static void life_bar(Canvas *cv, const UiFrame *f, const Mob *m, int hp, int max, int lift)
+{
+    if (hp >= max || hp <= 0 || max <= 0) return;
+    int z = f->zoom, w = TILE * z * 3 / 4, h = z + 2;
+    int sx = (int)((m->rx * TILE + TILE / 2.0f - f->camx) * z) - w / 2;
+    int sy = (int)((m->ry * TILE - lift - f->camy) * z) - h - z;
+    float k = (float)hp / max;
+    uint32_t c = k > 0.6f ? 0x6aa84a : k > 0.3f ? 0xd0a040 : 0xe04a38;
+    cv_blend_rect(cv, sx - 1, sy - 1, w + 2, h + 2, 0x000000, 210);
+    int fw = (int)(w * k);
+    cv_fill(cv, sx, sy, fw < 1 ? 1 : fw, h, c);
+}
+
+static void life_bars(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
+{
+    (void)ui;
+    if (g->state == GS_DEAD) return;
+    Level *lv = game_level(g);
+    Mob *ms = game_mobs(g, g->depth);
+    for (int i = 0; i < MAX_MOBS; i++) {
+        Mob *m = &ms[i];
+        if (!game_mob_noticed(g, m) || !(lv->f[m->y][m->x] & F_VIS)) continue;
+        life_bar(cv, f, m, m->hp, m->maxhp, m->kind == MK_OGRE ? 12 : m->kind == MK_HOLLOW ? 30 : 4);
+    }
+    life_bar(cv, f, &g->player, g->player.hp, game_max_hp(g), 4);
+}
+
+/* badly hurt: the edges of the view throb red, harder the nearer death you are */
+static void danger_edge(Canvas *cv, Game *g)
+{
+    int mx = game_max_hp(g), hp = g->player.hp;
+    if (g->state != GS_PLAY || hp <= 0 || hp * 3 > mx) return;
+    bool dire = hp * 6 <= mx;
+    float beat = 0.5f + 0.5f * sinf(g->time * (dire ? 9.0f : 5.5f));
+    float peak = (dire ? 120 : 62) * (0.55f + 0.45f * beat);
+    int bw = cv->h / (dire ? 6 : 8);
+    for (int i = 0; i < bw; i++) {
+        float k = 1.0f - (float)i / bw;
+        int a = (int)(peak * k * k);
+        if (a <= 0) break;
+        cv_blend_rect(cv, i, i, cv->w - i * 2, 1, 0xb01008, a);
+        cv_blend_rect(cv, i, cv->h - 1 - i, cv->w - i * 2, 1, 0xb01008, a);
+        cv_blend_rect(cv, i, i + 1, 1, cv->h - i * 2 - 2, 0xb01008, a);
+        cv_blend_rect(cv, cv->w - 1 - i, i + 1, 1, cv->h - i * 2 - 2, 0xb01008, a);
+    }
+}
+
 static int dialog_at(UI *ui, Canvas *cv, const char *title, const char *text, int *bx, int *by, int *bh, bool high, int minw);
 
 static int dialog(UI *ui, Canvas *cv, const char *title, const char *text, int *bx, int *by, int *bh)
@@ -746,7 +806,7 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Search", "s  five turns searching the walls close by for hidden doors (resting helps a little)" },
         { "Doors", "walk into one to open it;  c closes an open door beside you (rats can't open them)" },
         { "Stairs", ">  travel to and descend,  <  climb" },
-        { "Items", "i  your pack: pick an item to use, wield, throw or drop it  (a use, d drop)" },
+        { "Items", "i  your pack: pick an item to use, wield, throw or drop it  (a or q use, d drop)" },
         { "Throw", "t  then aim with the mouse or keys, Tab to cycle targets" },
         { "Torch", "T  light or snuff;  walk onto a burning torch to take it up" },
         { "Sconces", "walk into a cold one (or click it) to light it and take an ember" },
@@ -772,10 +832,20 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         if (a > kw) kw = a;
         if (b > vw) vw = b;
     }
-    int extra = pad * 3 + font_line(ui->big) + font_line(hf) * 2;
+    int extra = pad * 3 + font_line(ui->big) + font_line(ui->head) * 2;
     /* close up the rows in a short window rather than run off the screen */
     if (extra + n * line > cv->h - 8) line = (cv->h - 8 - extra) / n;
-    if (line < font_line(bf)) line = font_line(bf);
+    if (line < font_line(bf)) {             /* still too tall: smaller type */
+        hf = bf = ui->small;
+        line = (cv->h - 8 - extra) / n;
+        if (line < font_line(bf)) line = font_line(bf);
+        kw = vw = 0;
+        for (int i = 0; i < n; i++) {
+            int a = font_width(hf, L[i][0]), b = font_width(bf, L[i][1]);
+            if (a > kw) kw = a;
+            if (b > vw) vw = b;
+        }
+    }
     int w = kw + vw + pad * 4, h = extra + n * line;
     if (w > cv->w - 10) w = cv->w - 10;
     int x = (cv->w - w) / 2, y = (cv->h - h) / 2;
@@ -789,7 +859,7 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         font_draw(bf, cv, x + pad * 2 + kw, yy + font_ascent(bf), L[i][1], 0xd8cbb0, 255);
         yy += line;
     }
-    int bh = font_line(hf) * 3 / 2;
+    int bh = font_line(ui->head) * 3 / 2;
     int bw = button_width(ui, "Esc", "Close");
     button(ui, cv, x + (w - bw) / 2, y + h - pad - bh, bh, "Esc", "Close", UA_CLOSE, f->mx, f->my, true);
 }
@@ -1081,6 +1151,8 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
     }
     if (ui->banner_t > 0) ui->banner_t -= dt;
 
+    danger_edge(cv, g);
+    life_bars(ui, cv, g, f);
     floaters(ui, cv, g, f);
     int bar_top;
     status_bar(ui, cv, g, f, &bar_top);
@@ -1096,6 +1168,28 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
         int y = cv->h / 5;
         font_draw_shadow(ui->big, cv, (cv->w - w) / 2, y, buf, GOLD, (int)(255 * a));
         cv_blend_rect(cv, (cv->w - w * 3 / 2) / 2, y + ui->px / 2, w * 3 / 2, 1, GOLD, (int)(200 * a));
+    }
+
+    /* the health warning: big, in the middle, where you're looking */
+    {
+        int mx = game_max_hp(g), hp = g->player.hp;
+        int step = g->state != GS_PLAY || hp <= 0 ? 0 : hp * 6 <= mx ? 3 : hp * 3 <= mx ? 2 : hp * 2 <= mx ? 1 : 0;
+        if (step > ui->hurt_step && step >= 2) ui->hurt_t = 2.8f;
+        if (step < 2) ui->hurt_t = 0;
+        ui->hurt_step = step;
+        if (ui->hurt_t > 0) {
+            ui->hurt_t -= dt;
+            float a = clampf(ui->hurt_t / 0.6f, 0, 1);
+            int pots = 0;
+            for (int i = 0; i < g->ninv; i++) if (g->inv[i].kind == IT_POTION) pots += g->inv[i].count;
+            const char *t1 = step == 3 ? "Near death" : "Badly hurt";
+            char t2[80];
+            if (pots) snprintf(t2, sizeof t2, "%d HP left.  Press q to drink a healing potion (%d).", hp, pots);
+            else snprintf(t2, sizeof t2, "%d HP left, and no healing potions.", hp);
+            int w1 = font_width(ui->big, t1), w2 = font_width(ui->head, t2), y = cv->h / 3;
+            font_draw_shadow(ui->big, cv, (cv->w - w1) / 2, y, t1, 0xff5040, (int)(255 * a));
+            font_draw_shadow(ui->head, cv, (cv->w - w2) / 2, y + font_line(ui->head) * 5 / 4, t2, 0xffd0c0, (int)(255 * a));
+        }
     }
 
     /* version, top right */

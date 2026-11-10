@@ -241,6 +241,7 @@ bool game_by_fire(Game *g)
     return level_fire(game_level(g), g->player.x, g->player.y) > SHADE_FEAR;
 }
 
+#define HP_PER_DEPTH 2             /* max HP gained the first time you reach each new depth */
 #define TORCHES_PER_LEVEL 0.75f    /* the paced supply of torches on the floor */
 
 /* How much sharper and tougher than the top a monster is at depth d. Full steps
@@ -811,6 +812,25 @@ static void hurt_note(Game *g, MobKind k, int dmg)
     else g->dmg_other += dmg;
     int left = g->player.hp - dmg;
     if (left < g->hp_low) g->hp_low = left < 0 ? 0 : left;
+    /* say so, loudly, each time your health drops through a half, a third and a sixth:
+     * death shouldn't come as a surprise */
+    int mx = game_max_hp(g), was = g->player.hp;
+    if (left <= 0) return;
+    int step = left * 6 <= mx && was * 6 > mx ? 3 : left * 3 <= mx && was * 3 > mx ? 2
+             : left * 2 <= mx && was * 2 > mx ? 1 : 0;
+    if (!step) return;
+    int pots = 0;
+    for (int i = 0; i < g->ninv; i++) if (g->inv[i].kind == IT_POTION) pots += g->inv[i].count;
+    char hint[64] = "";
+    if (pots && step >= 2) snprintf(hint, sizeof hint, " You have %d healing potion%s (press q).", pots, pots == 1 ? "" : "s");
+    else if (step >= 2) snprintf(hint, sizeof hint, " You have no healing potions.");
+    if (step == 3) game_msg(g, C_BAD, "YOU ARE NEAR DEATH (%d HP): one more blow could kill you!%s", left, hint);
+    else if (step == 2) game_msg(g, C_BAD, "YOU ARE BADLY HURT (%d of %d HP).%s", left, mx, hint);
+    else game_msg(g, C_WARN, "you are wounded (%d of %d HP).", left, mx);
+    if (step >= 2) {
+        sfx_ex(g, SND_ALERT, 0, 0, true, 0.12f, step == 3 ? 1.3f : 1.0f);
+    }
+    game_stop(g);
 }
 
 /* returns true if it hit */
@@ -1746,6 +1766,12 @@ static bool kindle(Game *g)
 static void arrive(Game *g)
 {
     if (g->depth <= g->deepest) return;
+    /* the deeper you carry the fire, the hardier you grow */
+    int gain = (g->depth - g->deepest) * HP_PER_DEPTH;
+    g->player.maxhp += gain;
+    g->player.hp += gain;
+    game_msg(g, C_GOOD, "you have come deeper than ever before, and feel the hardier for it (+%d max HP, %d now).",
+             gain, game_max_hp(g));
     g->deepest = g->depth;
     g->hp_low = g->player.hp;
     if (game_final(g)) {

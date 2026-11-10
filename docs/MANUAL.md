@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.16.7. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.17.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -51,7 +51,7 @@ Every action also has a button on screen.
 | Close an open door beside you | `c` | **Close** button (shows beside an open door) |
 | Pack | `i` | **Items** button |
 | Throw | `t`, then aim | **Throw** button |
-| Use (light, drink, pour, wield, wear) | `a` | from the item card |
+| Use (light, drink, pour, wield, wear) | `a` or `q` | from the item card |
 | Drop | `d` | from the item card |
 | Light / snuff your torch | `T` | **Torch** / **Snuff** button |
 | Go down / up stairs | `>` (travels there first) / `<` | click the stairs |
@@ -132,6 +132,9 @@ rather than deleted.
 - **Bottom left:** the message log.
 - **HP in pale blue**, with a frosted end to the bar, means you are chilled
   (see [the chill](#shades-and-the-chill)).
+- **Health bars:** anything wounded that you can see has a small health bar
+  over its head, and so do you once you're hurt.
+- **Health warnings:** see [Health and resting](#health-and-resting).
 
 ---
 
@@ -422,6 +425,16 @@ less likely.
 ## Health and resting
 
 - You start with **24 HP**.
+- **You grow hardier as you go down:** the first time you reach each new depth
+  you gain **+2 max HP** (and 2 HP with it). That's 74 by the bottom, before
+  anything the forge adds. So embers don't all have to go on staying alive.
+- **The game warns you as your health falls.** Under half, the log says you're
+  wounded. Under a third, **Badly hurt** is written across the middle of the
+  screen with your HP and how many healing potions you have, a horn sounds, the
+  HP figure flashes and the edges of the view throb red until you're better.
+  Under a sixth it says **Near death**, and the red beats harder: one more blow
+  could kill you. Each warning stops whatever you were doing (exploring,
+  travelling, resting). `q` then the potion's letter drinks one.
 - You heal **1 HP every 9 turns**, or every 5 turns beside a fixed fire.
 - **Rest** (`z`) passes a turn. **Rest until healed** (`Z`) keeps going until
   you're full or something turns up. While you rest you're also looking about
