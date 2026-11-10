@@ -7,7 +7,7 @@ hover descriptions and clickable actions.
 
 ![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
 
-Version: 0.20.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.21.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -189,6 +189,8 @@ of a room's south wall, or in front of a cold sconce with a shade two steps
 away (4 also lights the sconce). It applies after `SHADESDEEP_DUMP_JUMP`. `SHADESDEEP_DUMP_MAP=1` opens the map and `SHADESDEEP_DUMP_HELP=1` the help.
 `SHADESDEEP_DUMP_MOBS="bat,2,0;ogre,0,2"` puts creatures near the player (rat,
 goblin, shade, bat, slinger, ogre, eel; `eel+` is an eel above the water).
+`SHADESDEEP_DUMP_SENSED=1` makes every creature on the level hunt you as if it had just
+attacked (eyes in the dark, arrows at the edge for off-screen ones).
 `SHADESDEEP_DUMP_FORGE=N` stands by the forge with N embers and opens it (`N,0`
 leaves it shut), `SHADESDEEP_DUMP_FRAMES=N[,FPS]` writes N more frames after the
 first (`out-001.png` on, FPS a second, default 24: for checking animation), and `SHADESDEEP_DUMP_GEAR="spear,1;mail,0"` puts gear in the pack (`SHADESDEEP_DUMP_SLOT=N`

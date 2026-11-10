@@ -60,6 +60,7 @@ typedef struct {
     bool rest;          /* an ogre: sits out this turn (it acts every other turn) */
     bool startled;      /* (padding) came through a door onto you: caught off guard until its next turn */
     uint8_t trail;      /* (padding) a goblin or ogre that has lost sight of you: steps it still follows your tracks */
+    uint8_t sensed;     /* (padding) turns its eyes still give it away in the dark: it has seen you, or attacked you */
     int daze;           /* turns it reels, dazzled by flash powder: it can't act, and can't see you */
 } Mob;
 
@@ -249,6 +250,7 @@ bool  game_by_fire(Game *g);                      /* standing in a fixed fire's 
 bool  game_mob_noticed(Game *g, const Mob *m);    /* in view, or a shade's eyes in the dark */
 bool  game_mob_back_to(const Game *g, const Mob *m);  /* on the move with its back to you: sees you half as far */
 bool  game_mob_hidden(const Mob *m);              /* an eel under the water: not there, as far as you know */
+const char *game_dir_name(int dx, int dy);        /* "north", "south-east"... the way (dx, dy) points */
 bool  game_burning(Game *g, int x, int y);        /* burning oil on that tile of the current level */
 bool  game_final(const Game *g);                  /* on the last level, the Heartflame's */
 /* the run is over and its closing screen is up (a moment after the end, to see it happen) */

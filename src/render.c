@@ -1468,6 +1468,31 @@ static void draw_shade(Canvas *cv, const View *v, const Mob *m, float ox, float 
     }
 }
 
+/* a creature out in the dark that has seen you (or is hitting you): its eyes catch
+ * your light. Where its sprite has glowing eyes they go there, else at its head. */
+static void draw_sensed_eyes(Renderer *r, Canvas *cv, const View *v, const Mob *m)
+{
+    const Image *gl = &r->t.mob_glow[m->kind];
+    int W = m->kind == MK_OGRE ? 42 : TILE, sx = 0, sy = 0, n = 0;
+    for (int j = 0; gl->px && j < TILE; j++)
+        for (int i = 0; i < TILE; i++)
+            if (CA(gl->px[j * TILE + i])) { sx += i; sy += j; n++; }
+    float ex = n ? (float)sx / n : 16, ey = n ? (float)sy / n : 10;
+    if (m->flip) ex = TILE - 1 - ex;
+    ex = ex * W / TILE;
+    ey = ey * W / TILE;
+    float cx = m->rx * TILE + 16 - W / 2.0f + ex - v->camx;
+    float cy = m->ry * TILE - 3 - (W - TILE) + ey - v->camy;
+    if (fmodf(v->time * 0.6f + m->idle, 3.7f) < 0.12f) return;      /* a blink */
+    float pulse = 0.85f + 0.15f * sinf(v->time * 3 + m->idle * 2);
+    cv_glow(cv, (int)cx, (int)cy, 10, 0xff7a30, 0.45f * pulse);
+    for (int e = -1; e <= 1; e += 2) {
+        int x = (int)(cx + e * 2.0f), y = (int)cy;
+        if ((unsigned)x < (unsigned)cv->w && (unsigned)y < (unsigned)cv->h)
+            blend_px(&cv->px[(size_t)y * cv->w + x], 0xffc060, (int)(255 * pulse));
+    }
+}
+
 static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool is_player)
 {
     const Level *lv = v->lv;
@@ -1486,7 +1511,10 @@ static void draw_mob(Renderer *r, Canvas *cv, const View *v, const Mob *m, bool 
     }
     if (game_mob_hidden(m)) return;        /* under the water: only its ripples show */
     if (v->fog && !is_player) {
-        if (!(lv->f[m->y][m->x] & F_VIS)) return;
+        if (!(lv->f[m->y][m->x] & F_VIS)) {
+            if (m->sensed && (lv->f[m->y][m->x] & F_LOS)) draw_sensed_eyes(r, cv, v, m);
+            return;
+        }
         alpha = v->visf[m->y][m->x];
     }
     if (alpha <= 0.02f) return;

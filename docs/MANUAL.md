@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.20.0. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.21.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -129,7 +129,11 @@ rather than deleted.
   and the action buttons. **SNARED** shows while a snare holds you. On the last level, **FLAME n/3** shows how far
   you've kindled the Heartflame, and the Descend button becomes **Hearth**.
 - **Top left:** the monsters you can see, with their health and whether they
-  are asleep, hunting you, or only *watching* (eyes in the dark).
+  are asleep, hunting you, or only *watching* (eyes in the dark). Eyes in the
+  dark marked *attacking* are hitting you from out of the dark.
+- **Arrows at the edge of the view** point to monsters you know about that
+  are off the screen (or hidden under the bottom bar): red if they're hunting
+  you. The view keeps you centred in the part of the screen above the bar.
 - **Bottom left:** the message log.
 - **HP in pale blue**, with a frosted end to the bar, means you are chilled
   (see [the chill](#shades-and-the-chill)).
@@ -152,6 +156,12 @@ their walls. Dark rooms have cold ones.
 - Goblins (and slingers) see well in the dark, about three or four tiles
   where anything else sees two, but even better in the light.
 - Light is the only thing that holds off shades (see below).
+
+**Eyes in the dark.** A monster out in the dark that has seen you, or that is
+attacking you, gives itself away: its eyes glint amber in your light, for as
+long as it keeps watching you and a turn or two after. It shows in the list at
+the top left and on the map, and if a sling stone comes at you out of the
+dark the log says which way it came from. (A shade's pale eyes always show.)
 
 So light keeps the shades away while it shows you to everything else. Most of
 the game is choosing when to be seen.
@@ -581,10 +591,14 @@ step on it anyway"). Hover one to see what it is.
 | **Snare** | A wire noose holds your ankle. Each step you try is a turn spent tearing at it (3–4 tries). You can still fight, throw and use things while it holds you. |
 | **Spark plate** | From depth 6, mostly beside [dry litter](#fire). A shower of sparks: a moment's fire on the plate itself (it burns you for 2–4), and anything dry right beside it catches. |
 
-**Monsters** know where the traps are and step lightly over them. But knock
-one onto a trap with a mace and it sets it off: a snared monster is held
-(dazed) for 3 turns (shades and bats slip free), a trapdoor drops it to the level below, an alarm
-brings everything else running, and a spark plate sets fire to whatever's dry around it.
+**Monsters** know where the traps are and step lightly over them, as long as
+they're minding the floor. **One hunting you has its eyes on you instead**,
+and blunders onto any trap in its way, whether you know about it or not. So
+lead a pursuer over a trap you've found. Knocking one onto a trap with a mace
+works too. A snared monster is held (dazed) for 3 turns, so your next blows
+are sneak attacks; a trapdoor drops it to the level below; an alarm brings
+everything else running; and a spark plate sets fire to whatever's dry around
+it. Bats fly over traps, and shades and the Hollow drift over them.
 
 ---
 
@@ -780,6 +794,9 @@ the difficulty can be tuned from real runs. It's safe to delete.
 - **Carry a lit torch where traps are likely**, in corridors and at the
   doors of storerooms, and you'll usually see them first.
 - **A mace and a known trapdoor** make a fine pair: knock the ogre in.
+- **Run over your own traps.** Found a snare in a corridor? Step round it,
+  let the goblin chasing you walk into it, then turn and cut it down while
+  it's held.
 - **Save something for the bottom.** Two twists of flash powder, or a flask
   of oil between you and the Hollow, buy the three turns the Heartflame needs.
   Keep a spare torch, too.

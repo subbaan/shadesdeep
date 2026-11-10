@@ -36,7 +36,10 @@ struct UI {
     Canvas title_cv;        /* title_art scaled to the screen */
     float title_t;
     struct { float x, y, vx, vy, life, max, r; } ember[90];
+    int bar_top;            /* where the status bar starts, last frame (0: not drawn yet) */
 };
+
+int ui_bar_top(const UI *ui) { return ui ? ui->bar_top : 0; }
 
 static const uint32_t GOLD = 0xc9a45c, GOLD_DIM = 0x6e5a34, INK = 0x0b0907;
 
@@ -544,7 +547,9 @@ static void sidebar(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         snprintf(name, sizeof name, "%s", dark ? "eyes in the dark" : MOB_INFO[m->kind].name);
         if (name[0] >= 'a' && name[0] <= 'z') name[0] = (char)(name[0] - 32);
         font_draw(bf, cv, x + pad, yy + font_ascent(bf), name, 0xe2d4b4, 255);
-        if (dark) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "watching", C_WARN, 255);
+        if (dark) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf),
+                            m->sensed > 2 && m->kind != MK_SHADE && m->kind != MK_HOLLOW ? "attacking" : "watching",
+                            m->sensed > 2 && m->kind != MK_SHADE && m->kind != MK_HOLLOW ? C_BAD : C_WARN, 255);
         else if (m->daze > 0) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "dazzled", 0xfff0a0, 255);
         else if (m->asleep) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "asleep", C_INFO, 255);
         else if (m->hunting) font_draw(sf, cv, x + pad + font_width(bf, name) + pad, yy + font_ascent(bf), "hunting", C_WARN, 255);
@@ -603,6 +608,11 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
                  : m->hunting ? " It is hunting you."
                  : game_mob_back_to(g, m) ? " It hasn't noticed you, and its back is to you." : " It hasn't noticed you.");
         snprintf(hint, sizeof hint, "Click to attack");
+    } else if (m && game_mob_noticed(g, m) && m->kind != MK_SHADE && m->kind != MK_HOLLOW) {
+        snprintf(title, sizeof title, "Eyes in the dark");
+        snprintf(desc, sizeof desc, "Eyes glint at you out of the dark beyond your light. Something there has seen you%s.",
+                 m->sensed > 2 ? ", and it is attacking you" : "");
+        snprintf(hint, sizeof hint, "Throw a torch to see what it is");
     } else if (m && game_mob_noticed(g, m)) {
         snprintf(title, sizeof title, "Eyes in the dark");
         snprintf(desc, sizeof desc, "Two pale eyes watch you from beyond your light. Whatever owns them is darker than the dark.");
@@ -611,7 +621,8 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         snprintf(title, sizeof title, "%s", trap_name(lv->trap[y][x]));
         title[0] = (char)(title[0] - 32);
         snprintf(desc, sizeof desc, "%s Monsters of the deep know where their traps lie and step lightly over "
-                 "them, but one knocked onto it will set it off.", trap_desc(lv->trap[y][x]));
+                 "them, but one hunting you has its eyes on you, not the floor: lead it over this and it sets it off. "
+                 "So does one knocked onto it.", trap_desc(lv->trap[y][x]));
         snprintf(hint, sizeof hint, "Travel goes around it");
     } else if (lv->burn[y][x] && vis && tile_flammable(t)) {
         snprintf(title, sizeof title, t == T_LITTER ? "Burning litter" : "Burning crates");
@@ -757,6 +768,60 @@ static void life_bars(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         life_bar(cv, f, m, m->hp, m->maxhp, m->kind == MK_OGRE ? 12 : m->kind == MK_HOLLOW ? 30 : 4);
     }
     life_bar(cv, f, &g->player, g->player.hp, game_max_hp(g), 4);
+}
+
+/* a filled arrowhead at (cx, cy) pointing along (dx, dy) */
+static void arrowhead(Canvas *cv, float cx, float cy, float dx, float dy, float s, uint32_t c, int a)
+{
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len <= 0) return;
+    dx /= len;
+    dy /= len;
+    float ax = cx + dx * s, ay = cy + dy * s;                       /* tip */
+    float bx = cx - dx * s * 0.6f - dy * s * 0.8f, by = cy - dy * s * 0.6f + dx * s * 0.8f;
+    float qx = cx - dx * s * 0.6f + dy * s * 0.8f, qy = cy - dy * s * 0.6f - dx * s * 0.8f;
+    int x0 = (int)floorf(fminf(ax, fminf(bx, qx))), x1 = (int)ceilf(fmaxf(ax, fmaxf(bx, qx)));
+    int y0 = (int)floorf(fminf(ay, fminf(by, qy))), y1 = (int)ceilf(fmaxf(ay, fmaxf(by, qy)));
+    for (int y = y0; y <= y1; y++)
+        for (int x = x0; x <= x1; x++) {
+            float px = x + 0.5f, py = y + 0.5f;
+            float e0 = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+            float e1 = (qx - bx) * (py - by) - (qy - by) * (px - bx);
+            float e2 = (ax - qx) * (py - qy) - (ay - qy) * (px - qx);
+            if ((e0 >= 0 && e1 >= 0 && e2 >= 0) || (e0 <= 0 && e1 <= 0 && e2 <= 0)) cv_blend_rect(cv, x, y, 1, 1, c, a);
+        }
+}
+
+/* creatures you know are there but that are off the edge of the view (or under the
+ * status bar): an arrow at the edge points to each, red if it's after you */
+static void offscreen_marks(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int bottom)
+{
+    if (g->state != GS_PLAY) return;
+    Mob *ms = game_mobs(g, g->depth);
+    int z = f->zoom, inset = ui->px;
+    float pcx = (g->player.rx * TILE + TILE / 2.0f - f->camx) * z, pcy = (g->player.ry * TILE + TILE / 2.0f - f->camy) * z;
+    for (int i = 0; i < MAX_MOBS; i++) {
+        Mob *m = &ms[i];
+        if (!game_mob_noticed(g, m)) continue;
+        float sx = (m->rx * TILE + TILE / 2.0f - f->camx) * z, sy = (m->ry * TILE + TILE / 2.0f - f->camy) * z;
+        float half = TILE * z * 0.35f;
+        if (sx - half >= 0 && sx + half <= cv->w && sy - half >= 0 && sy + half <= bottom) continue;   /* in view */
+        /* where the line from you to it leaves the view */
+        float dx = sx - pcx, dy = sy - pcy, t = 1;
+        float l = inset, r = cv->w - inset, tp = inset, b = bottom - inset;
+        if (pcx + dx * t > r) t = (r - pcx) / dx;
+        if (pcx + dx * t < l) t = (l - pcx) / dx;
+        if (pcy + dy * t > b) t = (b - pcy) / dy;
+        if (pcy + dy * t < tp) t = (tp - pcy) / dy;
+        if (t < 0) t = 0;
+        float ex = pcx + dx * t, ey = pcy + dy * t;
+        bool after = m->hunting || m->sensed > 2;
+        float pulse = after ? 0.75f + 0.25f * sinf(g->time * 6 + i) : 1;
+        uint32_t c = after ? 0xe04a3a : 0xd8b070;
+        float s = ui->px * 0.55f;
+        arrowhead(cv, ex, ey, dx, dy, s + 2, 0x000000, 200);
+        arrowhead(cv, ex, ey, dx, dy, s, c, (int)(255 * pulse));
+    }
 }
 
 /* badly hurt: the edges of the view throb red, harder the nearer death you are */
@@ -1122,7 +1187,8 @@ static void map_view(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         if (!game_mob_noticed(g, &ms[i])) continue;
         bool eyes = !(lv->f[ms[i].y][ms[i].x] & F_VIS);
         cv_disc(cv, MX(ms[i].x), MY(ms[i].y), fmaxf(2.5f, c * 0.32f) + 1.5f, 0, 220);
-        cv_disc(cv, MX(ms[i].x), MY(ms[i].y), fmaxf(2.5f, c * 0.32f), eyes ? 0xa8d0ff : 0xe04a3a, 255);
+        cv_disc(cv, MX(ms[i].x), MY(ms[i].y), fmaxf(2.5f, c * 0.32f),
+                eyes ? (ms[i].kind == MK_SHADE || ms[i].kind == MK_HOLLOW ? 0xa8d0ff : 0xffb060) : 0xe04a3a, 255);
     }
     /* you, pulsing */
     float pulse = 0.5f + 0.5f * sinf(g->time * 4);
@@ -1169,6 +1235,8 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
     floaters(ui, cv, g, f);
     int bar_top;
     status_bar(ui, cv, g, f, &bar_top);
+    ui->bar_top = bar_top;
+    offscreen_marks(ui, cv, g, f, bar_top);
     messages(ui, cv, g, bar_top - ui->px / 3);
     sidebar(ui, cv, g, f);
 

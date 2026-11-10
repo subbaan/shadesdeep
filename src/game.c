@@ -594,6 +594,17 @@ static void view_mark(void *vc, int x, int y, float d)
 
 bool game_mob_hidden(const Mob *m) { return m->kind == MK_EEL && m->surfaced <= 0; }
 
+const char *game_dir_name(int dx, int dy)
+{
+    /* a diagonal only if it's nearly one; otherwise the main way it lies */
+    int sx = abs(dx) * 5 >= abs(dy) * 2 ? (dx > 0) - (dx < 0) : 0;
+    int sy = abs(dy) * 5 >= abs(dx) * 2 ? (dy > 0) - (dy < 0) : 0;
+    static const char *const N[3][3] = { { "north-west", "north", "north-east" },
+                                         { "west", "here", "east" },
+                                         { "south-west", "south", "south-east" } };
+    return N[sy + 1][sx + 1];
+}
+
 bool game_burning(Game *g, int x, int y) { return in_map(x, y) && game_level(g)->burn[y][x] > 0; }
 
 bool game_final(const Game *g) { return g->depth == MAX_DEPTH; }
@@ -617,7 +628,7 @@ bool game_mob_noticed(Game *g, const Mob *m)
     Level *lv = game_level(g);
     if (!m->alive || game_mob_hidden(m)) return false;
     uint8_t f = lv->f[m->y][m->x];
-    return (f & F_VIS) || (shadeish(m->kind) && (f & F_LOS));
+    return (f & F_VIS) || ((shadeish(m->kind) || m->sensed) && (f & F_LOS));
 }
 
 static int count_visible_mobs(Game *g)
@@ -656,7 +667,10 @@ static void compute_view(Game *g)
         Mob *m = g->mobs[g->depth];
         for (int i = 0; i < MAX_MOBS; i++)
             if (game_mob_noticed(g, &m[i])) {
-                if (!(lv->f[m[i].y][m[i].x] & F_VIS)) game_msg(g, C_WARN, "two pale eyes watch you from the dark.");
+                if (!(lv->f[m[i].y][m[i].x] & F_VIS))
+                    game_msg(g, C_WARN, shadeish(m[i].kind) ? "two pale eyes watch you from the dark."
+                                                            : "eyes glint at you out of the dark, %s: something has seen you.",
+                             game_dir_name(m[i].x - g->player.x, m[i].y - g->player.y));
                 else game_msg(g, C_WARN, "you see %s %s%s.", m[i].kind == MK_HOLLOW ? "the" : "a", MOB_INFO[m[i].kind].name,
                               m[i].asleep ? " (asleep)" : "");
                 break;
@@ -726,7 +740,10 @@ void game_resume(Game *g)
     /* fields that sit in what was padding: an older save might hold anything there */
     if (g->poison > 5) g->poison = 0;
     for (int d = 0; d < MAX_DEPTH + 2; d++)
-        for (int i = 0; i < MAX_MOBS; i++) if (g->mobs[d][i].trail > 8) g->mobs[d][i].trail = 0;
+        for (int i = 0; i < MAX_MOBS; i++) {
+            if (g->mobs[d][i].trail > 8) g->mobs[d][i].trail = 0;
+            if (g->mobs[d][i].sensed > 4) g->mobs[d][i].sensed = 0;
+        }
     Mob *ms = g->mobs[g->depth];
     for (int i = 0; i <= MAX_MOBS; i++) {
         Mob *m = i < MAX_MOBS ? &ms[i] : &g->player;
@@ -857,6 +874,7 @@ static bool attack(Game *g, Mob *a, Mob *d)
     if (!shadeish(a->kind) && a->kind != MK_EEL && a->kind != MK_BAT)
         sfx_ex(g, SND_SWING, a->x, a->y, false, 0, pl_att ? 1.0f : a->kind == MK_OGRE ? 1.0f : 0.7f);
     if (!pl_att && a->kind != MK_EEL && rng_chance(&g->rng, 30)) vocal(g, a);
+    if (pl_def) a->sensed = 4;          /* whatever's hitting you, you know where it is */
     if (d->kind == MK_EEL && d->surfaced < 2) d->surfaced = 2;      /* struck: it shows itself */
     if (a->bdx) a->flip = a->bdx < 0;
     int chance = acc - def;
@@ -1350,11 +1368,15 @@ static void sling(Game *g, Mob *m)
     m->bdy = ddy > 0 ? 1 : ddy < 0 ? -1 : 0;
     sfx(g, SND_SLING, m->x, m->y);
     push_fx_from(g, FX_STONE, m->x, m->y, p->x, p->y);
+    m->sensed = 4;                      /* you see where that came from */
+    bool unseen = !(game_level(g)->f[m->y][m->x] & F_VIS);
+    const char *from = game_dir_name(m->x - p->x, m->y - p->y);
     int acc, dmin, dmax, def, x0, x1, x2;
     mob_stats(g, m, &acc, &dmin, &dmax, &x0);
     mob_stats(g, p, &x0, &x1, &x2, &def);
     if ((int)(rng_u32(&g->rng) % 100) >= acc - 10 - def) {
-        game_msg(g, C_DIM, "a sling stone whizzes past you.");
+        if (unseen) game_msg(g, C_WARN, "a sling stone whizzes past you out of the dark, from the %s.", from);
+        else game_msg(g, C_DIM, "a sling stone whizzes past you.");
         floater(g, p->x, p->y, 0xb0b0b0, "miss");
         sfx_ex(g, SND_CLINK, p->x, p->y, false, 0.25f, 0.6f);
         return;
@@ -1376,7 +1398,8 @@ static void sling(Game *g, Mob *m)
         g->end_t = g->time;
         sfx_ex(g, SND_DIE, p->x, p->y, true, 0.45f, 1);
     } else {
-        game_msg(g, C_BAD, "a sling stone hits you.");
+        if (unseen) game_msg(g, C_BAD, "a sling stone hits you out of the dark, from the %s.", from);
+        else game_msg(g, C_BAD, "a sling stone hits you.");
     }
 }
 
@@ -1404,6 +1427,8 @@ static void eel_turn(Game *g, Mob *m)
         mob_wander(g, m);
     }
 }
+
+static void mob_trap(Game *g, Mob *m, int x, int y);
 
 /* goblins, slingers and ogres hunt the long way round, and follow your tracks */
 static bool tracker(const Mob *m)
@@ -1487,6 +1512,7 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
         m->hunting = true;
         m->tx = p->x; m->ty = p->y;
         m->trail = trail_steps(m);              /* fresh tracks to follow, if it loses sight of you */
+        if (m->sensed < 2) m->sensed = 2;       /* its eyes on you glint in the dark */
     } else if (shade && m->hunting && dist <= 7 && rng_chance(&g->rng, 6)) {
         vocal(g, m);                            /* whispering in the dark */
     }
@@ -1507,9 +1533,15 @@ static void mob_turn(Game *g, Mob *m, float pb, int *gnaw)
         if (m->band) { m->tx = m->ty = -1; m->linger = (uint8_t)rng_range(&g->rng, 2, 5); }
     }
     if (m->hunting) {
+        int ox = m->x, oy = m->y;
         if (bat && rng_chance(&g->rng, 40)) mob_wander(g, m);
         else if (m->band || tracker(m)) mob_path_step(g, m, m->tx, m->ty);   /* the long way round corners */
         else mob_step_toward(g, m, m->tx, m->ty);
+        if ((m->x != ox || m->y != oy) && lv->trap[m->y][m->x] && !bat && !shade) {
+            /* its eyes are on you, not the floor: it blunders onto a trap it would otherwise step over */
+            mob_trap(g, m, m->x, m->y);
+            if (!m->alive) return;              /* down a trapdoor */
+        }
         if (m->x == m->tx && m->y == m->ty && !sees && !(tracker(m) && follow_tracks(g, m))) {
             m->hunting = false;
             if (m->band) { m->tx = m->ty = -1; m->linger = (uint8_t)rng_range(&g->rng, 2, 5); }   /* lost you: on its way again */
@@ -1533,6 +1565,7 @@ static void monsters_act(Game *g)
     for (int i = 0; i < MAX_MOBS && g->state != GS_DEAD; i++) {
         Mob *m = &ms[i];
         if (!m->alive) continue;
+        if (m->sensed) m->sensed--;
         if (m->daze > 0) {                                                  /* reeling from a flash */
             m->daze--;
             if (shadeish(m->kind)) shade_burns(g, m);
@@ -2074,7 +2107,7 @@ static void spring_trap(Game *g, int x, int y)
     }
 }
 
-/* a monster knocked onto a trap sets it off */
+/* a monster knocked onto a trap, or blundering onto one while it hunts you, sets it off */
 static void mob_trap(Game *g, Mob *m, int x, int y)
 {
     Level *lv = game_level(g);
@@ -2083,7 +2116,7 @@ static void mob_trap(Game *g, Mob *m, int x, int y)
     if (seen) lv->f[y][x] |= F_TRAP;
     switch (lv->trap[y][x]) {
     case TR_ALARM:
-        if (seen) game_msg(g, C_WARN, "the %s lands on an alarm plate, and a bell clangs in the walls!", nm);
+        if (seen) game_msg(g, C_WARN, "the %s treads on an alarm plate, and a bell clangs in the walls!", nm);
         sfx(g, SND_CLICK, x, y);
         make_noise(g, x, y, 16);
         break;
@@ -2103,7 +2136,7 @@ static void mob_trap(Game *g, Mob *m, int x, int y)
         }
         break;
     case TR_SPARK:
-        if (seen) game_msg(g, C_GOOD, "the %s lands on a spark plate, and sparks shower up around it!", nm);
+        if (seen) game_msg(g, C_GOOD, "the %s treads on a spark plate, and sparks shower up around it!", nm);
         sparks(g, x, y);
         break;
     }
@@ -2325,7 +2358,7 @@ static void knock_back(Game *g, Mob *m, int dx, int dy)
     }
     mob_go(g, m, nx, ny);
     if (seen) game_msg(g, C_TEXT, t == T_DEEP ? "the %s is knocked into the deep water." : "the %s staggers back.", nm);
-    if (lv->trap[ny][nx]) mob_trap(g, m, nx, ny);        /* the one way a monster ever sets one off */
+    if (lv->trap[ny][nx]) mob_trap(g, m, nx, ny);        /* flung onto it */
 }
 
 /* you attack the monster at m with whatever you wield */

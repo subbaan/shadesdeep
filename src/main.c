@@ -154,6 +154,13 @@ static void frame_resize(Frame *fr, int w, int h, int zoom)
     fr->zoom = zoom;
 }
 
+/* the height of the world the camera centres you in: what's above the status bar */
+static int cam_h(const UI *ui, const Frame *fr)
+{
+    int bt = ui_bar_top(ui), z = fr->zoom > 0 ? fr->zoom : 1;
+    return bt > 0 && bt / z < fr->world.h ? bt / z : fr->world.h;
+}
+
 typedef struct {
     int path[MAX_PATH];
     int plen;
@@ -526,6 +533,13 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
             s++;
         }
     }
+    /* SHADESDEEP_DUMP_SENSED=1: every creature on the level is hunting you and has just
+     * attacked (its eyes show in the dark, off-screen ones get an arrow) */
+    if (getenv("SHADESDEEP_DUMP_SENSED")) {
+        Mob *ms = game_mobs(g, g->depth);
+        for (int i = 0; i < MAX_MOBS; i++)
+            if (ms[i].alive) { ms[i].sensed = 4; ms[i].hunting = true; ms[i].asleep = false; }
+    }
     /* SHADESDEEP_DUMP_STRIKE=dx,dy[,N]: step (attack) that way N times */
     {
         int sdx, sdy, sn = 1;
@@ -593,7 +607,7 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         fame_load(getenv("SHADESDEEP_DUMP_FAMEADD"), tmp, FAME_MAX, &ctl.fame_total);
         fprintf(stderr, "recorded \"%s\": rank %d of %d\n", e.cause, ctl.fame_rank, ctl.fame_total);
     }
-    render_camera(r, g, fr.world.w, fr.world.h, 0, true);
+    render_camera(r, g, fr.world.w, cam_h(ui, &fr), 0, true);
     /* show the closing screen at once (SHADESDEEP_DUMP_NOEND=1: not yet) */
     if ((g->state == GS_DEAD || g->state == GS_WON) && !getenv("SHADESDEEP_DUMP_NOEND")) g->end_t = g->time - 30;
     bool freeze = g->proj.active;
@@ -880,7 +894,7 @@ int main(int argc, char **argv)
     KGfx kg;
     kgfx_init(&kg, tx, SC_SELF);
     term_enter_game();
-    render_camera(r, g, fr.world.w, fr.world.h, 0, true);
+    render_camera(r, g, fr.world.w, cam_h(ui, &fr), 0, true);
 
     static Hover hv;
     double last = now_s(), next = last, fps_t = last, quit_t = -10;
@@ -960,7 +974,7 @@ int main(int argc, char **argv)
                         run_logged = 0;
                         save_gone = false;
                         saved_depth = g->depth;
-                        render_camera(r, g, fr.world.w, fr.world.h, 0, true);
+                        render_camera(r, g, fr.world.w, cam_h(ui, &fr), 0, true);
                         tf.confirm_new = false;
                         tf.can_continue = false;
                         scr = SCR_PLAY;
@@ -1107,7 +1121,7 @@ int main(int argc, char **argv)
                 save_gone = false;
                 saved_depth = g->depth;
                 ctl.fame_rank = 0;
-                render_camera(r, g, fr.world.w, fr.world.h, 0, true);
+                render_camera(r, g, fr.world.w, cam_h(ui, &fr), 0, true);
                 if (to_title) {
                     scr = SCR_TITLE;
                     played = false;
@@ -1262,7 +1276,7 @@ int main(int argc, char **argv)
         game_update(g, dt);
         play_sounds(g);
         update_loops(g);
-        render_camera(r, g, fr.world.w, fr.world.h, dt, false);
+        render_camera(r, g, fr.world.w, cam_h(ui, &fr), dt, false);
 
         unsigned inflight = kg.sent - (g_input.gfx_ok + g_input.gfx_err);
         if (inflight >= MAX_INFLIGHT && t - fps_t < 0.25) continue;     /* kitty is behind: skip a frame */

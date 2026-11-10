@@ -66,6 +66,7 @@ typedef struct {
 void ui_map_layout(const UI *ui, Game *g, int sw, int sh, MapLayout *m);
 
 void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f);
+int  ui_bar_top(const UI *ui);      /* screen y where the status bar starts (0 before the first frame) */
 void ui_set_icons(UI *ui, const Image *icons, const Image *icons_hi);   /* item pictures for menus (hi may be NULL) */
 UiAction ui_hit(const UI *ui, int mx, int my, int *arg);    /* button under the mouse */
 bool ui_over_panel(const UI *ui, int mx, int my);   /* mouse is over interface, not the map */
