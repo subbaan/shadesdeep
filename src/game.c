@@ -26,10 +26,11 @@ const MobInfo MOB_INFO[MK_COUNT] = {
                     "it. Its bite is often venomous: the wound burns for a few turns and won't heal until it stops. "
                     "It never leaves the water.", 12, 80, 2, 5, 10, 7 },
     [MK_HOLLOW] = { "Hollow", "The thing that put out the Heartflame: a shade grown vast on the warmth of everyone who ever "
-                    "came down here. Your torch doesn't frighten it and salt won't stop it. A fixed fire burns it but can't "
-                    "drive it off, a flash of powder dazzles it, darts pass through it, and its touch is bitterly cold. "
-                    "While you kindle the Heartflame, every blow it lands smothers the young flame.",
-                    50, 95, 5, 10, 30, 10 },
+                    "came down here. Your torch doesn't frighten it and salt won't stop it. Steel bites it only half as "
+                    "deep as it should, like cutting smoke. A fixed fire burns it but can't drive it off, a flash of "
+                    "powder dazzles it, darts pass through it, and its touch is bitterly cold. While you kindle the "
+                    "Heartflame, every blow it lands smothers the young flame.",
+                    150, 115, 8, 15, 40, 10 },
 };
 
 const ItemInfo ITEM_INFO[IT_COUNT] = {
@@ -891,6 +892,8 @@ static bool attack(Game *g, Mob *a, Mob *d)
     int dmg = rng_range(&g->rng, dmin, dmax);
     bool sneak = unaware;
     if (sneak) dmg *= g->weapon.kind == IT_DAGGER ? 5 : 3;
+    bool smoke = pl_att && d->kind == MK_HOLLOW;
+    if (smoke) dmg = (dmg + 1) / 2;     /* steel goes half through it, like cutting smoke: fire is what it fears */
     int chill = 0;
     bool warded = false;
     if (shadeish(a->kind) && pl_def && g->warm_left > 0) {
@@ -962,6 +965,8 @@ static bool attack(Game *g, Mob *a, Mob *d)
         if (sneak) game_msg(g, C_GOOD, was_asleep ? "you strike the sleeping %s a savage blow (x%d)!"
                                               : "you catch the %s unawares (x%d)!", di->name,
                             g->weapon.kind == IT_DAGGER ? 5 : 3);
+        else if (smoke && rng_chance(&g->rng, 40))
+            game_msg(g, C_TEXT, "your blade goes half through the Hollow, like cutting smoke. Fire would bite deeper.");
         else game_msg(g, C_TEXT, "you hit the %s.", di->name);
     }
     return true;

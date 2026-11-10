@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.21.1. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.22.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -677,9 +677,13 @@ by the hearth.
   It comes on through the flames.
 - **Burning oil** is the one thing it won't walk into.
 - **Flash powder** scorches it and dazzles it, but only for **2 turns**.
-- Darts pass through it, as they do through any shade. Its touch hits hard
-  (5–10) and chills you by 2–3 at a time. It's far too big for a mace to
-  knock back. It has 50 HP, and killing it leaves **5 embers**.
+- **Steel bites it only half as deep.** Every blow you land does half its
+  damage (rounded up), like cutting smoke. Even a heavily tempered blade won't
+  carve through it before it carves through you: fire is what it fears.
+- Darts pass through it, as they do through any shade. Its touch hits very
+  hard (8–15, and it rarely misses) and chills you by 2–3 at a time. It's far
+  too big for a mace to knock back. It has **150 HP**, and killing it leaves
+  **5 embers**.
 - **While you're kindling, every blow it lands smothers the flame** back a
   step. You can't kindle with the Hollow at your side: dazzle it, wall it off
   with fire, or kill it first.
@@ -803,3 +807,7 @@ the difficulty can be tuned from real runs. It's safe to delete.
   Keep a spare torch, too.
 - **Light the hall's sconces first** if you can reach them. The Hollow burns
   in their light, and the other shades can't follow you into it.
+- **Don't try to out-fight the Hollow toe to toe.** With your blade only
+  biting half, you'll lose that trade. Fight it standing in a sconce's light
+  so it burns every turn, and dazzle it with flash powder for free blows. Or
+  forget killing it and go for the hearth.
