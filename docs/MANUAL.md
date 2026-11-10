@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.21.0. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.21.1. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -131,9 +131,10 @@ rather than deleted.
 - **Top left:** the monsters you can see, with their health and whether they
   are asleep, hunting you, or only *watching* (eyes in the dark). Eyes in the
   dark marked *attacking* are hitting you from out of the dark.
-- **Arrows at the edge of the view** point to monsters you know about that
-  are off the screen (or hidden under the bottom bar): red if they're hunting
-  you. The view keeps you centred in the part of the screen above the bar.
+- **Small arrows at the edge of the view** point to monsters hunting you
+  that are off the screen (or hidden under the bottom bar), within a dozen
+  tiles or so. They pulse while it's attacking you. The view keeps you
+  centred in the part of the screen above the bar.
 - **Bottom left:** the message log.
 - **HP in pale blue**, with a frosted end to the bar, means you are chilled
   (see [the chill](#shades-and-the-chill)).

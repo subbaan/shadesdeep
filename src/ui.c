@@ -792,8 +792,8 @@ static void arrowhead(Canvas *cv, float cx, float cy, float dx, float dy, float 
         }
 }
 
-/* creatures you know are there but that are off the edge of the view (or under the
- * status bar): an arrow at the edge points to each, red if it's after you */
+/* creatures after you that are off the edge of the view (or under the status bar),
+ * not far off: a small arrow at the edge points to each, pulsing while it attacks */
 static void offscreen_marks(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int bottom)
 {
     if (g->state != GS_PLAY) return;
@@ -802,7 +802,9 @@ static void offscreen_marks(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int b
     float pcx = (g->player.rx * TILE + TILE / 2.0f - f->camx) * z, pcy = (g->player.ry * TILE + TILE / 2.0f - f->camy) * z;
     for (int i = 0; i < MAX_MOBS; i++) {
         Mob *m = &ms[i];
-        if (!game_mob_noticed(g, m)) continue;
+        if (!game_mob_noticed(g, m) || !(m->hunting || m->sensed > 2)) continue;
+        int far = abs(m->x - g->player.x) > abs(m->y - g->player.y) ? abs(m->x - g->player.x) : abs(m->y - g->player.y);
+        if (far > 12) continue;
         float sx = (m->rx * TILE + TILE / 2.0f - f->camx) * z, sy = (m->ry * TILE + TILE / 2.0f - f->camy) * z;
         float half = TILE * z * 0.35f;
         if (sx - half >= 0 && sx + half <= cv->w && sy - half >= 0 && sy + half <= bottom) continue;   /* in view */
@@ -815,12 +817,11 @@ static void offscreen_marks(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int b
         if (pcy + dy * t < tp) t = (tp - pcy) / dy;
         if (t < 0) t = 0;
         float ex = pcx + dx * t, ey = pcy + dy * t;
-        bool after = m->hunting || m->sensed > 2;
-        float pulse = after ? 0.75f + 0.25f * sinf(g->time * 6 + i) : 1;
-        uint32_t c = after ? 0xe04a3a : 0xd8b070;
-        float s = ui->px * 0.55f;
-        arrowhead(cv, ex, ey, dx, dy, s + 2, 0x000000, 200);
-        arrowhead(cv, ex, ey, dx, dy, s, c, (int)(255 * pulse));
+        bool attacking = m->sensed > 2;
+        float pulse = attacking ? 0.7f + 0.3f * sinf(g->time * 5 + i) : 0.6f;
+        float s = ui->px * 0.38f;
+        arrowhead(cv, ex, ey, dx, dy, s + 1.5f, 0x000000, (int)(140 * pulse));
+        arrowhead(cv, ex, ey, dx, dy, s, 0xc85040, (int)(200 * pulse));
     }
 }
 
