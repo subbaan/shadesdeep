@@ -76,7 +76,8 @@ sound, and libvorbis for the music; if no audio device opens, the game runs sile
   Death (or winning) deletes the save. It lives in `~/.local/share/shadesdeep/save.gz`;
   `--new` starts afresh, `--save=FILE` and `--no-save` change or skip it.
 - **Title and hall of fame:** the game opens on a title screen (Continue, New
-  game, Hall of fame, Quit; `--no-title` skips it). Every run that ends goes
+  game, Hall of fame, Quit; `--no-title` skips it). A new game opens on a
+  short prologue (any key begins). Every run that ends goes
   into the hall of fame, kept next to the save in `halloffame.txt`: how it
   ended, how deep you got, turns, embers, kills and the date, best first,
   with a gold mark on runs that slew the Hollow. A win ends on an epilogue
@@ -206,6 +207,7 @@ title screen (fresh, with a saved game, asking to give it up), with
 the hall of fame in FILE with RANK picked out. `SHADESDEEP_DUMP_HP=N` sets your hit points
 and `SHADESDEEP_DUMP_FAMEADD=FILE` writes a finished run into FILE (with
 `SHADESDEEP_DUMP_MOBS="goblin,1,0"` and `SHADESDEEP_DUMP_REST=20`, a quick death to test with).
+`SHADESDEEP_DUMP_INTRO=SECONDS` draws the prologue that long after it opened.
 `SHADESDEEP_DUMP_SLAIN=1` counts the Hollow as slain by you (with `SHADESDEEP_DUMP_DEPTH=26
 SHADESDEEP_DUMP_KINDLE=3`, the Hollow-slayer's ending).
 `SHADESDEEP_DUMP_WADE=1` reports how many of the `--steps` tour's steps waded. A `~` after a creature's name in `SHADESDEEP_DUMP_MOBS` puts it there

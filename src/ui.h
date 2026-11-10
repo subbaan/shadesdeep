@@ -89,6 +89,14 @@ typedef struct {
 int  ui_title_menu(const TitleFrame *t, UiAction *out, int max);
 void ui_draw_title(UI *ui, Canvas *cv, const TitleFrame *t);
 
+/* the prologue before a new game: Begin (UA_NEW_GAME) or Back (UA_TITLE) */
+typedef struct {
+    float t;                /* seconds it has been showing (the text comes up a paragraph at a time) */
+    int mx, my;
+    float dt;
+} IntroFrame;
+void ui_draw_intro(UI *ui, Canvas *cv, const IntroFrame *f);
+
 typedef struct {
     const FameEntry *e;     /* best first */
     int n;                  /* entries in e */

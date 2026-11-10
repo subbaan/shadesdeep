@@ -91,7 +91,8 @@ static void usage(FILE *f)
         "                      (default ~/.local/share/shadesdeep/save.gz)\n"
         "      --no-save       don't resume or save a game, or record it in the hall\n"
         "                      of fame\n"
-        "      --no-title      skip the title screen and go straight into the game\n"
+        "      --no-title      skip the title screen (and the prologue) and go straight\n"
+        "                      into the game\n"
         "      --hall-of-fame  print the hall of fame and exit\n"
         "      --mute          start with the sound off (F2 toggles it in the game)\n"
         "      --no-music      start with the music off (F3 toggles it)\n"
@@ -626,7 +627,8 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
      * SHADESDEEP_DUMP_FAME=FILE[,RANK]: the hall of fame in FILE, with RANK picked out */
     Image art = { 0 };
     const char *dt_ = getenv("SHADESDEEP_DUMP_TITLE"), *df = getenv("SHADESDEEP_DUMP_FAME");
-    if (dt_ || df) {
+    const char *di = getenv("SHADESDEEP_DUMP_INTRO");     /* =SECONDS: the prologue, that long after it opened */
+    if (dt_ || df || di) {
         char tp[PATH_MAX + 16];
         if (getenv("SHADESDEEP_DUMP_TITLEART")) snprintf(tp, sizeof tp, "%s", getenv("SHADESDEEP_DUMP_TITLEART"));
         else snprintf(tp, sizeof tp, "%s/title.png", assets);
@@ -647,7 +649,10 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         FameFrame ff = { fl, n, total, frank, frank ? &mine : NULL, mx, my, 1.0f / 30 };
         for (int i = 0; i < 240; i++) {      /* let the embers rise */
             if (df) ui_draw_fame(ui, &fr.screen, &ff);
-            else ui_draw_title(ui, &fr.screen, &tf);
+            else if (di) {
+                IntroFrame in = { (float)atof(di), mx, my, 1.0f / 30 };
+                ui_draw_intro(ui, &fr.screen, &in);
+            } else ui_draw_title(ui, &fr.screen, &tf);
         }
     }
     int rc = canvas_write_png(&fr.screen, path);
@@ -691,7 +696,7 @@ static bool dir_key(const bool *rep, int *dx, int *dy)
     return false;
 }
 
-typedef enum { SCR_TITLE, SCR_PLAY, SCR_FAME } Screen;
+typedef enum { SCR_TITLE, SCR_PLAY, SCR_FAME, SCR_INTRO } Screen;
 
 /* --hall-of-fame: the table, as text */
 static int print_hall(const char *save_opt)
@@ -915,6 +920,7 @@ int main(int argc, char **argv)
     Ctl ctl = { .tslot = -1 };
     int mx = -1, my = -1;
     Music music_now = MUS_NONE;
+    float intro_t = 0;          /* how long the prologue has been showing */
     bool end_music = false;     /* this run's closing piece has been started */
 
     while (!g_quit && !g_input.quit && !quit) {
@@ -958,7 +964,7 @@ int main(int argc, char **argv)
          * only its own sounds, until the end, which gets a lament or a hymn (once) */
         {
             Music want = MUS_NONE;
-            if (scr == SCR_TITLE) want = MUS_TITLE;
+            if (scr == SCR_TITLE || scr == SCR_INTRO) want = MUS_TITLE;
             else if (scr == SCR_FAME) want = MUS_FAME;
             else if (g->state == GS_WON || (g->state == GS_DEAD && game_end_shown(g))) {
                 if (!end_music) want = g->state == GS_WON ? MUS_VICTORY : MUS_DEATH;
@@ -1012,7 +1018,8 @@ int main(int argc, char **argv)
                         render_camera(r, g, fr.world.w, cam_h(ui, &fr), 0, true);
                         tf.confirm_new = false;
                         tf.can_continue = false;
-                        scr = SCR_PLAY;
+                        scr = SCR_INTRO;
+                        intro_t = 0;
                     } else if (pr['n'] || pr[K_ESC] || click == UA_NO || g_input.mclick[2]) {
                         tf.confirm_new = false;
                     }
@@ -1034,7 +1041,7 @@ int main(int argc, char **argv)
                 case UA_CONTINUE: scr = SCR_PLAY; break;
                 case UA_NEW_GAME:
                     if (tf.can_continue) tf.confirm_new = true;
-                    else scr = SCR_PLAY;          /* the game waiting behind the title is a fresh one */
+                    else { scr = SCR_INTRO; intro_t = 0; }    /* the game waiting behind the title is a fresh one */
                     break;
                 case UA_FAME:
                     fame_n = fame_load(fame_path[0] ? fame_path : NULL, fame_list, FAME_MAX, &ctl.fame_total);
@@ -1048,6 +1055,18 @@ int main(int argc, char **argv)
                     played = true;
                     quit_t = -10;
                 }
+            } else if (scr == SCR_INTRO) {
+                /* the prologue: any key begins (after a moment, so the key that chose New game doesn't skip it) */
+                intro_t += dt;
+                if (intro_t > 0.25f) {
+                    if (pr[K_ESC] || click == UA_TITLE || g_input.mclick[2]) {
+                        scr = SCR_TITLE;
+                    } else if (click == UA_NEW_GAME || (any_key && !pr[K_F2] && !pr[K_F3])) {
+                        scr = SCR_PLAY;
+                        played = true;
+                        quit_t = -10;
+                    }
+                }
             } else if (pr[K_ESC] || pr[K_ENTER] || pr[K_KPENTER] || PLAIN('h') || PLAIN('q') || click == UA_CLOSE
                        || g_input.mclick[2]) {
                 scr = fame_back;
@@ -1057,6 +1076,9 @@ int main(int argc, char **argv)
                 if (scr == SCR_TITLE) {
                     tf.mx = mx; tf.my = my; tf.dt = dt;
                     ui_draw_title(ui, &fr.screen, &tf);
+                } else if (scr == SCR_INTRO) {
+                    IntroFrame in = { intro_t, mx, my, dt };
+                    ui_draw_intro(ui, &fr.screen, &in);
                 } else {
                     bool from_end = fame_back == SCR_PLAY;
                     FameFrame ff = { fame_list, fame_n, ctl.fame_total, from_end ? ctl.fame_rank : 0,
@@ -1163,6 +1185,10 @@ int main(int argc, char **argv)
                     played = false;
                     tf.can_continue = false;
                     tf.sel = 0;
+                } else if (!no_title) {
+                    scr = SCR_INTRO;            /* the tale again, for the new run */
+                    intro_t = 0;
+                    played = false;
                 }
             } else if (PLAIN('h') || click == UA_FAME) {
                 fame_n = fame_load(fame_path[0] ? fame_path : NULL, fame_list, FAME_MAX, &ctl.fame_total);

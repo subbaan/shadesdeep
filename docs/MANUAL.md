@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.24.1. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.25.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -112,7 +112,13 @@ Shadesdeep opens on a title screen:
 - **Quit** (`q` or `Esc`) leaves.
 
 Choose with the mouse, the letter keys, or the up and down arrows and `Enter`.
-`--no-title` skips the title screen and starts playing straight away.
+`--no-title` skips the title screen (and the prologue) and starts playing
+straight away.
+
+Every new game, from the title or from the closing screen, opens with a short
+**prologue**, *The Long Cold*: how the Heartflame went out and what that did to
+the kingdom above. Any key (or **Begin**) starts the game; `Esc` (or **Back**)
+returns to the title.
 
 ### Saving
 

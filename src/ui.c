@@ -1626,6 +1626,68 @@ void ui_draw_title(UI *ui, Canvas *cv, const TitleFrame *t)
     }
 }
 
+/* ------------------------------------------------------- the prologue */
+
+void ui_draw_intro(UI *ui, Canvas *cv, const IntroFrame *f)
+{
+    static const char *TALE[] = {
+        "Far below the kingdom under the hills, at the bottom of the world, the Heartflame once burned. "
+        "It warmed the stone, and the stone warmed everything above it: the fields, the wells, the hearth "
+        "in every house.",
+        "A hundred years ago it went out. Since then the winters have come early and stayed late, and the "
+        "hearths burn low and blue however much wood they're fed. The dark has been creeping up out of the "
+        "deep, one level at a time, and things live in it now that hunt by warmth.",
+        "Many have gone down to bring the fire back. None have come up again.",
+        "You go down with a dim lantern, a short sword, two torches, a flask of oil and a pack. Twenty-six "
+        "levels below, the cold hearth is waiting. Carry fire to it.",
+    };
+    enum { NT = sizeof TALE / sizeof TALE[0] };
+    ui->nbtn = 0;
+    ui->npanel = 0;
+    title_backdrop(ui, cv, f->dt);
+    cv_blend_rect(cv, 0, 0, cv->w, cv->h, 0, 110);
+    int px = ui->px, pad = px;
+    const char *title = "The Long Cold";
+    const char *sub = "A hundred winters since the Heartflame went out";
+    int w1 = button_width(ui, "Enter", "Begin"), w2 = button_width(ui, "Esc", "Back"), gap = px;
+    int w = clampi(px * 34, w1 + w2 + gap + pad * 2, cv->w - 20);
+    if (w < px * 22) w = cv->w - 20;
+    Font *tf = ui->body;
+    int ih = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        int th = 0;
+        for (int i = 0; i < NT; i++) th += font_wrap(tf, NULL, 0, 0, w - pad * 2, TALE[i], 0, 0) + (i ? pad / 2 : 0);
+        ih = pad + font_line(ui->big) + font_line(ui->head) + pad * 5 / 4 + th + pad + font_line(ui->head) * 3 / 2 + pad;
+        if (ih <= cv->h - px || tf == ui->small) break;
+        tf = ui->small;
+    }
+    int x = (cv->w - w) / 2, y = clampi((cv->h - ih) / 2, px / 2, cv->h);
+    panel(ui, cv, x, y, w, ih, 236, true);
+    cv_glow(cv, x + w / 2, y + pad + font_ascent(ui->big) / 2, w / 3, 0x2a1a08, 0.6f);
+    int tw = font_width(ui->big, title);
+    font_draw_shadow(ui->big, cv, x + (w - tw) / 2, y + pad + font_ascent(ui->big), title, GOLD, 255);
+    int yy = y + pad + font_line(ui->big);
+    int a_sub = (int)(255 * clampf(f->t / 0.8f, 0, 1));
+    int sw = font_width(ui->head, sub);
+    if (sw > w - pad * 2) sw = w - pad * 2;
+    font_draw_shadow(ui->head, cv, x + (w - sw) / 2, yy + font_ascent(ui->head) * 9 / 10, sub, 0xb8c4d0, a_sub);
+    yy += font_line(ui->head) + pad * 5 / 4;
+    diamond(cv, x + w / 2, yy - pad * 3 / 4, px / 5 + 1, 0x8fa4b8);
+    cv_blend_rect(cv, x + w / 2 - px * 4, yy - pad * 3 / 4, px * 3 + px / 2, 1, GOLD_DIM, a_sub);
+    cv_blend_rect(cv, x + w / 2 + px / 2, yy - pad * 3 / 4, px * 3 + px / 2, 1, GOLD_DIM, a_sub);
+    /* a paragraph at a time, out of the dark */
+    for (int i = 0; i < NT; i++) {
+        if (i) yy += pad / 2;
+        int a = (int)(255 * clampf((f->t - 0.5f - 1.3f * i) / 1.4f, 0, 1));
+        uint32_t ink = i == NT - 1 ? 0xf0d890 : 0xd8d0c0;
+        if (a > 0) font_wrap(tf, cv, x + pad, yy, w - pad * 2, TALE[i], ink, a);
+        yy += font_wrap(tf, NULL, 0, 0, w - pad * 2, TALE[i], 0, 0);
+    }
+    int bh = font_line(ui->head) * 3 / 2, by = y + ih - pad - bh, x0 = x + (w - w1 - w2 - gap) / 2;
+    button(ui, cv, x0, by, bh, "Enter", "Begin", UA_NEW_GAME, f->mx, f->my, true);
+    button(ui, cv, x0 + w1 + gap, by, bh, "Esc", "Back", UA_TITLE, f->mx, f->my, true);
+}
+
 /* ------------------------------------------------------- hall of fame */
 
 /* draw s in at most maxw pixels, shortening it with an ellipsis if need be */
