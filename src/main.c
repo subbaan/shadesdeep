@@ -94,6 +94,7 @@ static void usage(FILE *f)
         "      --no-title      skip the title screen and go straight into the game\n"
         "      --hall-of-fame  print the hall of fame and exit\n"
         "      --mute          start with the sound off (F2 toggles it in the game)\n"
+        "      --no-music      start with the music off (F3 toggles it)\n"
         "      --no-sound      don't open the audio device at all\n"
         "      --classic-art   draw the creatures with the old built-in sprites\n"
         "      --show-fps      show the frame rate under the version\n"
@@ -596,6 +597,8 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         int mem = 0, b = game_debug_count_bands(g, &mem);
         fprintf(stderr, "bands %d, members %d, turn %d\n", b, mem, g->turn);
     }
+    /* SHADESDEEP_DUMP_SLAIN=1: as if you'd destroyed the Hollow yourself */
+    if (getenv("SHADESDEEP_DUMP_SLAIN")) g->hollow_slain = 1;
     /* SHADESDEEP_DUMP_FAMEADD=FILE: if the run is over, write it into that hall of fame */
     if (getenv("SHADESDEEP_DUMP_FAMEADD") && (g->state == GS_DEAD || g->state == GS_WON)) {
         FameEntry e;
@@ -701,15 +704,18 @@ static int print_hall(const char *save_opt)
     int total, n = fame_load(path, e, FAME_MAX, &total);
     if (n == 0) { printf("The hall of fame is empty (%s).\n", path); return 0; }
     printf("%5s  %-34s %5s %6s %6s %5s  %s\n", "", "Fate", "Depth", "Turns", "Embers", "Kills", "Date");
+    int slayers = 0;
     for (int i = 0; i < n; i++) {
         char date[16] = "?";
         time_t when = (time_t)e[i].when;
         struct tm tm;
         if (localtime_r(&when, &tm)) strftime(date, sizeof date, "%Y-%m-%d", &tm);
-        printf("%4d.  %-34.34s %5d %6d %6d %5d  %s\n", i + 1, e[i].cause, e[i].deepest, e[i].turns, e[i].embers,
-               e[i].kills, date);
+        printf("%4d.%s %-34.34s %5d %6d %6d %5d  %s\n", i + 1, e[i].feats & FAME_HOLLOW ? "*" : " ", e[i].cause,
+               e[i].deepest, e[i].turns, e[i].embers, e[i].kills, date);
+        if (e[i].feats & FAME_HOLLOW) slayers++;
     }
     if (total > n) printf("(and %d more)\n", total - n);
+    if (slayers) printf("* slew the Hollow\n");
     return 0;
 }
 
@@ -719,7 +725,7 @@ int main(int argc, char **argv)
     uint32_t seed = 0;
     bool new_game = false, no_save = false, no_title = false, print_fame = false;
     const char *save_opt = NULL;
-    bool seed_given = false, probe_only = false, show_fps = false, start_muted = false, no_sound = false;
+    bool seed_given = false, probe_only = false, show_fps = false, start_muted = false, no_sound = false, no_music = false;
     int fps = 60, zoom_opt = 0, dump_w = 1300, dump_h = 700, dump_cell = 20, steps = 0, hover_x = -1, hover_y = -1;
     float tscale = 1.0f;
     const char *dump_path = NULL, *assets_opt = NULL;
@@ -734,6 +740,7 @@ int main(int argc, char **argv)
         { "show-fps", no_argument,       0, 'F' },
         { "mute",     no_argument,       0, 'Q' },
         { "no-sound", no_argument,       0, 'N' },
+        { "no-music", no_argument,       0, 'U' },
         { "probe",    no_argument,       0, 'P' },
         { "dump",     required_argument, 0, 'D' },
         { "size",     required_argument, 0, 'S' },
@@ -762,6 +769,7 @@ int main(int argc, char **argv)
         case 'F': show_fps = true; break;
         case 'Q': start_muted = true; break;
         case 'N': no_sound = true; break;
+        case 'U': no_music = true; break;
         case 'P': probe_only = true; break;
         case 'D': dump_path = optarg; break;
         case 'S': if (sscanf(optarg, "%dx%d", &dump_w, &dump_h) != 2) { fprintf(stderr, "%s: bad size\n", SHADESDEEP_NAME); return 2; } break;
@@ -886,7 +894,10 @@ int main(int argc, char **argv)
     ui_set_icons(ui, render_item_icons(r), render_item_icons_hi(r));
     if (!no_sound) {
         if (snd_init(assets) != 0) game_msg(g, C_DIM, "(no sound: %s)", snd_status());
-        else if (start_muted) snd_toggle_mute();
+        else {
+            if (start_muted) snd_toggle_mute();
+            if (no_music) snd_toggle_music();
+        }
     }
     Frame fr = { 0 };
     int zoom = zoom_opt ? zoom_opt : auto_zoom(ts.ypix);
@@ -903,6 +914,8 @@ int main(int argc, char **argv)
     bool quit = false;
     Ctl ctl = { .tslot = -1 };
     int mx = -1, my = -1;
+    Music music_now = MUS_NONE;
+    bool end_music = false;     /* this run's closing piece has been started */
 
     while (!g_quit && !g_input.quit && !quit) {
         for (;;) {
@@ -941,14 +954,35 @@ int main(int argc, char **argv)
         for (int k = 0; k < K_MAX; k++)
             if (pr[k] && k != K_SHIFT && k != K_CTRL && k != K_ALT) any_key = true;
 
+        /* the music: a piece for the title and one for the hall of fame; in the dungeon
+         * only its own sounds, until the end, which gets a lament or a hymn (once) */
+        {
+            Music want = MUS_NONE;
+            if (scr == SCR_TITLE) want = MUS_TITLE;
+            else if (scr == SCR_FAME) want = MUS_FAME;
+            else if (g->state == GS_WON || (g->state == GS_DEAD && game_end_shown(g))) {
+                if (!end_music) want = g->state == GS_WON ? MUS_VICTORY : MUS_DEATH;
+                else want = music_now;      /* back from the hall of fame: leave its music playing */
+                end_music = true;
+            }
+            if (want != music_now) {
+                snd_music(want);
+                music_now = want;
+            }
+        }
+        if (pr[K_F3]) {
+            snd_toggle_music();
+            if (scr == SCR_PLAY && snd_ready()) game_msg(g, C_DIM, snd_music_on() ? "music on." : "music off (F3 turns it back on).");
+        }
+
         /* the title screen and the hall of fame */
         if (scr != SCR_PLAY) {
             UiAction click = g_input.mclick[0] ? ui_hit(ui, mx, my, NULL) : UA_NONE;
             if (click != UA_NONE) snd_play(SND_CLICK, 1, 1, 0, 0);
             if (pr[K_F2]) snd_toggle_mute();
             if (snd_ready()) {      /* the hush of the deep, and a fire crackling somewhere close */
-                snd_loop(LOOP_AMBIENCE, 0.6f);
-                snd_loop(LOOP_FIRE, 0.55f);
+                snd_loop(LOOP_AMBIENCE, snd_music_on() ? 0.35f : 0.6f);
+                snd_loop(LOOP_FIRE, snd_music_on() ? 0.4f : 0.55f);
                 snd_loop(LOOP_TORCH, 0);
                 snd_loop(LOOP_WATER, 0);
             }
@@ -971,6 +1005,7 @@ int main(int argc, char **argv)
                         save_remove(save_path);
                         game_free(g);
                         g = game_new((uint32_t)time(NULL) ^ seed++);
+                        end_music = false;
                         run_logged = 0;
                         save_gone = false;
                         saved_depth = g->depth;
@@ -1117,6 +1152,7 @@ int main(int argc, char **argv)
                 bool to_title = pr[K_ESC] || click == UA_TITLE;
                 game_free(g);
                 g = game_new((uint32_t)time(NULL) ^ seed++);
+                end_music = false;
                 run_logged = 0;
                 save_gone = false;
                 saved_depth = g->depth;

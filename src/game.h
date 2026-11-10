@@ -211,6 +211,7 @@ typedef struct {
     int lantern;                        /* times you've trimmed your lantern */
     bool forge_req;                     /* bumped a forge: the front end opens its menu */
     uint8_t poison;                     /* (padding) turns of an eel's venom left: 1 HP a turn, and no healing */
+    uint8_t hollow_slain;               /* (padding) you destroyed the Hollow yourself, not just outlasted it */
     int warm_left;                      /* turns a warming draught keeps the chill off */
     int fire_x, fire_y;                 /* burning oil the player was warned about (move again to walk in) */
     int kindle;                         /* the Heartflame: 0 cold, 1-2 kindling, 3 burning again (the game is won) */
@@ -317,6 +318,7 @@ void game_torch_toggle(Game *g);        /* light (using a torch if needed) or sn
 void game_msg(Game *g, uint32_t color, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
 /* what killed the player ("Killed by a goblin"), or "" */
 const char *game_death_cause(const Game *g);
+bool game_hollow_slain(const Game *g);   /* the Hollow fell to you (rather than to the Heartflame) */
 
 #define C_TEXT    0xd8cbb0
 #define C_GOOD    0x9ed36a

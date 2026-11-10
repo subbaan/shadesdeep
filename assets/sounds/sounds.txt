@@ -39,3 +39,8 @@ bat         bat_a.wav,bat_b.wav                          0.35
 ogre        ogre_a.wav,ogre_b.wav                        0.60
 eel         eel_a.wav,eel_b.wav                          0.55
 sling       sling_a.wav,sling_b.wav                      0.40
+# music (tools/make_music.py): .ogg or .wav; the title and hall of fame loop, death and victory play once
+title_music    music_title.ogg                          0.45
+fame_music     music_fame.ogg                           0.45
+death_music    music_death.ogg                          0.50
+victory_music  music_victory.ogg                        0.50

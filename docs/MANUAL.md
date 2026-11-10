@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.23.1. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.24.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -60,7 +60,14 @@ Every action also has a button on screen.
 | Help | `?` | **?** button |
 | Zoom | `+` / `-` | mouse wheel |
 | Sound on/off | `F2` | |
+| Music on/off | `F3` | |
 | Save and quit | `Esc` twice | |
+
+**Sound and music.** Down in the dungeon you only hear the dungeon: your steps,
+the creatures, fire and water. Music plays on the title screen and in the hall
+of fame, a lament when you die and a fanfare and hymn when you rekindle the
+Heartflame. `F3` turns just the music off (`--no-music` starts with it off);
+`F2` turns all sound off.
 
 **Explore and travel** take the shortest safe way. They go round shallow water
 when there's a dry way (even a fair bit longer), so you don't splash about and
@@ -662,9 +669,13 @@ Heartflame used to burn. Lighting it again wins the game.
 - **The dark notices.** The moment you start, every shade on the level, and the
   Hollow, comes for you.
 - **When it catches,** every shade on the level, the Hollow included, comes
-  apart, and every cold sconce lights at once. The closing screen tells the
-  story of your run: the turns it took, foes slain, embers gathered and
-  sconces lit.
+  apart, and every cold sconce lights at once, and the victory music
+  plays. The closing screen tells what the fire did for the kingdom above,
+  then the story of your run: the turns it took, foes slain, embers gathered
+  and sconces lit.
+- **You can win without killing the Hollow** (the Heartflame unmakes it
+  anyway), but if it falls to you first, the ending says so and the hall of
+  fame marks the run as a **Hollow-slayer's**.
 
 ### The Hollow
 
@@ -708,14 +719,17 @@ from the title screen. Each entry records:
 - the embers you gathered
 - the monsters you killed
 - the date
+- a small burst of gold light beside the fate if you **slew the Hollow** (in
+  `--hall-of-fame`'s text, a `*`). It counts even if you died afterwards.
 
 Runs are ranked like this:
 
 1. Wins come first.
-2. Then the deepest runs.
-3. Then the most embers.
-4. Then the most kills.
-5. A quicker win beats a slower one, and a death put off longer beats a quick one.
+2. Then runs that slew the Hollow.
+3. Then the deepest runs.
+4. Then the most embers.
+5. Then the most kills.
+6. A quicker win beats a slower one, and a death put off longer beats a quick one.
 
 The closing screen tells you where the run you've just finished stands, and its
 **Hall of fame** button (`h`) shows the table with your run picked out. From

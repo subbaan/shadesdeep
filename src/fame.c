@@ -1,7 +1,9 @@
 /* The hall of fame. One run per line, tab-separated, appended and never
  * rewritten, so a crash can't take the older runs with it:
  *
- *   when  seed  end  depth  deepest  turns  embers  kills  sconces  version  cause
+ *   when  seed  end  depth  deepest  turns  embers  kills  sconces  version  cause  feats
+ *
+ * (feats came later: lines without it have none)
  */
 #include "fame.h"
 
@@ -36,6 +38,7 @@ void fame_from_game(const Game *g, FameEnd end, FameEntry *e)
     e->embers = g->embers_got;
     e->kills = g->kills;
     e->sconces = g->sconces_lit;
+    if (game_hollow_slain(g)) e->feats |= FAME_HOLLOW;
     if (end == FAME_WON) snprintf(e->cause, sizeof e->cause, "Rekindled the Heartflame");
     else if (end == FAME_ABANDONED) snprintf(e->cause, sizeof e->cause, "Gave up on depth %d", g->depth);
     else {
@@ -49,6 +52,8 @@ int fame_cmp(const FameEntry *a, const FameEntry *b)
 {
     int aw = a->end == FAME_WON, bw = b->end == FAME_WON;
     if (aw != bw) return bw - aw;
+    int ah = (a->feats & FAME_HOLLOW) != 0, bh = (b->feats & FAME_HOLLOW) != 0;
+    if (ah != bh) return bh - ah;                   /* and slaying the Hollow beats slipping past it */
     if (a->deepest != b->deepest) return b->deepest - a->deepest;
     if (a->embers != b->embers) return b->embers - a->embers;
     if (a->kills != b->kills) return b->kills - a->kills;
@@ -64,9 +69,9 @@ static bool parse(char *line, FameEntry *e)
 {
     if (line[0] == '#' || line[0] == '\n' || !line[0]) return false;
     line[strcspn(line, "\r\n")] = 0;
-    char *f[11];
+    char *f[12];
     int nf = 0;
-    for (char *p = line; nf < 11; ) {
+    for (char *p = line; nf < 12; ) {
         f[nf++] = p;
         char *t = strchr(p, '\t');
         if (!t) break;
@@ -89,6 +94,7 @@ static bool parse(char *line, FameEntry *e)
     e->sconces = atoi(f[8]);
     snprintf(e->version, sizeof e->version, "%s", f[9]);
     snprintf(e->cause, sizeof e->cause, "%s", f[10]);
+    if (nf > 11) e->feats = (unsigned)strtoul(f[11], NULL, 10);
     return e->deepest > 0;
 }
 
@@ -169,9 +175,11 @@ int fame_add(const char *path, const FameEntry *e, char *err, size_t n)
     clean(ver, sizeof ver, e->version);
     clean(cause, sizeof cause, e->cause);
     if (fresh) fprintf(f, "# Shadesdeep hall of fame, one run per line (tab-separated):\n"
-                          "# when\tseed\tend (0 died, 1 won, 2 gave up)\tdepth\tdeepest\tturns\tembers\tkills\tsconces\tversion\tcause\n");
-    int w = fprintf(f, "%lld\t%u\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\n", e->when, e->seed, (int)e->end, e->depth,
-                    e->deepest, e->turns, e->embers, e->kills, e->sconces, ver[0] ? ver : "?", cause[0] ? cause : "?");
+                          "# when\tseed\tend (0 died, 1 won, 2 gave up)\tdepth\tdeepest\tturns\tembers\tkills\tsconces\tversion\tcause"
+                          "\tfeats (1 slew the Hollow)\n");
+    int w = fprintf(f, "%lld\t%u\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%u\n", e->when, e->seed, (int)e->end, e->depth,
+                    e->deepest, e->turns, e->embers, e->kills, e->sconces, ver[0] ? ver : "?", cause[0] ? cause : "?",
+                    e->feats);
     if (fclose(f) != 0 || w < 0) { snprintf(err, n, "can't write %s: %s", path, strerror(errno)); return 0; }
     return rank;
 }

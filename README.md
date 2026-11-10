@@ -19,9 +19,9 @@ make              # builds build/shadesdeep and symlinks ./shadesdeep
 ```
 
 Needs a C compiler (GNU C11), Make, pkg-config, and the libpng, zlib,
-FreeType and SDL3 development packages
-(`sudo pacman -S base-devel libpng zlib freetype2 sdl3`). SDL3 is only used for
-sound; if no audio device opens, the game runs silent.
+FreeType, SDL3 and libvorbis development packages
+(`sudo pacman -S base-devel libpng zlib freetype2 sdl3 libvorbis`). SDL3 is only used for
+sound, and libvorbis for the music; if no audio device opens, the game runs silent.
 
 ## Playing
 
@@ -63,7 +63,7 @@ sound; if no audio device opens, the game runs silent.
   shallow water when there's a dry way); `>` travel to the stairs
   down and descend, `<` climb; `i` items, `t` throw, `a` / `q` use,
   `d` drop, `T` light or snuff your torch; `m` map; `+` / `-` zoom;
-  F2 sound on/off; `?` help; Esc twice saves and quits.
+  F2 sound on/off, F3 music on/off; `?` help; Esc twice saves and quits.
 - **Art:** the player, the creatures and the items are pixel art made with
   [SpriteCook](https://spritecook.ai). Every creature has an idle animation
   (breathing, a swaying lantern, a whirling sling, flapping wings), dust
@@ -78,7 +78,9 @@ sound; if no audio device opens, the game runs silent.
 - **Title and hall of fame:** the game opens on a title screen (Continue, New
   game, Hall of fame, Quit; `--no-title` skips it). Every run that ends goes
   into the hall of fame, kept next to the save in `halloffame.txt`: how it
-  ended, how deep you got, turns, embers, kills and the date, best first.
+  ended, how deep you got, turns, embers, kills and the date, best first,
+  with a gold mark on runs that slew the Hollow. A win ends on an epilogue
+  telling what the rekindled fire did for the kingdom above.
   The closing screen tells you where the run stands, and
   `shadesdeep --hall-of-fame` prints the table in the terminal. Put a picture
   at `assets/title.png` and the title screen uses it. A run log for balance
@@ -92,6 +94,10 @@ sound; if no audio device opens, the game runs silent.
   lapping water that rise as you get near. Sounds are panned by where they
   happen and muffled out of sight. `--mute` starts silent, `--no-sound` never
   opens the audio device.
+- **Music:** four synthesized pieces: harp, flute and choir for the title, a
+  slow sarabande for the hall of fame, a tolling lament for a death, and timpani,
+  brass, pealing bells and a hymn for a win. The dungeon itself has none, only
+  its own sounds. F3 or `--no-music` turns it off.
 - **Items:** every action has an on-screen button. Press Throw (or `t`) and
   your throwable items are listed; pick one, then aim with the mouse or the
   direction keys (Tab cycles visible monsters) and click or press Enter.
@@ -200,6 +206,8 @@ title screen (fresh, with a saved game, asking to give it up), with
 the hall of fame in FILE with RANK picked out. `SHADESDEEP_DUMP_HP=N` sets your hit points
 and `SHADESDEEP_DUMP_FAMEADD=FILE` writes a finished run into FILE (with
 `SHADESDEEP_DUMP_MOBS="goblin,1,0"` and `SHADESDEEP_DUMP_REST=20`, a quick death to test with).
+`SHADESDEEP_DUMP_SLAIN=1` counts the Hollow as slain by you (with `SHADESDEEP_DUMP_DEPTH=26
+SHADESDEEP_DUMP_KINDLE=3`, the Hollow-slayer's ending).
 `SHADESDEEP_DUMP_WADE=1` reports how many of the `--steps` tour's steps waded. A `~` after a creature's name in `SHADESDEEP_DUMP_MOBS` puts it there
 asleep, `SHADESDEEP_DUMP_STRIKE=dx,dy[,N]` steps (attacks) that way N times, and
 `SHADESDEEP_DUMP_WIELD=1` wields the last piece `SHADESDEEP_DUMP_GEAR` added.
@@ -218,6 +226,14 @@ scipy) into `assets/sounds` (files already there are kept, so sounds you swapped
 NAME...` re-renders just those, `--force` re-renders everything); `assets/sounds/sounds.txt` says which file(s)
 each event plays and how loud, and is only written when missing, so edit it
 freely. `python3 tools/make_sounds.py --only step door` re-renders just those.
+
+The music is composed and synthesized by `tools/make_music.py` (the same
+Python, plus ffmpeg to write Ogg Vorbis; without ffmpeg, or with `--wav`, it
+writes WAV, which the game also reads). It keeps existing files too; `--only
+title fame death victory` picks pieces, `--force` redoes all four. Rendering
+takes about a minute. Swap in your own music by replacing
+`assets/sounds/music_*.ogg` or pointing the `*_music` lines in `sounds.txt` at
+other `.ogg` or `.wav` files.
 
 The creature sprites are `assets/sprites/NAME.png` (32x32, feet at the bottom,
 facing right), each with an optional `NAME_glow.png` of the pixels that glow in

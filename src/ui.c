@@ -901,7 +901,7 @@ static void help(UI *ui, Canvas *cv, const UiFrame *f)
         { "Map", "m  the whole level; click a place on it to travel there" },
         { "Water", "shallows splash; deep water puts out a torch; goblins won't swim, eels lurk" },
         { "Zoom", "+ and -  or the mouse wheel;  text size is kitty's font zoom (ctrl+shift+= / -)" },
-        { "Sound", "F2 turns it off and on" },
+        { "Sound", "F2 turns it all off and on,  F3 just the music" },
         { "Save and quit", "Esc twice (the next start carries on)" },
     };
     int n = sizeof L / sizeof *L;
@@ -1223,6 +1223,135 @@ static void map_view(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
     #undef MY
 }
 
+/* the mark of a run that destroyed the Hollow: a small burst of gold light */
+static void slayer_mark(Canvas *cv, int cx, int cy, int r)
+{
+    if (r < 3) r = 3;
+    cv_glow(cv, cx, cy, r * 2, 0x6a4a18, 0.7f);
+    for (int k = 1; k <= r; k++) {
+        int a = 255 - 150 * k / r;
+        uint32_t c = k <= r / 3 ? 0xfff2c8 : GOLD;
+        cv_blend_rect(cv, cx + k, cy, 1, 1, c, a);
+        cv_blend_rect(cv, cx - k, cy, 1, 1, c, a);
+        cv_blend_rect(cv, cx, cy + k, 1, 1, c, a);
+        cv_blend_rect(cv, cx, cy - k, 1, 1, c, a);
+        if (k <= r * 3 / 5) {
+            cv_blend_rect(cv, cx + k, cy + k, 1, 1, c, a * 3 / 4);
+            cv_blend_rect(cv, cx - k, cy + k, 1, 1, c, a * 3 / 4);
+            cv_blend_rect(cv, cx + k, cy - k, 1, 1, c, a * 3 / 4);
+            cv_blend_rect(cv, cx - k, cy - k, 1, 1, c, a * 3 / 4);
+        }
+    }
+    cv_disc(cv, (float)cx, (float)cy, r * 0.32f + 0.6f, 0xfff8e0, 255);
+}
+
+/* how the run went, in a sentence or three, and where it stands in the hall */
+static void run_summary(char *text, size_t sz, const Game *g, const UiFrame *f)
+{
+    bool won = g->state == GS_WON;
+    int n = won ? snprintf(text, sz, "You carried fire down through all %d levels in %d turns.", MAX_DEPTH, g->turn)
+                : snprintf(text, sz, "You fell on depth %d after %d turns.", g->depth, g->turn);
+    if (!won && g->deepest > g->depth && n < (int)sz)
+        n += snprintf(text + n, sz - n, " You had been as deep as %d.", g->deepest);
+    if (!won && game_hollow_slain(g) && n < (int)sz)
+        n += snprintf(text + n, sz - n, " You had slain the Hollow itself.");
+    if (n < (int)sz)
+        n += snprintf(text + n, sz - n, " You slew %d foe%s, gathered %d ember%s and lit %d sconce%s along the way.",
+                      g->kills, g->kills == 1 ? "" : "s", g->embers_got, g->embers_got == 1 ? "" : "s",
+                      g->sconces_lit, g->sconces_lit == 1 ? "" : "s");
+    if (f->fame_rank > 0 && n < (int)sz) {
+        if (f->fame_rank == 1 && f->fame_total > 1)
+            snprintf(text + n, sz - n, " It is the finest run in the hall of fame.");
+        else if (f->fame_total > 1)
+            snprintf(text + n, sz - n, " It stands #%d of %d in the hall of fame.", f->fame_rank, f->fame_total);
+        else
+            snprintf(text + n, sz - n, " It is the first run in the hall of fame.");
+    }
+}
+
+/* the closing screen: a plain notice for a death; for a win, the tale of what the fire did */
+static void end_screen(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
+{
+    static const struct { const char *k, *l; UiAction a; } B[] = {
+        { "Enter", "New game", UA_NEW_GAME }, { "h", "Hall of fame", UA_FAME },
+        { "Esc", "Title", UA_TITLE }, { "q", "Quit", UA_QUIT },
+    };
+    int gap = ui->px, bw[4], tot = -gap;
+    for (int i = 0; i < 4; i++) tot += (bw[i] = button_width(ui, B[i].k, B[i].l)) + gap;
+    char stats[480];
+    run_summary(stats, sizeof stats, g, f);
+    int bx, by, bh, w;
+
+    if (g->state != GS_WON) {
+        w = dialog_at(ui, cv, "You have perished", stats, &bx, &by, &bh, false, tot);
+    } else {
+        static const char *TALE =
+            "Fire runs up through the old stone like sap through a tree. Level by level the cold sconces catch, "
+            "and the shades that crept up the stairs for a hundred years come apart like morning mist. Far above, "
+            "in the kingdom under the hills, hearths that had burned low and blue flare up gold again, the frost "
+            "lets go of the fields, and people step out of their doors to feel a warmth in the ground they had "
+            "almost forgotten.";
+        const char *coda = game_hollow_slain(g)
+            ? "And the Hollow, the thing that swallowed the Heartflame, did not wait for the fire to end it: it fell "
+              "to your own hand. They will sing of the one who went down into the dark with a torch, and came back "
+              "the Hollow-slayer."
+            : "The Hollow came apart in the blaze, with every shade it ever made. They will sing of the one who "
+              "carried fire to the bottom of the world, and lit it again.";
+        const char *title = "The Heartflame burns again";
+        const char *sub = "The deep is warm, and the kingdom is saved";
+        int px = ui->px, pad = px;
+        w = clampi(px * 34, tot + pad * 2, cv->w - 20);
+        if (w < px * 22) w = cv->w - 20;
+        /* the tale in the body font if it fits, else the small one */
+        Font *tf = ui->body;
+        int ih = 0, avail = cv->h - px;
+        for (int pass = 0; pass < 2; pass++) {
+            int th = font_wrap(tf, NULL, 0, 0, w - pad * 2, TALE, 0, 0) + font_wrap(tf, NULL, 0, 0, w - pad * 2, coda, 0, 0);
+            int sh = font_wrap(ui->small, NULL, 0, 0, w - pad * 2, stats, 0, 0);
+            ih = pad + font_line(ui->big) + font_line(ui->head) + pad * 5 / 4 + th + pad / 2 + pad + sh + pad
+               + font_line(ui->head) * 3 / 2 + pad;
+            if (ih <= avail || tf == ui->small) break;
+            tf = ui->small;
+        }
+        int x = (cv->w - w) / 2, y = clampi((cv->h - ih) / 3, px / 2, cv->h);
+        /* it comes up a line at a time, as the light does */
+        float since = g->time - g->end_t - 3.0f;
+        int a_sub = (int)(255 * clampf(since / 0.8f, 0, 1));
+        int a_tale = (int)(255 * clampf((since - 0.6f) / 1.6f, 0, 1));
+        int a_coda = (int)(255 * clampf((since - 2.0f) / 1.6f, 0, 1));
+        int a_stats = (int)(255 * clampf((since - 3.2f) / 1.0f, 0, 1));
+        panel(ui, cv, x, y, w, ih, 236, true);
+        cv_glow(cv, x + w / 2, y + pad + font_ascent(ui->big) / 2, w / 3, 0x3a2408, 0.8f);
+        int tw = font_width(ui->big, title);
+        font_draw_shadow(ui->big, cv, x + (w - tw) / 2, y + pad + font_ascent(ui->big), title, 0xf0cc78, 255);
+        int yy = y + pad + font_line(ui->big);
+        int sw = font_width(ui->head, sub);
+        font_draw_shadow(ui->head, cv, x + (w - sw) / 2, yy + font_ascent(ui->head) * 9 / 10, sub, 0xd8c08a, a_sub);
+        yy += font_line(ui->head) + pad * 5 / 4;
+        diamond(cv, x + w / 2, yy - pad * 3 / 4, px / 5 + 1, GOLD);
+        cv_blend_rect(cv, x + w / 2 - px * 4, yy - pad * 3 / 4, px * 3 + px / 2, 1, GOLD_DIM, a_sub);
+        cv_blend_rect(cv, x + w / 2 + px / 2, yy - pad * 3 / 4, px * 3 + px / 2, 1, GOLD_DIM, a_sub);
+        if (a_tale > 0) yy += font_wrap(tf, cv, x + pad, yy, w - pad * 2, TALE, 0xe2d6bc, a_tale);
+        else yy += font_wrap(tf, NULL, 0, 0, w - pad * 2, TALE, 0, 0);
+        yy += pad / 2;
+        bool slayer = game_hollow_slain(g);
+        if (a_coda > 0) {
+            font_wrap(tf, cv, x + pad, yy, w - pad * 2, coda, slayer ? 0xf0d890 : 0xe2d6bc, a_coda);
+        }
+        yy += font_wrap(tf, NULL, 0, 0, w - pad * 2, coda, 0, 0) + pad;
+        cv_blend_rect(cv, x + pad, yy - pad / 2, w - pad * 2, 1, GOLD_DIM, a_stats * 3 / 4);
+        if (a_stats > 0) font_wrap(ui->small, cv, x + pad, yy, w - pad * 2, stats, 0xc8b894, a_stats);
+        bh = font_line(ui->head) * 3 / 2;
+        by = y + ih - pad - bh;
+        bx = x;
+    }
+    int x0 = bx + (w - tot) / 2;
+    for (int i = 0; i < 4; i++) {
+        button(ui, cv, x0, by, bh, B[i].k, B[i].l, B[i].a, f->mx, f->my, true);
+        x0 += bw[i] + gap;
+    }
+}
+
 void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
 {
     ui->nbtn = 0;
@@ -1311,38 +1440,7 @@ void ui_draw(UI *ui, Game *g, Canvas *cv, const UiFrame *f)
         button(ui, cv, x0, by, bh, "y", "Jump", UA_JUMP_YES, f->mx, f->my, true);
         button(ui, cv, x0 + w1 + gap, by, bh, "n", "Stay", UA_JUMP_NO, f->mx, f->my, true);
     } else if (game_end_shown(g)) {
-        char text[400];
-        bool won = g->state == GS_WON;
-        int n = won ? snprintf(text, sizeof text, "You carried fire down through all %d levels and rekindled the Heartflame, in %d turns.",
-                               MAX_DEPTH, g->turn)
-                    : snprintf(text, sizeof text, "You fell on depth %d after %d turns.", g->depth, g->turn);
-        if (!won && g->deepest > g->depth && n < (int)sizeof text)
-            n += snprintf(text + n, sizeof text - n, " You had been as deep as %d.", g->deepest);
-        if (n < (int)sizeof text)
-            n += snprintf(text + n, sizeof text - n, " You slew %d foe%s, gathered %d ember%s and lit %d sconce%s along the way.",
-                     g->kills, g->kills == 1 ? "" : "s", g->embers_got, g->embers_got == 1 ? "" : "s",
-                     g->sconces_lit, g->sconces_lit == 1 ? "" : "s");
-        if (f->fame_rank > 0 && n < (int)sizeof text) {
-            if (f->fame_rank == 1 && f->fame_total > 1)
-                snprintf(text + n, sizeof text - n, " It is the finest run in the hall of fame.");
-            else if (f->fame_total > 1)
-                snprintf(text + n, sizeof text - n, " It stands #%d of %d in the hall of fame.", f->fame_rank, f->fame_total);
-            else
-                snprintf(text + n, sizeof text - n, " It is the first run in the hall of fame.");
-        }
-        static const struct { const char *k, *l; UiAction a; } B[] = {
-            { "Enter", "New game", UA_NEW_GAME }, { "h", "Hall of fame", UA_FAME },
-            { "Esc", "Title", UA_TITLE }, { "q", "Quit", UA_QUIT },
-        };
-        int gap = ui->px, bw[4], tot = -gap;
-        for (int i = 0; i < 4; i++) tot += (bw[i] = button_width(ui, B[i].k, B[i].l)) + gap;
-        int bx, by, bh;
-        int w = dialog_at(ui, cv, won ? "The Heartflame burns again" : "You have perished", text, &bx, &by, &bh, won, tot);
-        int x0 = bx + (w - tot) / 2;
-        for (int i = 0; i < 4; i++) {
-            button(ui, cv, x0, by, bh, B[i].k, B[i].l, B[i].a, f->mx, f->my, true);
-            x0 += bw[i] + gap;
-        }
+        end_screen(ui, cv, g, f);
     } else if (f->help) {
         help(ui, cv, f);
     } else if (f->map) {
@@ -1614,6 +1712,7 @@ void ui_draw_fame(UI *ui, Canvas *cv, const FameFrame *f)
         font_wrap(bf, cv, x + pad, yy + font_ascent(bf), w - pad * 2,
                   "No runs yet. Carry fire down into the deep, and the tale of it will be written here.", 0xd8cbb0, 255);
     }
+    bool slayers = false;
     for (int i = 0; i < rows && f->n > 0; i++) {
         const FameEntry *e;
         int rank;
@@ -1639,7 +1738,14 @@ void ui_draw_fame(UI *ui, Canvas *cv, const FameFrame *f)
         char buf[32];
         snprintf(buf, sizeof buf, "%d.", rank);
         font_draw(bf, cv, cx[C_RANK], base, buf, rank <= 3 ? GOLD : GOLD_DIM, 255);
-        draw_fit(bf, cv, cx[C_FATE], base, cw[C_FATE] - px / 2, e->cause, won ? GOLD : ink, 255);
+        int fx = cx[C_FATE];
+        if (e->feats & FAME_HOLLOW) {       /* slew the Hollow */
+            int r = font_ascent(bf) * 2 / 5;
+            slayer_mark(cv, fx + r, base - font_ascent(bf) * 2 / 5, r);
+            fx += r * 2 + px / 3;
+            slayers = true;
+        }
+        draw_fit(bf, cv, fx, base, cx[C_FATE] + cw[C_FATE] - px / 2 - fx, e->cause, won ? GOLD : ink, 255);
         snprintf(buf, sizeof buf, "%d", e->deepest);
         font_draw(bf, cv, cx[C_DEPTH], base, buf, ink, 255);
         snprintf(buf, sizeof buf, "%d", e->turns);
@@ -1663,4 +1769,11 @@ void ui_draw_fame(UI *ui, Canvas *cv, const FameFrame *f)
     int bh = font_line(ui->head) * 3 / 2;
     int bw = button_width(ui, "Esc", "Back");
     button(ui, cv, x + (w - bw) / 2, y + h - pad - bh, bh, "Esc", "Back", UA_CLOSE, f->mx, f->my, true);
+    if (slayers) {          /* the key to the mark, in the corner */
+        int r = font_ascent(sf) / 3, base = y + h - pad - bh / 2 + font_ascent(sf) / 3;
+        if (x + pad + r * 2 + px / 3 + font_width(sf, "slew the Hollow") < x + (w - bw) / 2 - px) {
+            slayer_mark(cv, x + pad + r, base - font_ascent(sf) * 2 / 5, r);
+            font_draw(sf, cv, x + pad + r * 2 + px / 3, base, "slew the Hollow", GOLD_DIM, 255);
+        }
+    }
 }

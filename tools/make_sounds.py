@@ -6,7 +6,8 @@ Everything is made from noise and oscillators, then put in a small stone room
 several variants (step_a/_b/_c...) and the game picks one at random.
 
 assets/sounds/sounds.txt maps game events to files and volumes. It is only
-written when missing, so hand edits survive re-runs.
+written when missing, so hand edits survive re-runs. The music is made by
+tools/make_music.py; this only writes its lines into a fresh sounds.txt.
 
 Existing files are kept (you may have swapped in your own), except for sounds
 named with --only, or everything with --force.
@@ -22,7 +23,7 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import butter, lfilter, fftconvolve
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 SR = 44100
 RNG = np.random.default_rng(2611)
 
@@ -629,6 +630,11 @@ VOLUME = {
 }
 
 
+# the music's lines in a fresh sounds.txt (the pieces themselves come from tools/make_music.py)
+MUSIC = (("title_music", "music_title.ogg", 0.45), ("fame_music", "music_fame.ogg", 0.45),
+         ("death_music", "music_death.ogg", 0.50), ("victory_music", "music_victory.ogg", 0.50))
+
+
 def filename(name, v, n):
     return f"{name}.wav" if n == 1 else f"{name}_{'abcdefgh'[v]}.wav"
 
@@ -672,6 +678,9 @@ def main(argv):
             for name, (fn, n, loop) in SOUNDS.items():
                 files = ",".join(filename(name, v, n) for v in range(n))
                 f.write(f"{name:<11} {files:<44} {VOLUME[name]:.2f}\n")
+            f.write("# music (tools/make_music.py): .ogg or .wav; the title and hall of fame loop, death and victory play once\n")
+            for ev, file, vol in MUSIC:
+                f.write(f"{ev:<14} {file:<40} {vol:.2f}\n")
         print(f"  {txt}")
     return 0
 

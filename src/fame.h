@@ -13,6 +13,9 @@
 
 typedef enum { FAME_DIED, FAME_WON, FAME_ABANDONED } FameEnd;
 
+/* deeds worth marking beside a run (a bit set, kept in the file as a number) */
+enum { FAME_HOLLOW = 1 };   /* destroyed the Hollow, rather than just outlasting it */
+
 typedef struct {
     long long when;         /* unix time the run ended */
     uint32_t seed;
@@ -22,6 +25,7 @@ typedef struct {
     int turns, embers, kills, sconces;
     char cause[80];         /* "Killed by a goblin", "Rekindled the Heartflame" */
     char version[16];
+    unsigned feats;         /* FAME_HOLLOW... */
 } FameEntry;
 
 /* $dir/halloffame.txt, where $dir holds the save at save_path */

@@ -127,6 +127,8 @@ const char *game_death_cause(const Game *g)
     return g_cause;
 }
 
+bool game_hollow_slain(const Game *g) { return g->hollow_slain == 1; }
+
 void game_msg(Game *g, uint32_t color, const char *fmt, ...)
 {
     char buf[160];
@@ -749,6 +751,13 @@ void game_resume(Game *g)
     memset(g->fl, 0, sizeof g->fl);
     /* fields that sit in what was padding: an older save might hold anything there */
     if (g->poison > 5) g->poison = 0;
+    if (g->hollow_slain > 1 || g->deepest < FINAL_DEPTH) g->hollow_slain = 0;   /* older saves: whatever was in the padding */
+    if (!g->hollow_slain && g->lv[FINAL_DEPTH] && g->lv[FINAL_DEPTH]->hall >= 0) {  /* a save from before it was kept: the Hollow is there until slain */
+        bool alive = false;
+        for (int i = 0; i < MAX_MOBS; i++)
+            if (g->mobs[FINAL_DEPTH][i].alive && g->mobs[FINAL_DEPTH][i].kind == MK_HOLLOW) alive = true;
+        if (!alive) g->hollow_slain = 1;
+    }
     for (int d = 0; d < MAX_DEPTH + 2; d++)
         for (int i = 0; i < MAX_MOBS; i++) {
             if (g->mobs[d][i].trail > 8) g->mobs[d][i].trail = 0;
@@ -805,6 +814,7 @@ static void kill_mob(Game *g, Mob *m)
     g->kills++;
     if (m->kind == MK_SHADE) ember(g, 1, "the shade leaves a cold ember behind as it goes");
     if (m->kind == MK_HOLLOW) {
+        g->hollow_slain = 1;
         game_msg(g, C_GOOD, "the Hollow comes apart like smoke in a wind, with a sound like a long sigh.");
         ember(g, 5, "at its heart lies a knot of cold embers");
     }
