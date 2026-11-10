@@ -7,7 +7,7 @@ hover descriptions and clickable actions.
 
 ![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
 
-Version: 0.18.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.19.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -47,6 +47,9 @@ sound; if no audio device opens, the game runs silent.
   flagstones, then moss-grown works, red brick vaults, drowned slate and black
   basalt, each with its own room shapes (pillared halls, ruined rooms, ovals,
   crosses, rooms with their corners cut off).
+- **Fire:** from depth 6 there's dry litter, stacked crates and casks of lamp
+  oil, and fire spreads through them. Throw a torch into the straw under a
+  sleeping goblin pack, or into a cask. Watch for spark plates.
 - **Lakes and ruins:** from depth 2, wide lakes spread across rooms, corridors
   and the walls between them, and chasms are ragged holes where the floor has
   fallen in.

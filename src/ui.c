@@ -584,7 +584,7 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         }
         if (lv->burn[y][x]) {
             size_t dn = strlen(desc);
-            snprintf(desc + dn, sizeof desc - dn, " You are standing in burning oil!");
+            snprintf(desc + dn, sizeof desc - dn, t == T_LITTER ? " You are standing in fire!" : " You are standing in burning oil!");
         }
         snprintf(hint, sizeof hint, t == T_STAIRS_DOWN ? "Click to descend" : t == T_STAIRS_UP ? "Click to climb" : "Click to rest a turn");
     } else if (m && vis) {
@@ -608,6 +608,13 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
         snprintf(desc, sizeof desc, "%s Monsters of the deep know where their traps lie and step lightly over "
                  "them, but one knocked onto it will set it off.", trap_desc(lv->trap[y][x]));
         snprintf(hint, sizeof hint, "Travel goes around it");
+    } else if (lv->burn[y][x] && vis && tile_flammable(t)) {
+        snprintf(title, sizeof title, t == T_LITTER ? "Burning litter" : "Burning crates");
+        snprintf(desc, sizeof desc, "%s It's a fixed fire: shades can't bear it, nothing will willingly walk through it, "
+                 "and it sears whatever stands in it. Fire creeps on to anything dry beside it.",
+                 t == T_LITTER ? "The litter is going up fast, and will be ash in a few turns."
+                               : "The old crates are well alight, and will burn for a long while yet.");
+        if (t == T_LITTER) snprintf(hint, sizeof hint, "Walking in will burn you");
     } else if (lv->burn[y][x] && vis) {
         snprintf(title, sizeof title, "Burning oil");
         snprintf(desc, sizeof desc, "Oil burning on the %s, for a few turns more. It's a fixed fire: shades can't bear it, "

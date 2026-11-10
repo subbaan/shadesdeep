@@ -1529,19 +1529,144 @@ static void burn_floor_torches(Game *g, int d)
     }
 }
 
-/* burning oil on a level dies down a turn; where it burned out on stone, soot is left */
+/* ------------------------------------------------------------ fire */
+
+static void ignite_oil(Game *g, int depth, int x, int y);
+static int g_spread_told = -100;        /* the turn the log last said a fire was spreading */
+
+/* keep a fire's light going near (x, y) for `fuel` turns: one light does for a few tiles */
+static void fire_light(Level *lv, int x, int y, int fuel)
+{
+    for (int i = 0; i < lv->nlights; i++) {
+        Light *l = &lv->lights[i];
+        if (l->kind != L_OILFIRE || cheb(l->x, l->y, x, y) > 2) continue;
+        if (l->fuel < fuel) l->fuel = fuel;
+        return;
+    }
+    if (lv->nlights >= MAX_LIGHTS - 8) return;      /* leave room for torches and sconces */
+    int i = level_add_light(lv, L_OILFIRE, x, y, x, y, true, lv->room[y][x]);
+    if (i >= 0) lv->lights[i].fuel = fuel;
+}
+
+/* fire takes hold of (x, y) on level d, if there's anything there to burn; true if it did */
+static bool ignite_tile(Game *g, int d, int x, int y)
+{
+    Level *lv = g->lv[d];
+    if (!lv || !in_map(x, y)) return false;
+    Tile t = (Tile)lv->t[y][x];
+    if (!tile_flammable(t) || lv->burn[y][x]) return false;
+    if (t == T_CASK) {
+        /* the cask splits and its oil goes up all at once */
+        lv->t[y][x] = T_FLOOR;
+        if (d == g->depth) {
+            bool seen = lv->f[y][x] & F_SEEN;
+            push_fx(g, FX_OIL, x, y);
+            sfx_ex(g, SND_SHATTER, x, y, false, 0, 1);
+            sfx_ex(g, SND_IGNITE, x, y, false, 0.05f, 1);
+            make_noise(g, x, y, 8);
+            if (cheb(x, y, g->player.x, g->player.y) <= 6) g->shake = 0.3f;
+            if (seen) game_msg(g, C_WARN, "an oil cask bursts in a roar of flame!");
+            else game_msg(g, C_WARN, "somewhere close by, something bursts with a roar.");
+            game_stop(g);
+        }
+        ignite_oil(g, d, x, y);
+        return true;
+    }
+    int f = tile_fuel(t);
+    lv->burn[y][x] = (uint8_t)rng_range(&g->rng, f - 1, f + 2);
+    fire_light(lv, x, y, lv->burn[y][x]);
+    return true;
+}
+
+/* Fire creeps on to anything dry beside it, a little each turn: straw quickly, crates
+ * slowly, and everything more slowly on the wet slate. A torch left lying by the straw
+ * may set it going too. */
+static void fire_spread(Game *g, int d)
+{
+    Level *lv = g->lv[d];
+    if (!lv) return;
+    static uint8_t catch_[MAP_H][MAP_W];
+    memset(catch_, 0, sizeof catch_);
+    bool wet = depth_theme(d) == TH_SLATE, any = false;
+    for (int y = 1; y < MAP_H - 1; y++)
+        for (int x = 1; x < MAP_W - 1; x++) {
+            if (!lv->burn[y][x]) continue;
+            for (int j = -1; j <= 1; j++)
+                for (int i = -1; i <= 1; i++) {
+                    Tile n = (Tile)lv->t[y + j][x + i];
+                    if ((!i && !j) || !tile_flammable(n) || lv->burn[y + j][x + i] || catch_[y + j][x + i]) continue;
+                    bool diag = i && j;
+                    int pct = n == T_LITTER ? (diag ? 20 : 45) : n == T_CRATES ? (diag ? 10 : 25) : (diag ? 12 : 30);
+                    if (wet) pct /= 2;
+                    if (rng_chance(&g->rng, pct)) { catch_[y + j][x + i] = 1; any = true; }
+                }
+        }
+    for (int i = 0; i < lv->nlights; i++) {
+        const Light *l = &lv->lights[i];
+        if (l->kind != L_FLOORTORCH || !l->lit) continue;
+        for (int dir = 0; dir < 4; dir++) {
+            int X = l->x + (dir == 0) - (dir == 1), Y = l->y + (dir == 2) - (dir == 3);
+            if (tile_at(lv, X, Y) == T_LITTER && !lv->burn[Y][X] && rng_chance(&g->rng, wet ? 6 : 12)) { catch_[Y][X] = 1; any = true; }
+        }
+    }
+    if (!any) return;
+    bool seen = false, near = false;
+    for (int y = 1; y < MAP_H - 1; y++)
+        for (int x = 1; x < MAP_W - 1; x++) {
+            if (!catch_[y][x] || !ignite_tile(g, d, x, y)) continue;
+            if (d == g->depth && (lv->f[y][x] & F_VIS)) seen = true;
+            if (d == g->depth && cheb(x, y, g->player.x, g->player.y) <= 4) near = true;
+        }
+    level_relight(lv);
+    if (d == g->depth + 1) g->lower_dirty = true;
+    if (d != g->depth) return;
+    if (near) game_stop(g);
+    if (seen && g->turn - g_spread_told >= 6) {
+        g_spread_told = g->turn;
+        game_msg(g, near ? C_WARN : C_TEXT, "the fire spreads!");
+    }
+}
+
+/* a fire on a level dies down a turn; where it burned out on stone, soot is left,
+ * and what burned is gone: straw to ash, crates to charred timbers */
 static void burn_tick(Game *g, int d)
 {
     Level *lv = g->lv[d];
     if (!lv) return;
-    bool out = false;
+    fire_spread(g, d);
+    bool out = false, gone = false, saw = false;
     for (int y = 0; y < MAP_H; y++)
         for (int x = 0; x < MAP_W; x++) {
             if (!lv->burn[y][x] || --lv->burn[y][x]) continue;
             out = true;
+            Tile t = (Tile)lv->t[y][x];
+            if (t == T_LITTER || t == T_CRATES) {
+                lv->t[y][x] = t == T_LITTER ? T_FLOOR : T_RUBBLE;
+                gone = true;
+                if (t == T_CRATES && d == g->depth && (lv->f[y][x] & F_VIS)) saw = true;
+            }
             if (!tile_water((Tile)lv->t[y][x]) && !lv->scorch[y][x]) lv->scorch[y][x] = 2;
         }
+    if (saw) game_msg(g, C_DIM, "the burning crates fall in on themselves, a heap of charred timber.");
+    if (gone) lv->light_dirty = true;
     if (out && d == g->depth + 1) g->lower_dirty = true;
+}
+
+/* a spark plate's shower of sparks at (x, y): a moment's fire on the plate, and whatever's dry beside it catches */
+static void sparks(Game *g, int x, int y)
+{
+    Level *lv = game_level(g);
+    push_fx(g, FX_SPARKS, x, y);
+    sfx_ex(g, SND_IGNITE, x, y, false, 0.05f, 0.8f);
+    if (!tile_water((Tile)lv->t[y][x])) {
+        if (!ignite_tile(g, g->depth, x, y) && lv->burn[y][x] < 2) lv->burn[y][x] = 2;
+        fire_light(lv, x, y, 3);
+    }
+    for (int j = -1; j <= 1; j++)
+        for (int i = -1; i <= 1; i++)
+            if (i || j) ignite_tile(g, g->depth, x + i, y + j);
+    level_relight(lv);
+    flare(g);
 }
 
 /* burning oil sears whatever stands in it (shades have the firelight to fear instead) */
@@ -1564,7 +1689,7 @@ static void fire_harm(Game *g)
         if (m->hp <= 0) {
             kill_mob(g, m);
             sfx(g, SND_KILL, m->x, m->y);
-            if (seen) game_msg(g, C_GOOD, "the %s burns to death in the oil!", MOB_INFO[m->kind].name);
+            if (seen) game_msg(g, C_GOOD, "the %s burns to death!", MOB_INFO[m->kind].name);
         } else if (seen) {
             game_msg(g, C_TEXT, "the %s burns!", MOB_INFO[m->kind].name);
             vocal(g, m);
@@ -1583,13 +1708,14 @@ static void fire_harm(Game *g)
     sfx_ex(g, SND_HURT, p->x, p->y, false, 0.05f, 1);
     game_stop(g);
     if (p->hp <= 0) {
-        game_msg(g, C_BAD, "you burn to death in the oil...");
-        set_cause("Burned to death in the oil");
+        bool dry = tile_flammable((Tile)lv->t[p->y][p->x]);
+        game_msg(g, C_BAD, dry ? "you burn to death in the blaze..." : "you burn to death in the oil...");
+        set_cause(dry ? "Burned to death in a blaze" : "Burned to death in the oil");
         g->state = GS_DEAD;
         g->end_t = g->time;
         sfx_ex(g, SND_DIE, p->x, p->y, true, 0.25f, 1);
     } else {
-        game_msg(g, C_BAD, "the burning oil sears you!");
+        game_msg(g, C_BAD, tile_flammable((Tile)lv->t[p->y][p->x]) ? "the flames sear you!" : "the burning oil sears you!");
     }
 }
 
@@ -1875,6 +2001,10 @@ static void spring_trap(Game *g, int x, int y)
             sfx_ex(g, SND_DIE, x, y, true, 0.25f, 1);
         }
         break;
+    case TR_SPARK:
+        game_msg(g, C_BAD, "click! Sparks shower up out of the floor around you!");
+        sparks(g, x, y);
+        break;
     }
 }
 
@@ -1905,6 +2035,10 @@ static void mob_trap(Game *g, Mob *m, int x, int y)
             m->daze = 3;
             if (seen) game_msg(g, C_GOOD, "the %s is caught fast in a snare!", nm);
         }
+        break;
+    case TR_SPARK:
+        if (seen) game_msg(g, C_GOOD, "the %s lands on a spark plate, and sparks shower up around it!", nm);
+        sparks(g, x, y);
         break;
     }
 }
@@ -1978,7 +2112,7 @@ static const char *door_blocked(Game *g, int x, int y)
     Level *lv = game_level(g);
     Mob *m = game_mob_at(g, x, y);
     if (m) return game_mob_noticed(g, m) ? MOB_INFO[m->kind].name : "something";
-    if (lv->burn[y][x]) return "the burning oil";
+    if (lv->burn[y][x]) return "the fire";
     for (int i = 0; i < lv->nlights; i++)
         if (lv->lights[i].kind == L_FLOORTORCH && lv->lights[i].lit && lv->lights[i].x == x && lv->lights[i].y == y)
             return "the torch";
@@ -2099,7 +2233,7 @@ static void knock_back(Game *g, Mob *m, int dx, int dy)
         return;
     }
     bool salt_wall = m->kind == MK_SHADE && in_map(nx, ny) && lv->salt[ny][nx];   /* it can't cross, even flung */
-    if (tile_solid(t) || t == T_DOOR || t == T_BRAZIER || t == T_HEARTH || !in_map(nx, ny) || salt_wall) {
+    if (tile_solid(t) || t == T_DOOR || t == T_BRAZIER || t == T_HEARTH || tile_clutter(t) || !in_map(nx, ny) || salt_wall) {
         int dmg = rng_range(&g->rng, 1, 3);
         m->hp -= dmg;
         m->flash = 1;
@@ -2109,7 +2243,7 @@ static void knock_back(Game *g, Mob *m, int dx, int dy)
         sfx_ex(g, SND_THUD, m->x, m->y, false, 0.1f, 0.8f);
         if (m->hp <= 0) {
             kill_mob(g, m);
-            if (seen) game_msg(g, C_GOOD, "the blow smashes the %s against the %s!", nm, salt_wall ? "salt" : t == T_DOOR ? "door" : "wall");
+            if (seen) game_msg(g, C_GOOD, "the blow smashes the %s against the %s!", nm, salt_wall ? "salt" : t == T_DOOR ? "door" : t == T_CRATES ? "crates" : t == T_CASK ? "cask" : "wall");
             if (shadeish(m->kind)) push_fx(g, FX_DISSOLVE, m->x, m->y);
         } else if (seen) {
             if (salt_wall) game_msg(g, C_TEXT, "the %s is flung against the salt and recoils.", nm);
@@ -2200,6 +2334,12 @@ bool game_move(Game *g, int dx, int dy)
         game_stop(g);
         return false;
     }
+    if (tile_clutter(t)) {
+        game_stop(g);
+        game_msg(g, C_DIM, lv->burn[ny][nx] ? "the crates are burning." : t == T_CASK ? "a heavy cask of lamp oil is in the way. Keep fire well away from it."
+                 : "a stack of old crates is in the way.");
+        return false;
+    }
     if (t == T_HEARTH) {
         game_stop(g);
         if (!kindle(g)) return false;
@@ -2256,7 +2396,7 @@ bool game_move(Game *g, int dx, int dy)
         g->fire_x = nx;
         g->fire_y = ny;
         game_stop(g);
-        game_msg(g, C_WARN, "that oil is burning, and it will sear you. Move again to walk through the flames.");
+        game_msg(g, C_WARN, "that's burning, and it will sear you. Move again to walk through the flames.");
         return false;
     }
     g->fire_x = g->fire_y = -1;
@@ -2989,6 +3129,10 @@ static bool floor_torch(Game *g, int depth, int x, int y)
     }
     int i = level_add_light(lv, L_FLOORTORCH, x, y, x, y, true, lv->room[y][x]);
     if (i >= 0) lv->lights[i].fuel = FLOOR_TORCH_FUEL;
+    if (tile_at(lv, x, y) == T_LITTER) {
+        ignite_tile(g, depth, x, y);         /* straw doesn't wait to be asked */
+        if (depth == g->depth && (lv->f[y][x] & F_VIS)) game_msg(g, C_WARN, "the dry litter under it catches at once!");
+    }
     level_relight(lv);
     if (depth == g->depth) flare(g);
     return true;
@@ -3029,6 +3173,7 @@ int game_throw_path(Game *g, ItemKind k, int tx, int ty, int *out, int max, bool
         Tile t = tile_at(lv, x, y);
         if (tile_opaque(t) || tile_solid(t)) break;     /* bounces off: lands in front */
         out[n++] = y * MAP_W + x;
+        if (tile_clutter(t)) break;                     /* lands among the crates */
         Mob *hm = game_mob_at(g, x, y);
         if (hm && !game_mob_hidden(hm)) { *hits = true; break; }
     }
@@ -3092,11 +3237,12 @@ static void ignite_oil(Game *g, int depth, int x, int y)
 {
     Level *lv = g->lv[depth];
     if (!lv) return;
-    int centre = 0;
+    int centre = 0, clut[9], nclut = 0;
     for (int dy = -1; dy <= 1; dy++)
         for (int dx = -1; dx <= 1; dx++) {
             int X = x + dx, Y = y + dy;
             Tile t = tile_at(lv, X, Y);
+            if (tile_clutter(t) && (!(dx || dy) || diag_ok(lv, x, y, dx, dy))) { clut[nclut++] = Y * MAP_W + X; continue; }
             if (!tile_walkable(t) || t == T_DOOR) continue;
             if ((dx || dy) && (!diag_ok(lv, x, y, dx, dy) || rng_chance(&g->rng, 25))) continue;   /* a ragged splash */
             int turns = dx || dy ? rng_range(&g->rng, 9, 13) : rng_range(&g->rng, 13, 16);
@@ -3127,7 +3273,12 @@ static void ignite_oil(Game *g, int depth, int x, int y)
                 }
             }
         }
-    if (!centre) return;
+    /* crates and casks splashed with it catch (a cask bursting in turn) */
+    for (int k = 0; k < nclut; k++) ignite_tile(g, depth, clut[k] % MAP_W, clut[k] / MAP_W);
+    if (!centre) {
+        if (nclut) { level_relight(lv); if (depth == g->depth) flare(g); }
+        return;
+    }
     Light *l = NULL;
     for (int i = 0; i < lv->nlights; i++)
         if (lv->lights[i].kind == L_OILFIRE && lv->lights[i].x == x && lv->lights[i].y == y) l = &lv->lights[i];
@@ -3209,6 +3360,29 @@ static void resolve_throw(Game *g)
     const char *mn = m ? MOB_INFO[m->kind].name : "";
     bool into_chasm = lv->t[y][x] == T_CHASM;
     char t[16];
+    /* the throw ended among crates, or against a cask */
+    if (tile_clutter((Tile)lv->t[y][x])) {
+        if (pr->kind == IT_TORCH) {
+            push_fx(g, FX_SPARKS, x, y);
+            sfx_ex(g, SND_IGNITE, x, y, false, 0.05f, 0.8f);
+            if (lv->t[y][x] == T_CASK) game_msg(g, C_WARN, "the torch strikes the oil cask...");
+            else game_msg(g, C_TEXT, lv->burn[y][x] ? "the torch falls into the burning crates."
+                                                    : "the torch lodges among the old crates, and they catch.");
+            ignite_tile(g, g->depth, x, y);
+            level_relight(lv);
+            flare(g);
+            make_noise(g, x, y, 3);
+            end_turn(g);
+            return;
+        }
+        if (pr->kind != IT_OIL) {
+            /* anything else knocks against them and drops in front */
+            int b = pr->n >= 2 ? pr->path[pr->n - 2] : g->player.y * MAP_W + g->player.x;
+            x = b % MAP_W;
+            y = b / MAP_W;
+            into_chasm = lv->t[y][x] == T_CHASM;
+        }
+    }
     switch (pr->kind) {
     case IT_DART:
         if (m && shadeish(m->kind)) {
@@ -3693,6 +3867,49 @@ bool game_debug_kindle(Game *g, int times)
         g->player.hp = game_max_hp(g);
         for (int k = 0; k < 30; k++) game_update(g, 1.0f / 30);
     }
+    return true;
+}
+
+/* developer: stand in sight of the thickest litter on the level, near crates if there are any,
+ * the monsters close by cleared away; then, if `turns` >= 0, set the nearest litter alight and let them pass */
+bool game_debug_fire(Game *g, int turns)
+{
+    Level *lv = game_level(g);
+    int bx = -1, by = -1, best = -1;
+    for (int y = 2; y < MAP_H - 2; y++)
+        for (int x = 2; x < MAP_W - 2; x++) {
+            if (lv->t[y][x] != T_FLOOR || lv->trap[y][x] || game_mob_at(g, x, y)) continue;
+            int score = 0, touch = 0;
+            for (int j = -4; j <= 4; j++)
+                for (int i = -4; i <= 4; i++) {
+                    Tile t = tile_at(lv, x + i, y + j);
+                    if (!los(lv, x, y, x + i, y + j)) continue;
+                    score += t == T_LITTER ? 2 : t == T_CRATES ? 3 : t == T_CASK ? 4 : 0;
+                    if (cheb(x, y, x + i, y + j) <= 1 && tile_flammable(t)) touch++;
+                }
+            if (touch) continue;            /* not right up against it */
+            if (score > best) { best = score; bx = x; by = y; }
+        }
+    if (best <= 0) return false;
+    Mob *ms = g->mobs[g->depth];
+    for (int i = 0; i < MAX_MOBS; i++)
+        if (ms[i].alive && cheb(ms[i].x, ms[i].y, bx, by) < 7) ms[i].alive = false;
+    place_player(g, bx, by);
+    compute_view(g);
+    if (turns < 0) return true;
+    int fx = -1, fy = -1, fd = 1 << 30;
+    for (int y = 1; y < MAP_H - 1; y++)
+        for (int x = 1; x < MAP_W - 1; x++) {
+            int d = cheb(x, y, bx, by);
+            if (lv->t[y][x] == T_LITTER && d >= 2 && d < fd) { fd = d; fx = x; fy = y; }
+        }
+    if (fx >= 0) { ignite_tile(g, g->depth, fx, fy); level_relight(lv); }
+    for (int n = 0; n < turns && g->state == GS_PLAY; n++) {
+        g->player.hp = g->player.maxhp;
+        game_rest(g);
+        for (int i = 0; i < 30 && game_busy(g); i++) game_update(g, 1.0f / 30);
+    }
+    compute_view(g);
     return true;
 }
 

@@ -690,6 +690,137 @@ static void build_pillar(Image *im, int th)
         }
 }
 
+/* Dry litter over the floor, as an overlay: strands of straw, dead moss, rushes or roots,
+ * and a scrap of sacking now and then, in each stretch's own colours. */
+static void build_litter(Image *im, int v, int th)
+{
+    static const uint32_t COL[N_THEME][3] = {
+        [TH_HALLS]  = { 0xc8a860, 0xa88848, 0xe0c878 },
+        [TH_MOSS]   = { 0x8a7a40, 0x6a5c30, 0xa89850 },     /* dead moss and fungus */
+        [TH_BRICK]  = { 0xc8a860, 0xa88848, 0xe0c878 },     /* old straw */
+        [TH_SLATE]  = { 0x8a9068, 0x6e7454, 0xa8ac84 },     /* rushes */
+        [TH_BASALT] = { 0x7a5a38, 0x5a4028, 0xb8ac90 },     /* dry roots, and bits of bone */
+        [TH_HEARTH] = { 0xc8a860, 0xa88848, 0xe0c878 },
+    };
+    image_alloc(im, TILE, TILE);
+    Rng r = { 7100u + (uint32_t)v * 31 + (uint32_t)th * 977 };
+    if (rng_chance(&r, 40)) {           /* a scrap of rotten sacking */
+        int cx = rng_range(&r, 8, 23), cy = rng_range(&r, 8, 23), w = rng_range(&r, 4, 7), h = rng_range(&r, 3, 5);
+        for (int y = cy - h; y <= cy + h; y++)
+            for (int x = cx - w; x <= cx + w; x++) {
+                float n = fbm(x * 0.4f, y * 0.4f, 300 + (uint32_t)v);
+                if (n < 0.42f) continue;
+                put(im, x, y, 0xe0000000u | jitter(0x6a5a44, (int)((n - 0.5f) * 40) + ((x + y) & 1) * 6));
+            }
+    }
+    /* a matted bed of it, thick in places and thin in others (it wraps, so tiles join up) */
+    for (int y = 0; y < TILE; y++)
+        for (int x = 0; x < TILE; x++) {
+            if (CA(get(im, x, y))) continue;
+            float a = x * 6.2832f / TILE, b = y * 6.2832f / TILE;
+            float n = fbm(3 + cosf(a) * 1.2f + v, 3 + sinf(a) * 1.2f + cosf(b) * 1.2f, 400 + (uint32_t)th);
+            if (n < 0.26f) continue;
+            uint32_t c = jitter(COL[th][1], (int)((n - 0.5f) * 50) - 22 + (int)(hash2(x, y, 401) % 12));
+            put(im, x, y, (uint32_t)(n > 0.45f ? 235 : n > 0.34f ? 170 : 90) << 24 | c);
+        }
+    /* and loose strands over it, in tufts */
+    int n = rng_range(&r, 60, 76);
+    float tx = 0, ty = 0;
+    for (int k = 0; k < n; k++) {
+        if (k % 8 == 0) { tx = 3 + rng_f(&r) * 26; ty = 4 + rng_f(&r) * 24; }
+        float x = tx + (rng_f(&r) - 0.5f) * 10, y = ty + (rng_f(&r) - 0.5f) * 8, a = rng_f(&r) * 3.1416f;
+        int len = rng_range(&r, 4, 8);
+        uint32_t c = COL[th][rng_range(&r, 0, 2)];
+        for (int i = 0; i < len; i++) {
+            int xi = (int)(x + cosf(a) * i), yi = (int)(y + sinf(a) * i * 0.7f);
+            if (xi < 0 || yi < 1 || xi >= TILE || yi >= TILE) continue;
+            put(im, xi, yi, A(jitter(c, i == 0 ? 18 : (int)(rng_f(&r) * 20) - 6)));
+            if (yi + 1 < TILE && CA(get(im, xi, yi + 1)) < 200) put(im, xi, yi + 1, 0x90000000u | jitter(COL[th][1], -60));
+        }
+    }
+}
+
+/* Old crates, stacked: a big one at the back with a smaller one in front of it. */
+static void crate_box(Image *im, int x0, int y0, int w, int h, int top, uint32_t wood, uint32_t seed, bool burnt)
+{
+    for (int y = y0; y < y0 + h + top; y++)
+        for (int x = x0; x < x0 + w; x++) {
+            bool topf = y < y0 + top;
+            int i = x - x0, j = y - y0 - top;
+            float g = fbm(x * 0.15f, y * (topf ? 0.15f : 0.9f), seed);
+            uint32_t c = jitter(wood, (int)((g - 0.5f) * 40) + (topf ? 22 : 0));
+            if (!topf && j % 5 == 4) c = jitter(wood, -50);             /* gaps between the planks */
+            if (topf && i % 5 == 4) c = jitter(wood, -34);
+            if (!topf && (i < 2 || i >= w - 2)) c = jitter(wood, -14);  /* the corner posts */
+            if (!topf && (j == 0 || j == h - 1)) c = jitter(wood, -8);
+            if (x == x0 || x == x0 + w - 1 || y == y0 || y == y0 + h + top - 1) c = 0x1a120c;    /* outline */
+            if (burnt) {
+                int l = (CR(c) * 77 + CG(c) * 150 + CB(c) * 29) >> 8;
+                c = RGB(l / 3, l / 4, l / 5);
+                if (hash2(x, y, seed + 5) % 9 == 0) c = 0xc04818;       /* embers in the char */
+            }
+            put(im, x, y, A(c));
+        }
+}
+
+static void build_crates(Image *im, int v, bool burnt)
+{
+    image_alloc(im, TILE, TILE + CLUT_R);
+    const int H = TILE + CLUT_R;
+    /* a soft shadow on the floor round the foot of the stack */
+    for (int y = H - 12; y < H; y++)
+        for (int x = 0; x < TILE; x++) {
+            float dx = (x - 16.5f) / 15.0f, dy = (y - (H - 5.0f)) / 6.0f;
+            float d = dx * dx + dy * dy;
+            if (d < 1) put(im, x, y, (uint32_t)(int)(110 * (1 - d)) << 24);
+        }
+    if (v == 0) {
+        crate_box(im, 4, 3, 22, 18, 7, 0x7a5434, 61, burnt);
+        crate_box(im, 12, 22, 17, 13, 5, 0x8a6038, 62, burnt);
+    } else {
+        crate_box(im, 2, 9, 16, 16, 6, 0x805836, 63, burnt);
+        crate_box(im, 15, 4, 15, 14, 5, 0x74502e, 64, burnt);
+        crate_box(im, 9, 26, 18, 12, 4, 0x8a6038, 65, burnt);
+    }
+}
+
+/* A cask of lamp oil standing on its end: staves, iron hoops, and a dark wet stain at its foot. */
+static void build_cask(Image *im)
+{
+    image_alloc(im, TILE, TILE + CLUT_R);
+    const int H = TILE + CLUT_R, top = 7, bot = H - 4;
+    for (int y = bot - 6; y < H; y++)       /* the oil it weeps, and its shadow */
+        for (int x = 0; x < TILE; x++) {
+            float dx = (x - 17.0f) / 14.0f, dy = (y - (bot + 0.5f)) / 4.5f;
+            float d = dx * dx + dy * dy;
+            if (d < 1) put(im, x, y, d < 0.5f ? 0xd0100c08u : (uint32_t)(int)(140 * (1 - d)) << 24);
+        }
+    for (int y = top; y <= bot; y++)
+        for (int x = 4; x < 28; x++) {
+            float u = (x + 0.5f - 16) / 12.0f;
+            float bulge = 1.0f - 0.12f * ((y - (top + bot) / 2.0f) / ((bot - top) / 2.0f)) * ((y - (top + bot) / 2.0f) / ((bot - top) / 2.0f));
+            if (fabsf(u) > bulge) continue;
+            float shade = 0.6f + 0.55f * (1.0f - fabsf(u / bulge + 0.3f) / 1.3f);
+            uint32_t c = jitter(0x7a4c28, (int)((shade - 1) * 110 + (fbm(x * 0.9f, y * 0.12f, 70) - 0.5f) * 26));
+            if ((x * 7 / 24) != ((x + 1) * 7 / 24)) c = jitter(c, -30);                   /* seams between staves */
+            int yy = y - top;
+            if (yy == 5 || yy == 6 || yy == bot - top - 6 || yy == bot - top - 5 || yy == (bot - top) / 2)
+                c = yy & 1 ? jitter(0x4a4846, (int)((shade - 1) * 80)) : jitter(0x6a6662, (int)((shade - 1) * 80));   /* hoops */
+            if (fabsf(u) > bulge - 0.09f) c = 0x1a100a;
+            put(im, x, y, A(c));
+        }
+    /* its round lid, with the bung */
+    for (int y = top - 5; y <= top + 4; y++)
+        for (int x = 4; x < 28; x++) {
+            float dx = (x + 0.5f - 16) / 12.0f, dy = (y + 0.5f - top) / 4.6f;
+            float d = dx * dx + dy * dy;
+            if (d > 1) continue;
+            uint32_t c = d > 0.8f ? 0x2a1a10 : jitter(0x9a6a3c, (int)((fbm(x * 0.5f, y * 0.5f, 71) - 0.5f) * 30) - (int)(dx * 18));
+            if (abs(x - 20) <= 1 && abs(y - top) <= 1) c = 0x1a1008;
+            put(im, x, y, A(c));
+        }
+}
+
 /* ------------------------------------------------------------- sprites */
 
 typedef struct { char k; uint32_t c; bool glow; } Pal;
@@ -1259,7 +1390,15 @@ void tiles_build(Tiles *t)
     build_crystal(&t->crystal);
     for (int th = 0; th < N_THEME; th++)
         for (int i = 0; i < 3; i++) build_rubble(&t->rubble[th][i], i, th);
-    for (int th = 0; th < N_THEME; th++) build_pillar(&t->pillar[th], th);
+    for (int th = 0; th < N_THEME; th++) {
+        build_pillar(&t->pillar[th], th);
+        for (int i = 0; i < 3; i++) build_litter(&t->litter[th][i], i, th);
+    }
+    for (int i = 0; i < 2; i++) {
+        build_crates(&t->crates[i], i, false);
+        build_crates(&t->crates_burnt[i], i, true);
+    }
+    build_cask(&t->cask);
     build_sprite(&t->mob[MK_PLAYER], &t->mob_glow[MK_PLAYER], HERO, HERO_PAL, sizeof HERO_PAL / sizeof *HERO_PAL);
     build_sprite(&t->mob[MK_RAT], &t->mob_glow[MK_RAT], RAT, RAT_PAL, sizeof RAT_PAL / sizeof *RAT_PAL);
     build_sprite(&t->mob[MK_GOBLIN], &t->mob_glow[MK_GOBLIN], GOBLIN, GOBLIN_PAL, sizeof GOBLIN_PAL / sizeof *GOBLIN_PAL);

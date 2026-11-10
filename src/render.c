@@ -393,7 +393,7 @@ static uint32_t sample_lower(const Renderer *r, float x, float y)
 
 /* ------------------------------------------------- the broken rim of a chasm */
 
-static bool lip_ground(Tile t) { return t == T_FLOOR || t == T_RUBBLE; }
+static bool lip_ground(Tile t) { return t == T_FLOOR || t == T_RUBBLE || t == T_LITTER; }
 
 /* how far (px) the broken floor reaches out over the pit at position a along
  * boundary line b: a slow wander plus chunks knocked out of it */
@@ -723,6 +723,19 @@ static void draw_trap(Renderer *r, Canvas *cv, const View *v, int tx, int ty, in
         for (int i = 0; i < 6; i++) floor_px(cv, v, &c, cx + 8 + i, cy - i / 2, 0xa8a8a0, 0.2f);
         for (int j = -2; j <= 2; j++)
             for (int i = 0; i <= 1; i++) floor_px(cv, v, &c, cx + 14 + i, cy - 3 + j, 0x6a4a2a, 0.1f);
+    } else if (k == TR_SPARK) {
+        /* a small iron plate, scorched, with a striker's slot and a scatter of burn marks round it */
+        for (int j = -6; j <= 6; j++)
+            for (int i = -6; i <= 6; i++) {
+                bool rim = abs(i) == 6 || abs(j) == 6;
+                uint32_t col = rim ? 0x141210 : (j == 0 && abs(i) <= 3) ? 0x060504 : (i == -5 || j == -5) ? 0x5a5650 : 0x3e3a36;
+                floor_px(cv, v, &c, cx + i, cy + j, col, 0.12f);
+            }
+        for (int n = 0; n < 9; n++) {
+            uint32_t h = hash2(tx * 11 + n, ty * 3 + n, 0x5a7c);
+            float a = (h % 628) / 100.0f, rr = 8 + (h >> 10) % 4;
+            floor_px(cv, v, &c, cx + (int)(cosf(a) * rr), cy + (int)(sinf(a) * rr * 0.8f), n & 1 ? 0x1a1410 : 0xd07028, 0.2f);
+        }
     }
 }
 
@@ -1072,6 +1085,7 @@ static void draw_ground(Renderer *r, Canvas *cv, const View *v)
                 im = tile_solid(tile_at(lv, tx, ty - 1)) && tile_solid(tile_at(lv, tx, ty + 1)) ? &r->t.door_open_side[depth_theme(lv->depth)]
                                                                                               : &r->t.door_open[depth_theme(lv->depth)];
             else if (t == T_RUBBLE) over = &r->t.rubble[depth_theme(lv->depth)][(h >> 8) % 3];
+            else if (t == T_LITTER) over = &r->t.litter[depth_theme(lv->depth)][(h >> 8) % 3];
             int ao = 0;
             if (tile_solid(tile_at(lv, tx, ty - 1)) || tile_at(lv, tx, ty - 1) == T_DOOR) ao |= AO_N;
             if (tile_solid(tile_at(lv, tx - 1, ty))) ao |= AO_W;
@@ -1160,6 +1174,18 @@ static void draw_wall(Renderer *r, Canvas *cv, const View *v, int tx, int ty)
         Image face = image_rows(&r->t.wface[depth_theme(v->lv->depth)][(h >> 4) % N_WALL], WALL_R - rz, rz);
         draw_lit(cv, sx, sy + TILE - rz, &face, TILE, rz, &a, &b, &a, &b, 0.7f, 1.0f, 0, v->fog, NULL, 0);
     }
+}
+
+/* crates or a cask, standing up into the row behind; crates char as they burn */
+static void draw_clutter(Renderer *r, Canvas *cv, const View *v, int tx, int ty)
+{
+    const Level *lv = v->lv;
+    int sx = tx * TILE - v->camx, sy = ty * TILE - v->camy;
+    uint32_t h = hash2(tx, ty, lv->seed + 3);
+    const Image *im = lv->t[ty][tx] == T_CASK ? &r->t.cask
+                    : lv->burn[ty][tx] && lv->burn[ty][tx] < 9 ? &r->t.crates_burnt[h & 1] : &r->t.crates[h & 1];
+    draw_lit(cv, sx, sy - CLUT_R, im, TILE, TILE + CLUT_R, &r->corner[ty][tx], &r->corner[ty][tx + 1],
+             &r->corner[ty + 1][tx], &r->corner[ty + 1][tx + 1], 0.85f, 1.0f, 0, v->fog, NULL, 0);
 }
 
 static void draw_door(Renderer *r, Canvas *cv, const View *v, int tx, int ty)
@@ -1771,6 +1797,7 @@ static void draw_effects(Renderer *r, Canvas *cv, const View *v, float dt)
                 if (vis < 0.05f) continue;
                 int sx = tx * TILE - v->camx, sy = ty * TILE - v->camy;
                 float size = b >= 5 ? 1.0f : 0.45f + 0.11f * b;
+                if (tile_clutter((Tile)lv->t[ty][tx])) { sy -= CLUT_R; size *= 1.3f; }   /* the crates burn from the top */
                 /* the oil itself glows where it burns */
                 cv_glow(cv, sx + 16, sy + 20, 22, 0xff7a20, 0.13f * size * vis);
                 for (int k = 0; k < 5; k++) {
@@ -1989,9 +2016,10 @@ static void draw_rows(Renderer *r, Canvas *cv, const View *v)
         for (int tx = tx0; tx <= tx1; tx++) {
             if (!in_map(tx, ty)) continue;
             Tile t = (Tile)lv->t[ty][tx];
-            if (t != T_WALL && t != T_DOOR && t != T_DOOR_OPEN) continue;
+            if (t != T_WALL && t != T_DOOR && t != T_DOOR_OPEN && !tile_clutter(t)) continue;
             if (v->fog && !(lv->f[ty][tx] & F_SEEN)) continue;
-            if (t == T_WALL) draw_wall(r, cv, v, tx, ty);
+            if (tile_clutter(t)) draw_clutter(r, cv, v, tx, ty);
+            else if (t == T_WALL) draw_wall(r, cv, v, tx, ty);
             else if (t == T_DOOR) draw_door(r, cv, v, tx, ty);
             else draw_door_leaf(r, cv, v, tx, ty);
         }

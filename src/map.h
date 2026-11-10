@@ -60,6 +60,10 @@ typedef enum {
     T_DEEP,             /* swim: puts out a torch, swallows what falls in */
     T_BRAZIER,          /* a forge brazier standing on the floor: blocks the way, lights the room */
     T_HEARTH,           /* the Heartflame's great hearth, on the last level: blocks the way */
+    /* saved as numbers: add new tiles at the end */
+    T_LITTER,           /* dry straw, dead moss, rushes: walkable, crackles underfoot, burns fast and spreads */
+    T_CRATES,           /* a stack of old crates: blocks the way (not sight), burns long, leaves charred rubble */
+    T_CASK,             /* a cask of lamp oil: blocks the way; fire bursts it into a pool of burning oil */
     T_COUNT
 } Tile;
 
@@ -73,7 +77,7 @@ enum {
 };
 
 /* traps, hidden in the floor (Level.trap); saved as numbers: add new kinds at the end */
-typedef enum { TR_NONE, TR_ALARM, TR_GUST, TR_PIT, TR_SNARE, TR_COUNT } TrapKind;
+typedef enum { TR_NONE, TR_ALARM, TR_GUST, TR_PIT, TR_SNARE, TR_SPARK, TR_COUNT } TrapKind;
 const char *trap_name(int k);
 const char *trap_desc(int k);
 
@@ -138,6 +142,9 @@ static inline bool is_pillar(const Level *lv, int x, int y)
 bool tile_opaque(Tile t);       /* blocks sight and light */
 bool tile_walkable(Tile t);     /* can stand on without falling */
 bool tile_solid(Tile t);        /* drawn as a raised block */
+bool tile_flammable(Tile t);    /* catches from fire beside it */
+bool tile_clutter(Tile t);      /* crates or a cask: stands on the floor, in the way, burnable */
+int  tile_fuel(Tile t);         /* how many turns it burns, roughly */
 static inline bool tile_water(Tile t) { return t == T_SHALLOW || t == T_DEEP; }
 const char *tile_name(Tile t);
 const char *tile_desc(Tile t);

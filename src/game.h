@@ -275,6 +275,7 @@ int  game_path_preview(Game *g, int x, int y, int *out, int max);
 bool game_debug_to_chasm(Game *g);
 bool game_debug_to_water(Game *g, int wade);   /* developer: 0 shore, 1 shallows, 2 deep */
 bool game_debug_spawn(Game *g, MobKind k, int x, int y);
+bool game_debug_fire(Game *g, int turns);      /* developer: stand by some clutter; light it and wait (turns >= 0) */
 bool game_debug_to_forge(Game *g);     /* developer: stand by the forge */
 bool game_debug_depth(Game *g, int depth);     /* developer: go straight to that depth */
 bool game_debug_kindle(Game *g, int times);    /* developer: at the hearth with a lit torch, kindle it */

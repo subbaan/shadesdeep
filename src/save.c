@@ -38,6 +38,10 @@ static uint32_t mix32(uint32_t h, uint32_t v)
     return h;
 }
 
+/* tiles added at the end of the list since saves began (litter, crates, casks) don't
+ * change what an older save's tiles mean, so the count it was made with stays in the print */
+#define T_SAVED 13
+
 static uint32_t layout_print(void)
 {
     uint32_t h = 2166136261u;
@@ -45,7 +49,7 @@ static uint32_t layout_print(void)
         sizeof(Game), sizeof(Level), sizeof(Mob), sizeof(FloorItem), sizeof(Slot), sizeof(Msg), sizeof(Light),
         offsetof(Game, player), offsetof(Game, inv), offsetof(Game, weapon), offsetof(Game, embers),
         offsetof(Game, items), offsetof(Game, mobs), offsetof(Game, rng), offsetof(Mob, lvl), offsetof(Mob, surfaced),
-        offsetof(Level, lights), offsetof(Level, lr), MAX_DEPTH, MAX_MOBS, MAX_ITEMS, MAX_INV, MK_COUNT, IT_COUNT, T_COUNT,
+        offsetof(Level, lights), offsetof(Level, lr), MAX_DEPTH, MAX_MOBS, MAX_ITEMS, MAX_INV, MK_COUNT, IT_COUNT, T_SAVED,
     };
     for (size_t i = 0; i < sizeof parts / sizeof *parts; i++) h = mix32(h, (uint32_t)parts[i]);
     return h;

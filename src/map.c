@@ -8,15 +8,19 @@ bool tile_opaque(Tile t) { return t == T_ROCK || t == T_WALL || t == T_DOOR; }
 bool tile_walkable(Tile t)
 {
     return t == T_FLOOR || t == T_DOOR_OPEN || t == T_DOOR || t == T_STAIRS_DOWN || t == T_STAIRS_UP || t == T_RUBBLE
-        || t == T_SHALLOW || t == T_DEEP;
+        || t == T_SHALLOW || t == T_DEEP || t == T_LITTER;
 }
 bool tile_solid(Tile t) { return t == T_ROCK || t == T_WALL; }
+bool tile_flammable(Tile t) { return t == T_LITTER || t == T_CRATES || t == T_CASK; }
+bool tile_clutter(Tile t) { return t == T_CRATES || t == T_CASK; }
+int tile_fuel(Tile t) { return t == T_LITTER ? 5 : t == T_CRATES ? 14 : t == T_CASK ? 3 : 0; }
 
 const char *tile_name(Tile t)
 {
     static const char *n[T_COUNT] = {
         "solid rock", "stone wall", "stone floor", "wooden door", "open door",
         "chasm", "stairs down", "stairs up", "rubble", "shallow water", "deep water", "forge brazier", "Heartflame",
+        "dry litter", "old crates", "oil cask",
     };
     return t < T_COUNT ? n[t] : "?";
 }
@@ -37,6 +41,11 @@ const char *tile_desc(Tile t)
                                "Goblins won't follow you in.";
     case T_BRAZIER:     return "An old forge's brazier, still burning on something that never runs out. Feed it embers "
                                "to temper your weapon or armour, or to strengthen yourself. No shade comes near it.";
+    case T_LITTER:      return "Dry straw, dead moss and rotten sacking, a fire waiting to happen. It crackles underfoot. "
+                               "A torch in your hand won't light it, but fire beside it will, and it spreads fast.";
+    case T_CRATES:      return "Old crates stacked up and left to rot. They block the way but not the view, and once "
+                               "they catch they burn a long time.";
+    case T_CASK:        return "A cask of lamp oil. If fire reaches it, it bursts, and burning oil goes everywhere.";
     case T_HEARTH:      return "The great hearth at the bottom of the world. The Heartflame burned here once, and the "
                                "dark has crept up from it ever since it went out.";
     default:            return "";
@@ -52,7 +61,7 @@ const char *theme_name(int th)
 
 const char *trap_name(int k)
 {
-    static const char *n[TR_COUNT] = { "", "alarm plate", "draught vent", "trapdoor", "snare" };
+    static const char *n[TR_COUNT] = { "", "alarm plate", "draught vent", "trapdoor", "snare", "spark plate" };
     return k > 0 && k < TR_COUNT ? n[k] : "trap";
 }
 
@@ -67,6 +76,8 @@ const char *trap_desc(int k)
                           "the level below.";
     case TR_SNARE: return "A noose of wire laid in the dust and pegged to the floor. It catches an ankle and holds it "
                           "until you tear free; you can still fight while it holds you.";
+    case TR_SPARK: return "A flint and striker under a loose plate. Step on it and it throws up a shower of sparks: they "
+                          "sting, and anything dry beside it catches fire.";
     default:       return "";
     }
 }
@@ -824,6 +835,119 @@ static void room_pillars(Level *lv, Rng *rng, int r)
         }
 }
 
+/* ------------------------------------------------------------- clutter */
+
+/* could something that's in the way stand at (x, y) without cutting anything off? Its
+ * open neighbours must all join up round it, and no doorway, stair or fire may be beside it. */
+static bool clutter_spot(const Level *lv, int x, int y)
+{
+    if (lv->t[y][x] != T_FLOOR && lv->t[y][x] != T_LITTER) return false;
+    if (lv->trap[y][x]) return false;
+    static const int RX[8] = { 0, 1, 1, 1, 0, -1, -1, -1 }, RY[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
+    bool open[8];
+    int n = 0;
+    for (int k = 0; k < 8; k++) {
+        Tile t = tile_at(lv, x + RX[k], y + RY[k]);
+        if (t == T_DOOR || t == T_DOOR_OPEN || t == T_STAIRS_UP || t == T_STAIRS_DOWN || t == T_BRAZIER || t == T_HEARTH)
+            return false;
+        if (lv->f[y + RY[k]][x + RX[k]] & F_SECRET) return false;
+        open[k] = t == T_FLOOR || t == T_LITTER || t == T_RUBBLE || t == T_SHALLOW;
+        n += open[k];
+    }
+    int runs = 0;
+    for (int k = 0; k < 8; k++) runs += open[k] && !open[(k + 7) % 8];
+    return n >= 3 && runs <= 1;
+}
+
+/* is (x, y) well clear of the stairs and the forge, where nobody wants a fire? */
+static bool clear_of_fixtures(const Level *lv, int x, int y, int r)
+{
+    for (int j = -r; j <= r; j++)
+        for (int i = -r; i <= r; i++) {
+            Tile t = tile_at(lv, x + i, y + j);
+            if (t == T_STAIRS_UP || t == T_STAIRS_DOWN || t == T_BRAZIER || t == T_HEARTH) return false;
+        }
+    return true;
+}
+
+/* a patch of dry litter grown out from (x, y), about `want` tiles */
+static int litter_patch(Level *lv, Rng *rng, int x, int y, int want)
+{
+    if (lv->t[y][x] != T_FLOOR || lv->trap[y][x] || !clear_of_fixtures(lv, x, y, 2)) return 0;
+    int at[64], n = 0;
+    lv->t[y][x] = T_LITTER;
+    at[n++] = y * MAP_W + x;
+    for (int tries = 0; tries < want * 8 && n < want && n < 64; tries++) {
+        int c = at[rng_range(rng, 0, n - 1)], d = rng_range(rng, 0, 3);
+        int X = c % MAP_W + (d == 0) - (d == 1), Y = c / MAP_W + (d == 2) - (d == 3);
+        if (lv->t[Y][X] != T_FLOOR || lv->trap[Y][X] || !clear_of_fixtures(lv, X, Y, 1)) continue;
+        if ((lv->f[Y][X] & F_CORR) && rng_chance(rng, 70)) continue;       /* it gathers in the rooms */
+        lv->t[Y][X] = T_LITTER;
+        at[n++] = Y * MAP_W + X;
+    }
+    return n;
+}
+
+/* a few crates stacked against a wall of room r, perhaps with a cask among them */
+static int crate_group(Level *lv, Rng *rng, int r, int want, int cask_pct)
+{
+    const Room *rm = &lv->rooms[r];
+    int placed = 0;
+    for (int tries = 0; tries < 200 && placed < want; tries++) {
+        int x = rng_range(rng, rm->x, rm->x + rm->w - 1), y = rng_range(rng, rm->y, rm->y + rm->h - 1);
+        if (lv->room[y][x] != r) continue;
+        bool by_wall = false, by_crate = false;
+        for (int d = 0; d < 4; d++) {
+            Tile t = tile_at(lv, x + (d == 0) - (d == 1), y + (d == 2) - (d == 3));
+            if (t == T_WALL) by_wall = true;
+            if (tile_clutter(t)) by_crate = true;
+        }
+        if (placed ? !by_crate : !by_wall) continue;
+        if (!clear_of_fixtures(lv, x, y, 1) || !clutter_spot(lv, x, y)) continue;
+        lv->t[y][x] = rng_chance(rng, cask_pct) ? T_CASK : T_CRATES;
+        if (lv->t[y][x] == T_CASK) cask_pct = 0;    /* one to a stack */
+        placed++;
+    }
+    return placed;
+}
+
+/* Deeper down the dungeon is full of old junk that burns: litter in drifts, stacked
+ * crates, the odd cask of lamp oil. The brick vaults and the black deeps have the most;
+ * the drowned slate is too wet for much. Storerooms are always full of it. */
+static void make_clutter(Level *lv, Rng *rng, int depth, int start)
+{
+    if (depth < 6 || depth >= FINAL_DEPTH) return;
+    int th = depth_theme(depth);
+    static const uint8_t PATCH[N_THEME][2] = { { 0, 0 }, { 1, 3 }, { 2, 4 }, { 0, 1 }, { 2, 4 }, { 0, 0 } };
+    static const uint8_t CRATE[N_THEME][2] = { { 0, 0 }, { 0, 1 }, { 1, 3 }, { 0, 1 }, { 1, 2 }, { 0, 0 } };
+    static const uint8_t CASK[N_THEME] = { 0, 10, 35, 15, 40, 0 };
+    for (int r = 0; r < lv->nrooms; r++) {
+        if (lv->rooms[r].kind != RK_STORE) continue;
+        int cx, cy;
+        room_center(lv, r, rng, &cx, &cy);
+        litter_patch(lv, rng, cx, cy, rng_range(rng, 8, 14));
+        crate_group(lv, rng, r, rng_range(rng, 2, 4), 50);
+        crate_group(lv, rng, r, rng_range(rng, 1, 3), CASK[th]);
+    }
+    int np = rng_range(rng, PATCH[th][0], PATCH[th][1]), nc = rng_range(rng, CRATE[th][0], CRATE[th][1]);
+    for (int k = 0, tries = 0; k < np && tries < 40; tries++) {
+        int r = rng_range(rng, 0, lv->nrooms - 1);
+        if (r == start || r == lv->hall) continue;
+        int x, y;
+        room_center(lv, r, rng, &x, &y);
+        x += rng_range(rng, -2, 2);
+        y += rng_range(rng, -1, 1);
+        if (!in_map(x, y) || lv->room[y][x] != r) continue;
+        if (litter_patch(lv, rng, x, y, rng_range(rng, 6, 12 + depth / 3))) k++;
+    }
+    for (int k = 0, tries = 0; k < nc && tries < 40; tries++) {
+        int r = rng_range(rng, 0, lv->nrooms - 1);
+        Room *rm = &lv->rooms[r];
+        if (r == start || r == lv->hall || rm->cave || rm->kind == RK_NEST) continue;
+        if (crate_group(lv, rng, r, rng_range(rng, 1, 4), CASK[th])) k++;
+    }
+}
+
 /* ------------------------------------------------------------- the level */
 
 void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[MAP_W], uint8_t (*holes)[MAP_W])
@@ -1270,6 +1394,10 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
     Rng hrng = { seed * 9001u + 61 };
     if (!final && rng_chance(&hrng, depth >= 2 ? 40 : 20)) make_secret_room(lv, &hrng);
 
+    /* old junk that burns, from depth 6 (own generator) */
+    Rng crng = { seed * 2477u + 53 };
+    make_clutter(lv, &crng, depth, start);
+
     /* traps, from depth 2: a few in the corridors and rooms, and at the way into a storeroom */
     Rng trng = { seed * 3779u + 41 };
     if (depth >= 2) {
@@ -1289,7 +1417,7 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
                 }
             if (near) continue;
             int roll = rng_range(&trng, 0, 99);
-            int k = roll < 30 ? TR_ALARM : roll < 55 ? TR_GUST : roll < 80 ? TR_SNARE : TR_PIT;
+            int k = roll < 30 ? TR_ALARM : roll < 55 ? TR_GUST : roll < 80 ? TR_SNARE : depth >= 6 && roll >= 90 ? TR_SPARK : TR_PIT;
             if (k == TR_PIT && final) k = TR_SNARE;         /* no below to fall to */
             lv->trap[y][x] = (uint8_t)k;
             placed++;
@@ -1312,6 +1440,20 @@ void level_generate(Level *lv, int depth, uint32_t seed, const uint8_t (*below)[
                     lv->trap[y][x] = (uint8_t)(rng_chance(&trng, 50) ? TR_ALARM : rng_chance(&trng, 50) || final ? TR_SNARE : TR_PIT);
                     n++;
                 }
+        }
+        /* where the litter lies thick, someone may have left a spark plate in the way of it */
+        int litter = 0;
+        for (int y = 0; y < MAP_H; y++)
+            for (int x = 0; x < MAP_W; x++) litter += lv->t[y][x] == T_LITTER;
+        int sparks = litter ? (litter > 30 ? 2 : 1) : 0;
+        for (int tries = 0; tries < 2000 && sparks > 0; tries++) {
+            int x = rng_range(&trng, 1, MAP_W - 2), y = rng_range(&trng, 1, MAP_H - 2);
+            if (lv->t[y][x] != T_FLOOR || lv->trap[y][x] || abs(x - lv->upx) + abs(y - lv->upy) < 7) continue;
+            int by = 0;
+            for (int d = 0; d < 4; d++) by += tile_at(lv, x + (d == 0) - (d == 1), y + (d == 2) - (d == 3)) == T_LITTER;
+            if (!by || !rng_chance(&trng, 60)) continue;
+            lv->trap[y][x] = TR_SPARK;
+            sparks--;
         }
     }
 

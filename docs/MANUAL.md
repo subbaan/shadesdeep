@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.18.0. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.19.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -28,11 +28,12 @@ down and [kindle it again](#the-heartflame).
 10. [Embers and the forge](#embers-and-the-forge)
 11. [Health and resting](#health-and-resting)
 12. [The dungeon](#the-dungeon)
-13. [Traps](#traps)
-14. [Special rooms](#special-rooms)
-15. [The Heartflame](#the-heartflame)
-16. [The hall of fame](#the-hall-of-fame)
-17. [Tips](#tips)
+13. [Fire](#fire)
+14. [Traps](#traps)
+15. [Special rooms](#special-rooms)
+16. [The Heartflame](#the-heartflame)
+17. [The hall of fame](#the-hall-of-fame)
+18. [Tips](#tips)
 
 ---
 
@@ -518,6 +519,41 @@ depth banner names it and a line in the log tells you what's changed.
 
 ---
 
+## Fire
+
+From depth 6 down, the dungeon is full of old junk that burns, and fire spreads
+through it. It's a weapon if you start it where you want it, and a danger if
+you don't.
+
+| Thing | Where | What it does |
+|---|---|---|
+| **Dry litter** | Drifts in the rooms: dead moss in the Mossed Works, old straw in the Brick Vaults, rushes on the slate, dry roots and bones in the Black Deeps | You can walk on it. It catches easily, burns for about 4–7 turns, and leaves soot. |
+| **Old crates** | Stacked against the walls | In the way, but you can see over them. Slow to catch, but once alight they burn for about 13–16 turns, then fall in to a heap of charred rubble you can walk on. |
+| **Oil cask** | Now and then among the crates, more often deeper down | In the way. When fire reaches it, it bursts like a thrown [oil flask](#burning-oil): burning oil over it and most of the tiles round it, and a bang that carries. A burst cask can set off the one next to it. |
+
+**How fire starts.** Burning oil, a torch thrown onto litter or into crates
+or a cask, a torch left lying on the floor right beside litter (sooner or
+later), or a [spark plate](#traps). The torch in your hand **never** sets
+anything alight: you can walk through the straw with it.
+
+**How fire spreads.** Every turn, each burning tile may set light to dry
+things right next to it: litter quickly, crates and casks more slowly, and
+along the diagonals less often than straight across. A room deep in straw can
+go up in a few turns. On the wet **Drowned Slate** (depths 16–20) fire spreads
+half as fast, and there's less there to burn anyway.
+
+**What fire does.** It's the same fixed fire as [burning oil](#burning-oil):
+it sears whatever stands in it for 2–4 a turn (a little more to monsters deeper
+down), nothing walks into it willingly, a monster caught in it steps out, and
+its light burns shades and drives them off. When fire catches near you (within four tiles), exploring, travelling and resting stop, and you get your move
+before it burns you. The log says when a fire you can see is spreading.
+
+**Throwing at crates and casks.** A throw stops where it hits them. A torch
+sets them alight (and is lost in the fire). An oil flask bursts over them. A
+dart or anything else knocks against them and drops in front.
+
+---
+
 ## Traps
 
 From depth 2, a few traps lie hidden in the floors, more the deeper you go,
@@ -539,11 +575,12 @@ step on it anyway"). Hover one to see what it is.
 | **Draught vent** | An icy gust blows out your torch (it keeps its fuel; light it again) and chills you by 1, unless a warming draught is in you. |
 | **Trapdoor** | Drops you to the level below, like jumping into a chasm: it hurts, and it can dent tempered gear. There are none on the last level. |
 | **Snare** | A wire noose holds your ankle. Each step you try is a turn spent tearing at it (3–4 tries). You can still fight, throw and use things while it holds you. |
+| **Spark plate** | From depth 6, mostly beside [dry litter](#fire). A shower of sparks: a moment's fire on the plate itself (it burns you for 2–4), and anything dry right beside it catches. |
 
 **Monsters** know where the traps are and step lightly over them. But knock
 one onto a trap with a mace and it sets it off: a snared monster is held
-(dazed) for 3 turns (shades and bats slip free), a trapdoor drops it to the level below, and an alarm
-brings everything else running.
+(dazed) for 3 turns (shades and bats slip free), a trapdoor drops it to the level below, an alarm
+brings everything else running, and a spark plate sets fire to whatever's dry around it.
 
 ---
 
@@ -553,7 +590,9 @@ From depth 2, most levels have a room with a purpose, and some have two. The mes
 
 - **Storeroom** (a small room, straw on the floor): 3–5 supplies, such as oil,
   darts, potions, flash powder, salt, a warming draught, now and then a torch.
-  Its keeper often left a trap just inside the way in.
+  Its keeper often left a trap just inside the way in. From depth 6 it's also
+  deep in dry straw, with crates stacked round the walls and often a cask of
+  lamp oil: be careful what you bring into it burning.
 - **Armoury** (rusted blades on the floor): two pieces of gear, often
   tempered, guarded by goblins (or slingers) or, from depth 8, an ogre, likely asleep.
 - **Shade's nest** (from depth 3, bones on the floor): a dark room, its
@@ -692,6 +731,14 @@ the difficulty can be tuned from real runs. It's safe to delete.
 - **Fight slingers in the dark.** Snuff your torch and close in through the
   shadows; they can't aim at what they can't see. Or duck round a corner and
   make them come to you.
+- **Burn them out.** Goblins asleep in a room full of straw? Throw a torch into
+  the straw from the doorway and step back. Better still, throw it at a cask
+  they're sleeping beside.
+- **Fire is a wall.** Light the litter between you and a chase, and nothing
+  follows you through it for a few turns. Shades won't even come near.
+- **Look before you throw.** Oil thrown at a goblin standing in straw sets the
+  whole room going, and you with it if you're standing in it too. Look at what's
+  under your own feet first.
 - **Use the pillars.** In a pillared hall, put a pillar between you and a
   slinger and it can't sling at you. Close in from one pillar to the next.
 - **Never stand and trade blows with an ogre** in the open if you're hurt.

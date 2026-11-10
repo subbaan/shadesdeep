@@ -438,6 +438,9 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     if (getenv("SHADESDEEP_DUMP_TORCH")) game_torch_toggle(g);
     if (getenv("SHADESDEEP_DUMP_MAP")) { ctl.map = true; ctl.map_stale = true; }
     if (getenv("SHADESDEEP_DUMP_HELP")) ctl.help = true;
+    /* SHADESDEEP_DUMP_FIRE=N: stand by some dry litter and crates, set the litter alight and wait N turns (-1: don't light it) */
+    if (getenv("SHADESDEEP_DUMP_FIRE") && !game_debug_fire(g, atoi(getenv("SHADESDEEP_DUMP_FIRE"))))
+        fprintf(stderr, "%s: nothing to burn on this level\n", SHADESDEEP_NAME);
     /* SHADESDEEP_DUMP_FORGE=N: stand by the forge with N embers and open it ("N,0": don't open it) */
     if (getenv("SHADESDEEP_DUMP_FORGE")) {
         g->embers = atoi(getenv("SHADESDEEP_DUMP_FORGE"));
