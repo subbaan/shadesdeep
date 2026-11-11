@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.26.2. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.26.3. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -248,8 +248,9 @@ dark all you see of it is a pair of pale eyes.
 - **A shade that burns away** leaves an ember behind.
 
 **The chill.** A shade's touch does a little damage and also chills you. The
-chill takes 1–2 from your *maximum* HP with each touch, up to half of it, until
-you warm up:
+chill takes 2–3 from your *maximum* HP with each touch, up to half of it, until
+you warm up. Deeper shades are colder: 3–4 a touch from depth 10, 4–5 from
+depth 20.
 - Standing by a fixed fire (a lit sconce, the forge, a torch on the floor)
   warms you quickly.
 - A torch in your hand warms you slowly.
@@ -443,7 +444,7 @@ forge:
 | **Temper your weapon** | 3, then 5, 7, 9… | +1: more accurate and harder hitting |
 | **Temper your armour** | 3, then 5, 7, 9… | +1: harder to hit |
 | **Kindle your heart** | 4, then 6, 8… | +3 max HP, for good |
-| **Trim your lantern** | 5, then 8 (twice at most) | Your lantern's own dim glow reaches a tile further: you see more in the dark without being seen |
+| **Trim your lantern** | 5, then 8 (twice at most) | Your lantern's own dim glow reaches a tile further: you see more in the dark without being seen. Each trim also makes you much quicker to [spot traps](#traps) |
 
 Tempering stays with the piece, not with you. If you swap your +3 spear for a
 mace, the spear keeps its +3 in your pack.
@@ -598,6 +599,10 @@ and storerooms are often trapped at the way in.
 you. A lit **torch** makes that far more likely, as does a well-lit room or
 standing right beside it. Walking in the dark with only your lantern, you'll
 step on about half the traps you meet; with a torch, about one in four.
+**Trimming your lantern** at the forge sharpens your eye a lot: walking
+straight at a trap, an untrimmed lantern spots it about one time in five and a
+torch about one in two; fully trimmed (twice), the lantern alone spots about
+three in four, and with a torch as well about nine in ten.
 **Flash powder** shows every trap in its glare.
 
 **Known traps** are marked on the floor and on the map. Travel and explore
@@ -607,7 +612,7 @@ step on it anyway"). Hover one to see what it is.
 | Trap | What it does |
 |---|---|
 | **Alarm plate** | A bell clangs in the walls. Everything within **24 tiles** wakes (but shades, which hunt your warmth anyway), and for **15 turns** it all knows where you are, wherever you go; their eyes glint in the dark as they come. If fewer than two answer, a **patrol comes up from the level below** 4–7 turns later, made up as for one level deeper, somewhere out of sight a short walk off, and it knows where you are for **30 turns**. When the hunt runs out they track you as usual, so get a door shut or some corners between you. Leaving the level ends it. **Once rung, the plate stays pressed down for 300 turns** (shown cracked and sunk; it can't ring and is safe to cross), then sets itself again while you're not looking. |
-| **Draught vent** | An icy gust blows out your torch (it keeps its fuel; light it again) and chills you by 1, unless a warming draught is in you. |
+| **Draught vent** | An icy gust blows out your torch (it keeps its fuel; light it again) and chills you by a tenth of your max HP (a seventh near the bottom), unless a warming draught is in you. |
 | **Trapdoor** | Drops you to the level below, like jumping into a chasm: it hurts, and it can dent tempered gear. There are none on the last level. |
 | **Snare** | A wire noose holds your ankle. Each step you try is a turn spent tearing at it (3–4 tries). You can still fight, throw and use things while it holds you. |
 | **Spark plate** | From depth 6, mostly beside [dry litter](#fire). A shower of sparks: a moment's fire on the plate itself (it burns you for 2–4), and anything dry right beside it catches. |
@@ -710,7 +715,7 @@ by the hearth.
   damage (rounded up), like cutting smoke. Even a heavily tempered blade won't
   carve through it before it carves through you: fire is what it fears.
 - Darts pass through it, as they do through any shade. Its touch hits very
-  hard (8–15, and it rarely misses) and chills you by 2–3 at a time. It's far
+  hard (8–15, and it rarely misses) and chills you by 4–6 at a time. It's far
   too big for a mace to knock back. It has **150 HP**, and killing it leaves
   **5 embers**.
 - **While you're kindling, every blow it lands smothers the flame** back a

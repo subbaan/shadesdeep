@@ -191,6 +191,23 @@ static void vocal(Game *g, const Mob *m)
 
 /* a shade, or the great one: things of the dark that hunt by warmth, chill with a touch and burn in fire */
 static bool shadeish(MobKind k) { return k == MK_SHADE || k == MK_HOLLOW; }
+
+/* how much a shade's touch chills you: 2-3 up top, a point more every ten levels down
+ * (3-4 from depth 10, 4-5 from depth 20), so it keeps pace with your growing max HP */
+static int shade_chill(Game *g)
+{
+    int b = 2 + g->depth / 10;
+    return rng_range(&g->rng, b, b + 1);
+}
+
+/* how much a draught vent's gust chills you: a tenth of your max HP up top, rising to
+ * about a seventh at the bottom, never less than 2 */
+static int gust_chill(const Game *g)
+{
+    int pct = 10 + g->depth / 5;
+    int c = (g->player.maxhp * pct + 50) / 100;
+    return c < 2 ? 2 : c;
+}
 static float clampf01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
 /* ---------------------------------------------------------------- levels */
@@ -936,7 +953,7 @@ static bool attack(Game *g, Mob *a, Mob *d)
         warded = true;                  /* the draught's warmth: the cold finds no hold */
     } else if (shadeish(a->kind) && pl_def) {
         /* the cold of its touch takes from your max HP until a fire warms you */
-        chill = a->kind == MK_HOLLOW ? rng_range(&g->rng, 2, 3) : rng_range(&g->rng, 1, 2);
+        chill = a->kind == MK_HOLLOW ? rng_range(&g->rng, 4, 6) : shade_chill(g);
         if (g->chill + chill > d->maxhp / 2) chill = d->maxhp / 2 - g->chill;     /* it can take half, no more */
         if (chill < 0) chill = 0;
         g->chill += chill;
@@ -2276,11 +2293,13 @@ static void spring_trap(Game *g, int x, int y)
             game_msg(g, C_WARN, "an icy gust roars up out of a grating.");
         }
         if (g->warm_left <= 0 && g->chill < p->maxhp / 2) {
-            g->chill++;
+            int c = gust_chill(g);
+            if (g->chill + c > p->maxhp / 2) c = p->maxhp / 2 - g->chill;     /* half, no more, as with a shade */
+            g->chill += c;
             g->warm_t = 0;
             if (p->hp > game_max_hp(g)) p->hp = game_max_hp(g);
             floater(g, x, y, 0x9ad8ff, "chill");
-            game_msg(g, C_BAD, "the cold gets into your bones (max HP -1 until a fire warms you).");
+            game_msg(g, C_BAD, "the cold gets into your bones (max HP -%d until a fire warms you).", c);
         }
         break;
     case TR_PIT:
@@ -2348,6 +2367,9 @@ static void mob_trap(Game *g, Mob *m, int x, int y)
 }
 
 /* traps you can make out near you: easier in good light, and right at your feet */
+#ifndef LANTERN_SPOT
+#define LANTERN_SPOT 20     /* trap spotting chance per turn, per lantern trim */
+#endif
 static void spot_traps(Game *g)
 {
     Level *lv = game_level(g);
@@ -2356,9 +2378,11 @@ static void spot_traps(Game *g)
         for (int x = p->x - 2; x <= p->x + 2; x++) {
             if (!in_map(x, y) || !lv->trap[y][x] || (lv->f[y][x] & F_TRAP) || !(lv->f[y][x] & F_VIS)) continue;
             if (x == p->x && y == p->y) continue;
-            /* a torch held high shows the floor's seams; a lantern's glow barely does */
+            /* a torch held high shows the floor's seams; an untrimmed lantern's glow barely
+             * does, but each trim of its wick makes it a better eye for them */
             float b = level_brightness(lv, x, y);
-            int pct = 5 + (int)(clampf01(b) * 15) + (g->torch_lit ? 20 : 0) + (cheb(x, y, p->x, p->y) <= 1 ? 10 : 0);
+            int pct = 5 + (int)(clampf01(b) * 15) + (g->torch_lit ? 20 : 0) + (cheb(x, y, p->x, p->y) <= 1 ? 10 : 0)
+                    + g->lantern * LANTERN_SPOT;
             if (!rng_chance(&g->rng, pct)) continue;
             lv->f[y][x] |= F_TRAP;
             game_msg(g, C_WARN, "you spot %s %s in the floor.", lv->trap[y][x] == TR_ALARM ? "an" : "a", trap_name(lv->trap[y][x]));
@@ -4047,7 +4071,7 @@ const char *game_forge_desc(ForgeOffer o)
     case FORGE_WEAPON:  return "More accurate, and it hits harder. Tempering stays with the weapon if you swap it out.";
     case FORGE_ARMOUR:  return "Harder to hit. Tempering stays with the armour if you change.";
     case FORGE_HEART:   return "Three more max HP, for good.";
-    case FORGE_LANTERN: return "Your lantern's own dim glow (not a torch) reaches a tile further: you see more in the dark without being seen.";
+    case FORGE_LANTERN: return "Your lantern's own dim glow (not a torch) reaches a tile further: you see more in the dark without being seen, and you're much quicker to spot traps, torch or no torch.";
     default:            return "";
     }
 }
