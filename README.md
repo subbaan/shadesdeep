@@ -7,7 +7,7 @@ hover descriptions and clickable actions.
 
 ![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
 
-Version: 0.25.2 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.25.3 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -169,7 +169,8 @@ sound, and libvorbis for the music; if no audio device opens, the game runs sile
   asked twice before swimming with one, and anything dropped in it sinks.
   Goblins won't follow you in, but eels may be waiting there. A torch thrown into water hisses out, and a
   chasm over water makes for a softer landing.
-- **Chasms:** you can see the real level below through them. Stepping in asks
+- **Chasms:** you can see the real level below through them, at the bottom of
+  a rock shaft whose walls shift as you move. Stepping in asks
   whether to jump: it is a quick way down, but the fall hurts. Anything you
   throw into a chasm lands on the level below, and a burning torch keeps
   burning down there.
@@ -183,7 +184,8 @@ The pixel zoom is picked from the window height; override it with `--zoom` or
 `./shadesdeep --dump out.png [--seed N] [--size WxH] [--cell H] [--steps N]` renders
 a frame to PNG without a terminal. `SHADESDEEP_DUMP_CHASM=1` stands at the edge of a
 chasm with the level revealed, `SHADESDEEP_DUMP_JUMP=N` jumps down N chasms, and
-`SHADESDEEP_DUMP_LOWER=file.png` writes the rendered level below. `SHADESDEEP_DUMP_TORCH=1`
+`SHADESDEEP_DUMP_LOWER=file.png` writes the rendered level below.
+`SHADESDEEP_DUMP_BENCH=N` times N more frames and prints the cost of each. `SHADESDEEP_DUMP_TORCH=1`
 lights a torch, `SHADESDEEP_DUMP_MENU=inv|throw|use|item` opens a menu,
 `SHADESDEEP_DUMP_AIM=dx,dy` aims a torch and `SHADESDEEP_DUMP_THROW=dx,dy,frac` freezes a
 thrown torch part-way through its flight. `SHADESDEEP_DUMP_REST=N` waits N turns

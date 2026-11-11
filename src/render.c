@@ -9,7 +9,8 @@
 #define CW (MAP_W + 1)
 #define CH (MAP_H + 1)
 #define MAX_PART 700
-#define LOWER_SCALE 0.72f       /* how much smaller the level below looks */
+#define LOWER_SCALE 0.80f       /* how much smaller the level below looks */
+#define SHAFT_TILT 30.0f        /* 3/4 view: the floor below shows this far north (px), so a pit's north wall shows */
 
 typedef struct { float r, g, b, v, s; } CF;     /* light, visibility, seen */
 
@@ -41,6 +42,20 @@ typedef struct {
 #define MAX_HICMD (MAX_MOBS + 1 + MAX_ITEMS)
 #define MAX_MOTES 130
 
+/* what the line of sight through one pixel of a pit meets, kept while the
+ * camera holds still: only the light on it and the mist change frame to frame */
+typedef struct {
+    float fh, hx, hy, k;        /* depth reached (1: the floor), where it met the rock, rock shade */
+    uint32_t low, base;         /* the level below under it; the floor's colour when fh is 1 */
+} ShaftPx;
+
+typedef struct {
+    const void *lv;
+    int camx, camy, w, h, gen;
+    bool below;
+    ShaftPx px[TILE * TILE];
+} ShaftBlk;
+
 struct Renderer {
     Tiles t;
     /* full-resolution creature pass: per canvas pixel, which HiCmd (1-based) drew
@@ -57,6 +72,9 @@ struct Renderer {
     int hcv_w, hcv_h;           /* size of the canvas last recorded */
     CF corner[CH][CW];
     float chasmc[CH][CW];
+    uint8_t chasmd[MAP_H][MAP_W];   /* tiles (Chebyshev) to the nearest floor that isn't chasm */
+    ShaftBlk *shaft[MAP_H][MAP_W];  /* per chasm tile, made when first drawn, dropped with the level */
+    int lower_gen;                  /* bumped each time the level below is rendered */
     float tl[MAP_H][MAP_W][3];
     Canvas lower;
     Canvas full;                /* the whole current level, for the map */
@@ -178,6 +196,15 @@ Renderer *render_new(void)
     return r;
 }
 
+static void shaft_drop(Renderer *r)
+{
+    for (int y = 0; y < MAP_H; y++)
+        for (int x = 0; x < MAP_W; x++) {
+            free(r->shaft[y][x]);
+            r->shaft[y][x] = NULL;
+        }
+}
+
 void render_free(Renderer *r)
 {
     if (!r) return;
@@ -188,6 +215,7 @@ void render_free(Renderer *r)
     free(r->hsnap);
     free(r->lower.px);
     free(r->full.px);
+    shaft_drop(r);
     free(r);
 }
 
@@ -313,6 +341,31 @@ static void compute_light(Renderer *r, const View *v)
             }
             r->corner[cy][cx] = c;
             r->chasmc[cy][cx] = nch / 4.0f;
+        }
+    for (int y = 0; y < MAP_H; y++)             /* a two-pass chamfer: how deep inside a pit each tile is */
+        for (int x = 0; x < MAP_W; x++) {
+            int d = 0;
+            if (lv->t[y][x] == T_CHASM) {
+                d = 255;
+                for (int k = 0; k < 4; k++) {
+                    static const int ox[4] = { -1, -1, 0, 1 }, oy[4] = { 0, -1, -1, -1 };
+                    int nx = x + ox[k], ny = y + oy[k];
+                    d = in_map(nx, ny) ? (r->chasmd[ny][nx] + 1 < d ? r->chasmd[ny][nx] + 1 : d) : 1;
+                }
+            }
+            r->chasmd[y][x] = (uint8_t)d;
+        }
+    for (int y = MAP_H - 1; y >= 0; y--)
+        for (int x = MAP_W - 1; x >= 0; x--) {
+            int d = r->chasmd[y][x];
+            if (!d) continue;
+            for (int k = 0; k < 4; k++) {
+                static const int ox[4] = { 1, 1, 0, -1 }, oy[4] = { 0, 1, 1, 1 };
+                int nx = x + ox[k], ny = y + oy[k];
+                int nd = in_map(nx, ny) ? r->chasmd[ny][nx] + 1 : 1;
+                if (nd < d) d = nd;
+            }
+            r->chasmd[y][x] = (uint8_t)d;
         }
 }
 
@@ -524,20 +577,191 @@ static void draw_rim_cracks(Canvas *cv, int tx, int ty, int sx, int sy, int edge
     }
 }
 
+/* where the line of sight through world pixel (wx, wy) is at depth f down a pit
+ * (0 = the rim, 1 = the floor of the level below): perspective about the
+ * camera centre plus the 3/4 tilt */
+static inline void shaft_point(float pcx, float pcy, float wx, float wy, float f, float *x, float *y)
+{
+    float k = 1 + f * (1 / LOWER_SCALE - 1);
+    *x = pcx + (wx - pcx) * k;
+    *y = pcy + (wy - pcy) * k - f * SHAFT_TILT;
+}
+
+/* how much of the floor around world pixel (x, y) is chasm, smoothly (0..1);
+ * the pit's shaft is this footprint carried straight down */
+static float chasm_field(const Renderer *r, float x, float y)
+{
+    float fx = x * (1.0f / TILE), fy = y * (1.0f / TILE);
+    if (fx < 0 || fy < 0 || fx >= CW - 1 || fy >= CH - 1) return 0;
+    int xi = (int)fx, yi = (int)fy;
+    float u = fx - xi, w = fy - yi;
+    float a = r->chasmc[yi][xi], b = r->chasmc[yi][xi + 1];
+    float c = r->chasmc[yi + 1][xi], d = r->chasmc[yi + 1][xi + 1];
+    return a + (b - a) * u + (c - a) * w + (a - b - c + d) * u * w;
+}
+
+/* the shaft's rock is rough: its walls wander in and out as they go down */
+static inline float shaft_open(const Renderer *r, float x, float y, float f)
+{
+    float cf = chasm_field(r, x, y);
+    if (cf > 0.76f) return cf - 0.5f;           /* the wobble can't reach: clearly open (or rock) */
+    if (cf < 0.24f) return cf - 0.5f;
+    float wob = noise_at(r, x * 0.07f + f * 5.0f, y * 0.07f - f * 7.0f) - 0.5f;
+    wob += 0.45f * (noise_at(r, x * 0.22f + 90, y * 0.22f + f * 24.0f) - 0.5f);
+    return cf + wob * 0.34f - 0.5f;
+}
+
+static void corner_light_at(const Renderer *r, float x, float y, CF *o)
+{
+    float fx = clampf(x / TILE, 0, CW - 1.001f), fy = clampf(y / TILE, 0, CH - 1.001f);
+    int xi = (int)fx, yi = (int)fy;
+    CF t, b;
+    cf_lerp(&t, &r->corner[yi][xi], &r->corner[yi][xi + 1], fx - xi);
+    cf_lerp(&b, &r->corner[yi + 1][xi], &r->corner[yi + 1][xi + 1], fx - xi);
+    cf_lerp(o, &t, &b, fy - yi);
+}
+
+/* how far down the line of sight through (wx, wy) gets before it meets the
+ * shaft wall (1: all the way to the floor below), and where it meets it */
+static float shaft_depth(const Renderer *r, float pcx, float pcy, float wx, float wy, float *hx, float *hy)
+{
+    *hx = wx;
+    *hy = wy;
+    if (shaft_open(r, wx, wy, 0) < 0) return 0;
+    float k1 = 1 / LOWER_SCALE - 1;
+    float dx = (wx - pcx) * k1, dy = (wy - pcy) * k1 - SHAFT_TILT;
+    float speed = fmaxf(fabsf(dx), fabsf(dy));          /* px moved (Chebyshev) per unit of depth */
+    float step = speed > 1 ? 9 / speed : 1;
+    float fp = 0, f = 0, x = wx, y = wy, vp = shaft_open(r, wx, wy, 0), vf;
+    for (;;) {
+        /* deep inside the pit the walls are far off: stride over the open middle */
+        int tx = (int)(x * (1.0f / TILE)), ty = (int)(y * (1.0f / TILE));
+        float adv = step;
+        if (in_map(tx, ty) && r->chasmd[ty][tx] >= 3) {
+            float ix = x - tx * TILE, iy = y - ty * TILE;
+            float edge = fminf(fminf(ix, TILE - ix), fminf(iy, TILE - iy));
+            float safe = (r->chasmd[ty][tx] - 2) * TILE + edge;
+            if (speed > 1 && safe / speed > adv) adv = safe / speed;
+        }
+        f = fminf(fp + adv, 1);
+        shaft_point(pcx, pcy, wx, wy, f, &x, &y);
+        vf = shaft_open(r, x, y, f);
+        if (vf < 0) break;
+        if (f >= 1) return 1;
+        fp = f;
+        vp = vf;
+    }
+    for (int b = 0; b < 2; b++) {                       /* close in on where it meets the rock */
+        float m = fp + (f - fp) * clampf(vp / (vp - vf), 0.1f, 0.9f), mx, my;
+        shaft_point(pcx, pcy, wx, wy, m, &mx, &my);
+        float vm = shaft_open(r, mx, my, m);
+        if (vm >= 0) { fp = m; vp = vm; }
+        else { f = m; vf = vm; }
+    }
+    shaft_point(pcx, pcy, wx, wy, f, hx, hy);
+    return f;
+}
+
+/* one pixel of a pit, the part that holds while the camera does: march the
+ * line of sight down the shaft until it meets the rock wall or the floor of
+ * the level below */
+static void shaft_geom(const Renderer *r, bool below, float pcx, float pcy, float wx, float wy, ShaftPx *o)
+{
+    float hx, hy;
+    float fh = shaft_depth(r, pcx, pcy, wx, wy, &hx, &hy);
+    float lx, ly;
+    shaft_point(pcx, pcy, wx, wy, 1, &lx, &ly);
+    uint32_t low = below ? sample_lower(r, lx, ly) : 0x000000;
+    o->fh = fh;
+    o->hx = hx;
+    o->hy = hy;
+    o->low = low;
+    if (fh < 1) {
+        /* rock, in rough beds, streaked down its face */
+        float gx = chasm_field(r, hx + 3, hy) - chasm_field(r, hx - 3, hy);
+        float gy = chasm_field(r, hx, hy + 3) - chasm_field(r, hx, hy - 3);
+        float gl = sqrtf(gx * gx + gy * gy);
+        float nx = gl > 1e-4f ? gx / gl : 0, ny = gl > 1e-4f ? gy / gl : 1;
+        float hu = hx * fabsf(ny) + hy * fabsf(nx);         /* across the face */
+        float z = fh * 200;                                 /* down the face (px) */
+        float tex = 0.62f + 0.38f * noise_at(r, hu * 0.07f, z * 0.07f + 30);
+        tex *= 0.74f + 0.26f * noise_at(r, hu * 0.4f + 11, z * 0.05f);        /* streaks */
+        float band = z / 46 + 0.8f * noise_at(r, hu * 0.025f + 5, z * 0.01f);
+        float fr = band - floorf(band);
+        float seam = smooth01(0.35f, 0.6f, noise_at(r, hu * 0.09f, floorf(band) * 13.0f));
+        if (fr < 0.12f) tex *= 1 - seam * (0.5f - 4.0f * fr);              /* the seam between beds */
+        else if (fr > 0.88f) tex *= 1 + 0.15f * seam;                       /* its lip catching light */
+        o->k = tex;
+        o->base = (uint32_t)((0.6f + 0.4f * ny) * 65535.0f);              /* north walls face us */
+    } else {
+        /* the floor far below: sharp, but dimmer for the distance, its lights
+         * still bright, and shadowed where the shaft walls come down to it */
+        int lum = (CR(low) * 77 + CG(low) * 150 + CB(low) * 29) >> 8;
+        float keep = 0.5f + 0.42f * smooth01(30, 200, (float)lum);
+        float ao = smooth01(0.0f, 0.22f, shaft_open(r, lx, ly, 1));
+        uint32_t c = mix(0x000000, low, (int)(256 * keep * (0.35f + 0.65f * ao)));
+        o->base = mix(c, RGB(10, 22, 30), 36);
+        o->k = 0;
+    }
+}
+
+/* ... and the part that moves: the light on the rock, and wisps of mist
+ * hanging at a few depths on the way down (each with its own parallax) */
+static uint32_t shaft_shade(const Renderer *r, const ShaftPx *s, float pcx, float pcy, float wx, float wy, float t)
+{
+    uint32_t c, low = s->low;
+    float fh = s->fh;
+    if (fh < 1) {
+        /* lit from the room above and fading into the dark, with a little glow
+         * thrown up from whatever lies below */
+        CF L;
+        corner_light_at(r, s->hx, s->hy, &L);
+        float face = s->base / 65535.0f;
+        float fall = expf(-fh * 3.0f) * face * s->k;
+        float amb = 0.035f * s->k;
+        c = lightc(RGB(122, 110, 98), L.r * fall + amb, L.g * fall + amb * 1.1f, L.b * fall + amb * 1.35f);
+        float up = smooth01(0.55f, 1.0f, fh) * 0.32f * s->k;
+        c = add_sat(c, (int)(CR(low) * up), (int)(CG(low) * up), (int)(CB(low) * up));
+    } else c = s->base;
+    static const float lay[3] = { 0.3f, 0.55f, 0.8f };
+    uint32_t mc = RGB(clampi(46 + CR(low) * 2 / 5, 0, 255), clampi(62 + CG(low) * 2 / 5, 0, 255),
+                      clampi(72 + CB(low) * 2 / 5, 0, 255));
+    for (int i = 0; i < 3; i++) {
+        float f = lay[i];
+        if (f >= fh) break;
+        float mx, my;
+        shaft_point(pcx, pcy, wx, wy, f, &mx, &my);
+        float sp = 1.0f + i * 0.35f, dir = i & 1 ? -1.0f : 1.0f;
+        float d = noise_at(r, mx * 0.022f * sp + t * 0.30f * dir + i * 31, my * 0.03f * sp + t * 0.08f);
+        if (d <= 0.16f) continue;
+        d *= noise_at(r, mx * 0.06f * sp - t * 0.55f * dir + 50, my * 0.05f * sp + i * 17 + t * 0.2f);
+        float wisp = smooth01(0.16f, 0.42f, d);
+        if (wisp <= 0) continue;
+        c = mix(c, mc, (int)(256 * wisp * (0.16f + 0.14f * f)));
+    }
+    return c;
+}
+
 static void draw_chasm(Renderer *r, Canvas *cv, const View *v, int tx, int ty, int sx, int sy)
 {
-    const Level *lv = v->lv;
     const CF *c00 = &r->corner[ty][tx], *c10 = &r->corner[ty][tx + 1];
     const CF *c01 = &r->corner[ty + 1][tx], *c11 = &r->corner[ty + 1][tx + 1];
-    float m00 = r->chasmc[ty][tx], m10 = r->chasmc[ty][tx + 1];
-    float m01 = r->chasmc[ty + 1][tx], m11 = r->chasmc[ty + 1][tx + 1];
     float pcx = v->camx + cv->w * 0.5f, pcy = v->camy + cv->h * 0.5f;
-    float inv = 1.0f / LOWER_SCALE;
     bool below = v->through && r->lower_ok;
-    float t = v->time;
-    bool oN = tile_at(lv, tx, ty - 1) != T_CHASM, oS = tile_at(lv, tx, ty + 1) != T_CHASM;
-    bool oW = tile_at(lv, tx - 1, ty) != T_CHASM, oE = tile_at(lv, tx + 1, ty) != T_CHASM;
-    bool oNW = tile_at(lv, tx - 1, ty - 1) != T_CHASM, oNE = tile_at(lv, tx + 1, ty - 1) != T_CHASM;
+    ShaftBlk *sb = r->shaft[ty][tx];
+    if (!sb) sb = r->shaft[ty][tx] = calloc(1, sizeof *sb);
+    if (!sb) return;
+    bool fresh = sb->lv != v->lv || sb->camx != v->camx || sb->camy != v->camy || sb->w != cv->w ||
+                 sb->h != cv->h || sb->gen != r->lower_gen || sb->below != below;
+    if (fresh) {
+        sb->lv = v->lv;
+        sb->camx = v->camx;
+        sb->camy = v->camy;
+        sb->w = cv->w;
+        sb->h = cv->h;
+        sb->gen = r->lower_gen;
+        sb->below = below;
+    }
     for (int j = 0; j < TILE; j++) {
         int y = sy + j;
         if ((unsigned)y >= (unsigned)cv->h) continue;
@@ -545,49 +769,22 @@ static void draw_chasm(Renderer *r, Canvas *cv, const View *v, int tx, int ty, i
         CF L, R;
         cf_lerp(&L, c00, c01, vv);
         cf_lerp(&R, c10, c11, vv);
-        float ml = m00 + (m01 - m00) * vv, mr = m10 + (m11 - m10) * vv;
-        float wy = (float)(v->camy + y);
-        float ly = pcy + (wy - pcy) * inv;
+        float wy = (float)(v->camy + y) + 0.5f;
         uint32_t *row = cv->px + (size_t)y * cv->w;
         for (int i = 0; i < TILE; i++) {
             int x = sx + i;
             if ((unsigned)x >= (unsigned)cv->w) continue;
-            float u = (i + 0.5f) / TILE;
-            float wx = (float)(v->camx + x);
-            float lx = pcx + (wx - pcx) * inv;
-            uint32_t c = below ? sample_lower(r, lx, ly) : 0x000000;
-            /* depth: dim, misty, darker toward the rim */
-            float rim = smooth01(0.3f, 1.0f, ml + (mr - ml) * u);
-            float n = noise_at(r, lx * 0.035f + t * 0.9f, ly * 0.035f + t * 0.35f);
-            float n2 = noise_at(r, lx * 0.08f - t * 1.7f + 50, ly * 0.08f + 90);
-            float mist = 0.26f + 0.34f * n * n2 * 1.6f;
-            /* the walls of the pit shade what lies below them */
-            float sh = 1.0f;
-            if (oN) sh *= smooth01(0, 30, (float)j);
-            else if (oNW && !oW) sh *= 0.25f + 0.75f * smooth01(0, 14, sqrtf((float)(i * i + j * j)));
-            if (oNE && !oN && !oE) sh *= 0.25f + 0.75f * smooth01(0, 14, sqrtf((float)((31 - i) * (31 - i) + j * j)));
-            if (oW) sh *= 0.2f + 0.8f * smooth01(0, 12, (float)i);
-            if (oE) sh *= 0.2f + 0.8f * smooth01(0, 12, (float)(31 - i));
-            if (oS) sh *= 0.55f + 0.45f * smooth01(0, 6, (float)(31 - j));
-            c = mix(0x000000, c, (int)(256 * sh));
-            c = mix(c, 0x000000, (int)(256 * (0.30f + 0.40f * (1 - rim))));
-            c = mix(c, RGB(26, 58, 70), (int)(256 * mist * (0.5f + 0.5f * rim)));
+            float wx = (float)(v->camx + x) + 0.5f;
+            ShaftPx *sp = &sb->px[j * TILE + i];
+            if (fresh) shaft_geom(r, below, pcx, pcy, wx, wy, sp);
+            uint32_t c = shaft_shade(r, sp, pcx, pcy, wx, wy, v->time);
             if (v->fog) {
                 CF p;
-                cf_lerp(&p, &L, &R, u);
+                cf_lerp(&p, &L, &R, (i + 0.5f) / TILE);
                 c = fogmix(c, memtone(c), p.v, p.s);
             }
             row[x] = c;
         }
-    }
-    /* the cliff face under the edge we look over: rock lit a little by the room above */
-    if (oN) {
-        CF a = *c00, b = *c10;
-        a.r = a.r * 0.8f + 0.10f; a.g = a.g * 0.8f + 0.11f; a.b = a.b * 0.8f + 0.14f;
-        b.r = b.r * 0.8f + 0.10f; b.g = b.g * 0.8f + 0.11f; b.b = b.b * 0.8f + 0.14f;
-        a.v = b.v = 1;
-        CF a2 = a, b2 = b;
-        draw_lit(cv, sx, sy, &r->t.cliff, TILE, TILE, &a, &b, &a2, &b2, 1.0f, 0.2f, 0, v->fog, NULL, 0);
     }
     draw_chasm_lip(r, cv, v, tx, ty, sx, sy);
 }
@@ -2062,33 +2259,28 @@ static void draw_rows(Renderer *r, Canvas *cv, const View *v)
     }
 }
 
-/* soften the level below once, like a camera focused on the near floor */
-static void blur_canvas(Canvas *cv)
+/* take the edge off the level below once (a 1-2-1 pass), so it doesn't
+ * shimmer when drawn smaller; any more and it reads as frosted glass */
+static void soften_canvas(Canvas *cv)
 {
     int w = cv->w, h = cv->h;
     uint32_t *tmp = malloc((size_t)w * h * 4);
     if (!tmp) return;
-    for (int pass = 0; pass < 2; pass++) {
-        for (int y = 0; y < h; y++) {          /* horizontal, radius 2 */
-            const uint32_t *row = cv->px + (size_t)y * w;
-            for (int x = 0; x < w; x++) {
-                int r = 0, g = 0, b = 0;
-                for (int k = -2; k <= 2; k++) {
-                    uint32_t c = row[clampi(x + k, 0, w - 1)];
-                    r += CR(c); g += CG(c); b += CB(c);
-                }
-                tmp[(size_t)y * w + x] = RGB(r / 5, g / 5, b / 5);
-            }
+    for (int y = 0; y < h; y++) {
+        const uint32_t *row = cv->px + (size_t)y * w;
+        for (int x = 0; x < w; x++) {
+            uint32_t a = row[clampi(x - 1, 0, w - 1)], b = row[x], c = row[clampi(x + 1, 0, w - 1)];
+            tmp[(size_t)y * w + x] = RGB((CR(a) + 2 * CR(b) + CR(c)) >> 2, (CG(a) + 2 * CG(b) + CG(c)) >> 2,
+                                         (CB(a) + 2 * CB(b) + CB(c)) >> 2);
         }
-        for (int y = 0; y < h; y++)            /* vertical */
-            for (int x = 0; x < w; x++) {
-                int r = 0, g = 0, b = 0;
-                for (int k = -2; k <= 2; k++) {
-                    uint32_t c = tmp[(size_t)clampi(y + k, 0, h - 1) * w + x];
-                    r += CR(c); g += CG(c); b += CB(c);
-                }
-                cv->px[(size_t)y * w + x] = RGB(r / 5, g / 5, b / 5);
-            }
+    }
+    for (int y = 0; y < h; y++) {
+        const uint32_t *ra = tmp + (size_t)clampi(y - 1, 0, h - 1) * w, *rb = tmp + (size_t)y * w,
+                       *rc = tmp + (size_t)clampi(y + 1, 0, h - 1) * w;
+        for (int x = 0; x < w; x++)
+            cv->px[(size_t)y * w + x] = RGB((CR(ra[x]) + 2 * CR(rb[x]) + CR(rc[x])) >> 2,
+                                            (CG(ra[x]) + 2 * CG(rb[x]) + CG(rc[x])) >> 2,
+                                            (CB(ra[x]) + 2 * CB(rb[x]) + CB(rc[x])) >> 2);
     }
     free(tmp);
 }
@@ -2108,8 +2300,9 @@ static void render_lower(Renderer *r, Game *g)
     draw_items(r, &r->lower, &v);
     draw_rows(r, &r->lower, &v);
     draw_effects(r, &r->lower, &v, 0);
-    blur_canvas(&r->lower);
+    soften_canvas(&r->lower);
     r->lower_ok = true;
+    r->lower_gen++;
     r->lower_depth = g->depth;
 }
 
@@ -2208,9 +2401,11 @@ static void draw_flames_below(Renderer *r, Canvas *cv, const View *v, Game *g)
         const Light *l = &lo->lights[i];
         if (l->kind != L_FLOORTORCH || !l->lit) continue;
         float wx = l->fx * TILE + 23.5f, wy = l->fy * TILE + 15.5f;
-        float ux = pcx + (wx - pcx) * LOWER_SCALE, uy = pcy + (wy - pcy) * LOWER_SCALE;
+        float ux = pcx + (wx - pcx) * LOWER_SCALE, uy = pcy + (wy + SHAFT_TILT - pcy) * LOWER_SCALE;
         int tx = (int)floorf(ux / TILE), ty = (int)floorf(uy / TILE);
         if (tile_at(v->lv, tx, ty) != T_CHASM || !(v->lv->f[ty][tx] & F_SEEN)) continue;
+        float hx, hy;
+        if (shaft_depth(r, pcx, pcy, ux, uy, &hx, &hy) < 1) continue;   /* behind the shaft wall */
         float vis = v->visf[ty][tx];
         if (vis < 0.05f) continue;
         float size = 0.6f * (l->fuel >= 0 && l->fuel < 25 ? 0.5f + 0.5f * l->fuel / 25.0f : 1.0f);
@@ -2261,6 +2456,7 @@ void render_world(Renderer *r, Game *g, Canvas *cv, float dt, const Overlay *ov)
         g->level_changed = false;
         g->lower_dirty = false;
         memset(r->part, 0, sizeof r->part);
+        shaft_drop(r);
     } else if (g->lower_dirty) {
         render_lower(r, g);
         g->lower_dirty = false;

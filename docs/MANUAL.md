@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.25.2. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.25.3. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -512,7 +512,8 @@ depth banner names it and a line in the log tells you what's changed.
 - **Chasms** are where the floor has fallen in: ragged holes with broken
   flagstones and rubble round the rim, sometimes a smaller hole beside the main
   one. They drop to the level below, and through them you can see what's down
-  there. Stepping in asks first. The fall hurts (more the deeper you are),
+  there, at the bottom of a shaft of rock (the walls you see shift as you
+  move, so a pit far off to one side shows more wall and less floor). Stepping in asks first. The fall hurts (more the deeper you are),
   water below breaks it, and it can dent tempered gear. It's a quick way down,
   not a free one.
 - **Lakes** from depth 2: wide water that spreads across rooms, corridors and

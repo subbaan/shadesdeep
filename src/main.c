@@ -621,6 +621,13 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
         if (!freeze) game_update(g, 1.0f / 60);
         draw_frame(r, ui, g, &fr, &hv, &ctl, mx, my, freeze ? 0 : 1.0f / 60, 60, false);
     }
+    /* SHADESDEEP_DUMP_BENCH=N: time N more frames and report the cost of each */
+    if (getenv("SHADESDEEP_DUMP_BENCH")) {
+        int nb = atoi(getenv("SHADESDEEP_DUMP_BENCH"));
+        double t0 = now_s();
+        for (int i = 0; i < nb; i++) draw_frame(r, ui, g, &fr, &hv, &ctl, mx, my, 1.0f / 60, 60, false);
+        if (nb > 0) fprintf(stderr, "%.2f ms a frame over %d frames\n", (now_s() - t0) * 1000 / nb, nb);
+    }
     if (getenv("SHADESDEEP_DUMP_LOWER")) render_dump_lower(r, getenv("SHADESDEEP_DUMP_LOWER"));
     /* SHADESDEEP_DUMP_TITLE=0|1|2: the title screen (fresh, with a saved game, asking to give it up);
      * SHADESDEEP_DUMP_TITLEART=PNG: its picture (default: assets/title.png if there is one);
