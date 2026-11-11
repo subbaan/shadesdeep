@@ -7,7 +7,7 @@ hover descriptions and clickable actions.
 
 ![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
 
-Version: 0.26.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.26.1 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -91,8 +91,8 @@ sound, and libvorbis for the music; if no audio device opens, the game runs sile
   with the game's own graphics: you, the stairs and any creatures you can make
   out are marked. Click a place on it to travel there.
 - **Sound:** footsteps, splashes, steel, the creatures' voices, torches
-  catching and hissing out, a low dungeon ambience, and crackling fire and
-  lapping water that rise as you get near. Sounds are panned by where they
+  catching and hissing out, a low dungeon ambience, crackling fire that rises
+  as you get near, and the odd drip falling into a pool as you pass it. Sounds are panned by where they
   happen and muffled out of sight. `--mute` starts silent, `--no-sound` never
   opens the audio device.
 - **Music:** four synthesized pieces: harp, flute and choir for the title, a

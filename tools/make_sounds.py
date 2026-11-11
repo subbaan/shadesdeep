@@ -23,7 +23,7 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import butter, lfilter, fftconvolve
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 SR = 44100
 RNG = np.random.default_rng(2611)
 
@@ -588,20 +588,59 @@ def fire_loop(v, size=1.0):
     return loopable(lp(mix(roar * 1.6, breath, pops), 7000, 2), 1.0)
 
 
-def water_loop(v):
-    """Still water lapping at stone."""
-    d = 10.0
+def cave_ir():
+    """A bigger, wetter space than room_ir: the echo of a cave over still water."""
+    d = 2.4
     t = tt(d)
-    lap = lp(noise(d), 450, 4) * (0.5 + 0.5 * np.sin(2 * np.pi * t * 0.31) ** 2) * 3.0
-    plinks = np.zeros(n_(d))
-    for k in range(int(d * 3)):
-        t0 = RNG.uniform(0, d - 0.2)
-        f = RNG.uniform(500, 1400)
-        dd = 0.07
-        p = sine(slide(f, f * 1.5, dd), dd) * env(dd, 0.003, 0.02, 0) * RNG.uniform(0.05, 0.25)
-        i = n_(t0)
-        plinks[i:i + len(p)] += p[:len(plinks) - i]
-    return loopable(mix(lap, plinks), 1.0)
+    ir = RNG.normal(0, 1, len(t)) * np.exp(-t / 0.42)
+    ir = lp(ir, 2600) * 0.5 + lp(ir, 700) * 0.5
+    for ms, g in ((23, 0.5), (61, 0.4), (118, 0.3), (187, 0.22), (263, 0.15)):   # far walls
+        ir[n_(ms / 1000)] += g * 5
+    ir[:n_(0.006)] = 0
+    return ir / np.sqrt(np.sum(ir * ir))
+
+
+def plip(f, loud, far):
+    """One drop falling into a pool: a tick as it strikes, then the rising
+    ring of the little bubble it pulls under."""
+    dd = 0.09
+    tick = hp(noise(dd), 2500) * env(dd, 0.0003, 0.0015, 0) * 0.25
+    rise = f * 1.9 ** np.clip(tt(dd) / 0.035, 0, 1)    # the bubble's pitch climbs as it shrinks
+    ring = sine(rise, dd) * env(dd, 0.001, RNG.uniform(0.012, 0.022), 0)
+    x = (tick + ring) * loud
+    return lp(x, 1500) * 0.7 if far else lp(x, 6000)
+
+
+def water_loop(v):
+    """Still water makes no sound of its own: what you hear by a pool is the
+    odd drop falling into it from the roof, and the cave's echo of it. A few
+    drip-points keep their own slow, not quite even time; now and then a stray
+    drop falls somewhere else."""
+    d = 29.0
+    dry = np.zeros(n_(d))
+
+    def drop(t0, f, loud, far):
+        p = plip(f, loud, far)
+        i = n_(t0 % d)
+        k = min(len(p), len(dry) - i)
+        dry[i:i + k] += p[:k]
+        dry[:len(p) - k] += p[k:]                   # wraps round the loop
+
+    # (interval s, pitch Hz, loudness, far off)
+    for every, f, loud, far in ((4.83, 1150, 0.9, False), (7.25, 820, 0.55, True), (9.67, 1500, 0.4, True)):
+        t = RNG.uniform(0, every)
+        n = int(round(d / every))
+        step = d / n                                 # a whole number of drips per loop
+        for k in range(n):
+            drop(t + k * step + RNG.normal(0, 0.12), f * RNG.uniform(0.94, 1.06), loud * RNG.uniform(0.8, 1.1), far)
+    for k in range(3):                               # strays
+        drop(RNG.uniform(0, d), RNG.uniform(700, 1700), RNG.uniform(0.25, 0.5), RNG.uniform() < 0.7)
+    # the echo, folded round so the loop has no seam
+    full = fftconvolve(dry, cave_ir())
+    wet = full[:len(dry)].copy()
+    tail = full[len(dry):]
+    wet[:len(tail)] += tail[:len(dry)]
+    return dry * 0.8 + wet * 0.26
 
 
 # name -> (function, variants, loop)
