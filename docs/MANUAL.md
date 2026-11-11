@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.25.4. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.26.0. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -142,7 +142,9 @@ rather than deleted.
 
 - **Bottom bar:** HP and its bar, the current depth, your torch's fuel (when
   you have one going), your embers (once you've earned any), the turn count,
-  and the action buttons. **SNARED** shows while a snare holds you. On the last level, **FLAME n/3** shows how far
+  and the action buttons. **SNARED** shows while a snare holds you, and
+  **HUNTED n** while things that answered an [alarm bell](#traps) still know
+  where you are (n is the turns left). On the last level, **FLAME n/3** shows how far
   you've kindled the Heartflame, and the Descend button becomes **Hearth**.
 - **Top left:** the monsters you can see, with their health and whether they
   are asleep, hunting you, or only *watching* (eyes in the dark). Eyes in the
@@ -604,7 +606,7 @@ step on it anyway"). Hover one to see what it is.
 
 | Trap | What it does |
 |---|---|
-| **Alarm plate** | A bell clangs in the walls: anything within 16 tiles may wake, and all of it comes to look. |
+| **Alarm plate** | A bell clangs in the walls. Everything within **24 tiles** wakes (but shades, which hunt your warmth anyway), and for **15 turns** it all knows where you are, wherever you go; their eyes glint in the dark as they come. If fewer than two answer, a **patrol comes up from the level below** 4–7 turns later, made up as for one level deeper, somewhere out of sight a short walk off, and it knows where you are for **30 turns**. When the hunt runs out they track you as usual, so get a door shut or some corners between you. Leaving the level ends it. |
 | **Draught vent** | An icy gust blows out your torch (it keeps its fuel; light it again) and chills you by 1, unless a warming draught is in you. |
 | **Trapdoor** | Drops you to the level below, like jumping into a chasm: it hurts, and it can dent tempered gear. There are none on the last level. |
 | **Snare** | A wire noose holds your ankle. Each step you try is a turn spent tearing at it (3–4 tries). You can still fight, throw and use things while it holds you. |
@@ -615,8 +617,8 @@ they're minding the floor. **One hunting you has its eyes on you instead**,
 and blunders onto any trap in its way, whether you know about it or not. So
 lead a pursuer over a trap you've found. Knocking one onto a trap with a mace
 works too. A snared monster is held (dazed) for 3 turns, so your next blows
-are sneak attacks; a trapdoor drops it to the level below; an alarm brings
-everything else running; and a spark plate sets fire to whatever's dry around
+are sneak attacks; a trapdoor drops it to the level below; an alarm it sets
+off brings everything near running to the plate (not to you, and no patrol); and a spark plate sets fire to whatever's dry around
 it. Bats fly over traps, and shades and the Hollow drift over them.
 
 ---

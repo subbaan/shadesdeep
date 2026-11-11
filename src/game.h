@@ -37,6 +37,7 @@ typedef struct {
     int hp, maxhp;
     bool asleep;
     bool hunting;       /* knows where the player is (or was) */
+    uint8_t called;     /* (padding) turns it still knows where you are: it answered an alarm bell */
     int tx, ty;         /* last known player position */
     /* animation (tiles) */
     float rx, ry;       /* rendered position */
@@ -205,6 +206,7 @@ typedef struct {
     int warm_t;                         /* turns spent warming */
     int torches_made;                   /* torches put on the floor so far (the supply is paced) */
     bool gnaw_told;                     /* explained that shades eat your torch's fuel */
+    uint8_t patrol_in;                  /* (padding) turns until a patrol comes up from below to answer a bell (0: none) */
     Slot weapon, armour;                /* what you wield and wear (count 1) */
     int embers;                         /* the forge's currency: from lit sconces and burnt shades */
     int heart;                          /* times you've fed the forge for max HP */
@@ -287,7 +289,9 @@ bool game_debug_depth(Game *g, int depth);     /* developer: go straight to that
 bool game_debug_kindle(Game *g, int times);    /* developer: at the hearth with a lit torch, kindle it */
 bool game_debug_to_room(Game *g, int kind);    /* developer: stand in a room of that RoomKind, traps shown */
 bool game_debug_to_secret_door(Game *g);       /* developer: stand by a hidden door, its room still unseen */
-int game_debug_count_bands(Game *g, int *members);   /* developer: wandering bands on this level */
+int game_debug_count_bands(Game *g, int *members);
+int game_hunted(const Game *g);
+void game_debug_alarm(Game *g, bool clear);         /* developer: ring an alarm bell at your feet */                     /* turns what answered an alarm bell still knows where you are (0: none) */   /* developer: wandering bands on this level */
 bool game_debug_to_spot(Game *g, int kind);   /* developer: 0 corridor, 1 side door, 2 south wall,
                                                  * 3 by a cold sconce with a shade near, 4 and light it,
                                                  * 5 in the Heartflame's hall, near the hearth */

@@ -416,6 +416,10 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
         snprintf(buf, sizeof buf, "WARM %d", g->warm_left);
         need += 2 * pad + font_width(hf, buf);
     }
+    if (game_hunted(g) > 0) {
+        snprintf(buf, sizeof buf, "HUNTED %d", game_hunted(g));
+        need += 2 * pad + font_width(hf, buf);
+    }
     if (game_final(g) && g->kindle > 0) {
         snprintf(buf, sizeof buf, "FLAME %d/3", g->kindle);
         need += 2 * pad + font_width(hf, buf);
@@ -469,6 +473,12 @@ static void status_bar(UI *ui, Canvas *cv, Game *g, const UiFrame *f, int *top)
     if (g->warm_left > 0) {
         snprintf(buf, sizeof buf, "WARM %d", g->warm_left);
         x = font_draw(hf, cv, x, base, buf, g->warm_left <= 10 ? 0xc89070 : 0xffb070, 255) + pad;
+        diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
+        x += pad;
+    }
+    if (game_hunted(g) > 0) {
+        snprintf(buf, sizeof buf, "HUNTED %d", game_hunted(g));
+        x = font_draw(hf, cv, x, base, buf, 0xff6a50, 255) + pad;
         diamond(cv, x, base - font_ascent(hf) * 3 / 10, ui->px / 4, GOLD);
         x += pad;
     }

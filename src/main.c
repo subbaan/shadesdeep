@@ -572,6 +572,8 @@ static int dump_frame(const char *assets, uint32_t seed, const char *path, int w
     /* SHADESDEEP_DUMP_KINDLE=N: stand at the hearth with a lit torch and kindle it N times (3 wins) */
     if (getenv("SHADESDEEP_DUMP_KINDLE") && !game_debug_kindle(g, atoi(getenv("SHADESDEEP_DUMP_KINDLE"))))
         fprintf(stderr, "%s: no hearth here (try SHADESDEEP_DUMP_DEPTH=26)\n", SHADESDEEP_NAME);
+    /* SHADESDEEP_DUMP_ALARM=1|2: ring an alarm bell at your feet (2: on an emptied level, so a patrol comes) */
+    if (getenv("SHADESDEEP_DUMP_ALARM")) game_debug_alarm(g, atoi(getenv("SHADESDEEP_DUMP_ALARM")) == 2);
     /* SHADESDEEP_DUMP_REST=N: wait N turns (lets thrown torches burn out) */
     for (int n = getenv("SHADESDEEP_DUMP_REST") ? atoi(getenv("SHADESDEEP_DUMP_REST")) : 0; n > 0 && g->state == GS_PLAY; n--) {
         game_rest(g);

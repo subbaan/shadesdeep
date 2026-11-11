@@ -68,8 +68,9 @@ const char *trap_name(int k)
 const char *trap_desc(int k)
 {
     switch (k) {
-    case TR_ALARM: return "A loose flagstone over a pressure plate. Step on it and a bell clangs somewhere in the walls, "
-                          "waking everything near and bringing it to look.";
+    case TR_ALARM: return "A loose flagstone over a pressure plate. Step on it and a bell clangs somewhere in the walls: "
+                          "everything for a long way round wakes and knows where you are for a while, and if too little "
+                          "answers, a patrol comes up from below.";
     case TR_GUST:  return "An iron grating over a shaft that breathes cold air. Step on it and an icy gust roars up: it "
                           "blows out a torch and leaves a chill in you.";
     case TR_PIT:   return "A trapdoor, its edges barely showing between the flagstones. It drops whatever steps on it to "

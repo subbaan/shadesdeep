@@ -294,6 +294,13 @@ static MobKind pick_kind(Rng *r, int d)
 
 static int cheb(int ax, int ay, int bx, int by);
 
+#define ALARM_REACH 24          /* tiles an alarm bell carries */
+#define ALARM_TURNS 15          /* turns what answers it knows where you are */
+#define PATROL_TURNS 30         /* ... and a patrol come up from below to hunt you */
+
+static uint8_t trail_steps(const Mob *m);
+static void patrol_turn(Game *g);
+
 /* where a band can stand: open floor in an ordinary room */
 static bool band_spot(const Level *lv, int x, int y)
 {
@@ -303,8 +310,8 @@ static bool band_spot(const Level *lv, int x, int y)
 }
 
 /* A wandering band at (x, y) on level d, in free mob slots: its leader first, the
- * rest about it. Returns how many it made. */
-static int spawn_band(Game *g, int d, Rng *r, int x, int y)
+ * rest about it, made up as for depth kd. Returns how many it made. */
+static int spawn_band(Game *g, int d, Rng *r, int x, int y, int kd)
 {
     Level *lv = g->lv[d];
     Mob *ms = g->mobs[d];
@@ -316,13 +323,13 @@ static int spawn_band(Game *g, int d, Rng *r, int x, int y)
     int n = 0;
     /* the ladder is spread over all 26 levels: rats at the top, small goblin packs in
      * the middle, slingers from 7, bigger packs from 12, an ogre at the head from 15 */
-    if (d <= 3) {
+    if (kd <= 3) {
         for (int k = rng_range(r, 2, 3); k > 0; k--) kinds[n++] = MK_RAT;
     } else {
-        if (d >= 15 && rng_chance(r, d >= 21 ? 50 : 30)) kinds[n++] = MK_OGRE;
-        for (int k = rng_range(r, 2, d >= 12 ? 4 : 3); k > 0 && n < 4; k--) kinds[n++] = MK_GOBLIN;
-        if (d >= 7 && rng_chance(r, d >= 12 ? 55 : 35)) kinds[n++] = MK_SLINGER;
-        if (d < 7 && n > 2 && rng_chance(r, 50)) n = 2;                   /* the first goblin packs are pairs as often as not */
+        if (kd >= 15 && rng_chance(r, kd >= 21 ? 50 : 30)) kinds[n++] = MK_OGRE;
+        for (int k = rng_range(r, 2, kd >= 12 ? 4 : 3); k > 0 && n < 4; k--) kinds[n++] = MK_GOBLIN;
+        if (kd >= 7 && rng_chance(r, kd >= 12 ? 55 : 35)) kinds[n++] = MK_SLINGER;
+        if (kd < 7 && n > 2 && rng_chance(r, 50)) n = 2;                   /* the first goblin packs are pairs as often as not */
     }
     int made = 0;
     for (int k = 0; k < n; k++) {
@@ -343,8 +350,8 @@ static int spawn_band(Game *g, int d, Rng *r, int x, int y)
         if (!ok) continue;
         Mob *m = &ms[slot];
         mob_init(m, kinds[k], bx, by);
-        m->lvl = d;
-        m->hp = m->maxhp = mob_hp_at(kinds[k], d);
+        m->lvl = kd;
+        m->hp = m->maxhp = mob_hp_at(kinds[k], kd);
         m->band = (uint8_t)id;
         m->lead = made == 0;
         m->tx = m->ty = -1;         /* no destination yet */
@@ -433,7 +440,7 @@ static void spawn_mobs(Game *g, int d)
             for (int i = 0; i < placed; i++)
                 if (g->mobs[d][i].alive && cheb(g->mobs[d][i].x, g->mobs[d][i].y, x, y) <= 2) taken = true;
             if (taken) continue;
-            placed += spawn_band(g, d, &r, x, y);
+            placed += spawn_band(g, d, &r, x, y, d);
             break;
         }
     }
@@ -751,6 +758,7 @@ void game_resume(Game *g)
     memset(g->fl, 0, sizeof g->fl);
     /* fields that sit in what was padding: an older save might hold anything there */
     if (g->poison > 5) g->poison = 0;
+    if (g->patrol_in > 7) g->patrol_in = 0;
     if (g->hollow_slain > 1 || g->deepest < FINAL_DEPTH) g->hollow_slain = 0;   /* older saves: whatever was in the padding */
     if (!g->hollow_slain && g->lv[FINAL_DEPTH] && g->lv[FINAL_DEPTH]->hall >= 0) {  /* a save from before it was kept: the Hollow is there until slain */
         bool alive = false;
@@ -762,6 +770,7 @@ void game_resume(Game *g)
         for (int i = 0; i < MAX_MOBS; i++) {
             if (g->mobs[d][i].trail > 8) g->mobs[d][i].trail = 0;
             if (g->mobs[d][i].sensed > 4) g->mobs[d][i].sensed = 0;
+            if (g->mobs[d][i].called > PATROL_TURNS) g->mobs[d][i].called = 0;
         }
     Mob *ms = g->mobs[g->depth];
     for (int i = 0; i <= MAX_MOBS; i++) {
@@ -1602,6 +1611,16 @@ static void monsters_act(Game *g)
         Mob *m = &ms[i];
         if (!m->alive) continue;
         if (m->sensed) m->sensed--;
+        if (m->called) {
+            /* it answered a bell: it knows where you are, and its eyes give it away coming */
+            m->called--;
+            m->asleep = false;
+            m->hunting = true;
+            m->tx = p->x;
+            m->ty = p->y;
+            if (m->trail < trail_steps(m)) m->trail = trail_steps(m);
+            if (m->sensed < 2) m->sensed = 2;
+        }
         if (m->daze > 0) {                                                  /* reeling from a flash */
             m->daze--;
             if (shadeish(m->kind)) shade_burns(g, m);
@@ -1896,6 +1915,7 @@ static void end_turn(Game *g)
         if (p->hp < game_max_hp(g) && g->state != GS_DEAD && !g->poison) p->hp++;   /* not while the venom burns */
     }
     if (g->state == GS_PLAY) wanderers_arrive(g);
+    if (g->state == GS_PLAY) patrol_turn(g);
     compute_view(g);
     if (g->state == GS_PLAY) { spot_traps(g); search_secrets(g); }
     g_search = 0;
@@ -1905,6 +1925,8 @@ static void end_turn(Game *g)
 
 static void change_level(Game *g, int depth, int x, int y)
 {
+    for (int i = 0; i < MAX_MOBS; i++) g->mobs[g->depth][i].called = 0;    /* a bell's hunt ends when you leave */
+    g->patrol_in = 0;
     g->depth = depth;
     ensure_level(g, depth);
     ensure_level(g, depth + 1);
@@ -2083,6 +2105,101 @@ static void mob_fall(Game *g, Mob *m, int x, int y)
     g->lower_dirty = true;
 }
 
+
+/* An alarm plate under your feet: the bell wakes everything for a long way round
+ * (but the shades, which hunt your warmth whatever rings), and for a while all of
+ * it knows where you are. If too little answers, a patrol comes up from the level
+ * below to find out what rang it. */
+static void alarm_bell(Game *g)
+{
+    Mob *ms = g->mobs[g->depth], *p = &g->player;
+    int n = 0, sx = 0, sy = 0;
+    for (int i = 0; i < MAX_MOBS; i++) {
+        Mob *m = &ms[i];
+        if (!m->alive || m->kind == MK_EEL || shadeish(m->kind) || cheb(m->x, m->y, p->x, p->y) > ALARM_REACH) continue;
+        m->asleep = false;
+        m->hunting = true;
+        m->tx = p->x;
+        m->ty = p->y;
+        m->called = ALARM_TURNS;
+        m->trail = trail_steps(m);
+        sx += m->x - p->x;
+        sy += m->y - p->y;
+        n++;
+    }
+    const char *dir = game_dir_name(sx, sy);
+    if (!strcmp(dir, "here")) dir = NULL;
+    if (n == 1) game_msg(g, C_BAD, "something stirs %s%s and comes for the bell.", dir ? "to the " : "close by", dir ? dir : "");
+    else if (n > 1 && n <= 3) game_msg(g, C_BAD, "things stir %s%s and come for the bell.", dir ? "to the " : "all about", dir ? dir : "");
+    else if (n > 3) game_msg(g, C_BAD, "the dark is full of answers: things are coming from all about%s%s.", dir ? ", most from the " : "", dir ? dir : "");
+    if (n < 2 && g->depth < MAX_DEPTH) {
+        g->patrol_in = (uint8_t)rng_range(&g->rng, 4, 7);
+        game_msg(g, C_BAD, n ? "and far below, a horn answers." : "the bell rings on through empty halls, and far below, a horn answers.");
+    }
+}
+
+/* the patrol a bell called up arrives: by the stairs down if they're out of
+ * sight, otherwise anywhere well away from you, and it knows where you are */
+static void patrol_turn(Game *g)
+{
+    if (!g->patrol_in || --g->patrol_in) return;
+    Level *lv = game_level(g);
+    Mob *ms = g->mobs[g->depth], *p = &g->player;
+    /* how far each spot is from you on foot, as a goblin walks */
+    Mob probe = { 0 };
+    probe.kind = MK_GOBLIN;
+    probe.x = probe.y = -1;
+    mob_bfs(g, &probe, p->x, p->y);
+    static int dist[MAP_H][MAP_W];
+    memcpy(dist, mob_dist, sizeof dist);
+    for (int tries = 0; tries < 600; tries++) {
+        int x, y;
+        bool stairs = tries < 12;
+        if (stairs) { x = lv->downx + rng_range(&g->rng, -2, 2); y = lv->downy + rng_range(&g->rng, -2, 2); }
+        else { x = rng_range(&g->rng, 1, MAP_W - 2); y = rng_range(&g->rng, 1, MAP_H - 2); }
+        /* close enough on foot to find you while the bell's hunt lasts */
+        if (!band_spot(lv, x, y) || (lv->f[y][x] & (F_VIS | F_LOS)) || dist[y][x] < 12 || dist[y][x] > (tries < 400 ? 24 : 36)
+            || cheb(x, y, p->x, p->y) < 8 || game_mob_at(g, x, y))
+            continue;
+        bool was[MAX_MOBS];
+        for (int i = 0; i < MAX_MOBS; i++) was[i] = ms[i].alive;
+        Rng r = { rng_u32(&g->rng) | 1u };
+        if (!spawn_band(g, g->depth, &r, x, y, g->depth + 1)) return;
+        for (int i = 0; i < MAX_MOBS; i++) {
+            Mob *m = &ms[i];
+            if (was[i] || !m->alive) continue;
+            m->hunting = true;
+            m->tx = p->x;
+            m->ty = p->y;
+            m->called = PATROL_TURNS;
+            m->trail = trail_steps(m);
+        }
+        game_msg(g, C_BAD, stairs && lv->f[lv->downy][lv->downx] & F_SEEN
+                               ? "boots on the stairs down: a patrol has come up from below, and it is hunting you."
+                               : "boots in the dark: a patrol has come up from below, and it is hunting you.");
+        sfx_ex(g, SND_ALERT, 0, 0, true, 0.1f, 0.8f);
+        return;
+    }
+    /* nowhere out of sight to come up: it doesn't come */
+}
+
+/* developer: an alarm bell at your feet (clear: empty the level first, to call the patrol) */
+void game_debug_alarm(Game *g, bool clear)
+{
+    if (clear)
+        for (int i = 0; i < MAX_MOBS; i++) g->mobs[g->depth][i].alive = false;
+    alarm_bell(g);
+}
+
+int game_hunted(const Game *g)
+{
+    int t = g->patrol_in ? g->patrol_in + PATROL_TURNS : 0;
+    const Mob *ms = g->mobs[g->depth];
+    for (int i = 0; i < MAX_MOBS; i++)
+        if (ms[i].alive && ms[i].called > t) t = ms[i].called;
+    return t;
+}
+
 /* you step on a trap */
 static void spring_trap(Game *g, int x, int y)
 {
@@ -2098,7 +2215,7 @@ static void spring_trap(Game *g, int x, int y)
         sfx(g, SND_CLICK, x, y);
         sfx_ex(g, SND_ALERT, 0, 0, true, 0.1f, 1.0f);
         g->shake = 0.15f;
-        make_noise(g, x, y, 16);
+        alarm_bell(g);
         break;
     case TR_GUST:
         push_fx(g, FX_STEAM, x, y);
@@ -2315,7 +2432,7 @@ static void wanderers_arrive(Game *g)
         else { x = rng_range(&g->rng, 1, MAP_W - 2); y = rng_range(&g->rng, 1, MAP_H - 2); }
         if (!band_spot(lv, x, y) || (lv->f[y][x] & (F_VIS | F_LOS)) || cheb(x, y, p->x, p->y) < 14 || game_mob_at(g, x, y)) continue;
         Rng r = { rng_u32(&g->rng) | 1u };
-        if (!spawn_band(g, d, &r, x, y)) return;
+        if (!spawn_band(g, d, &r, x, y, d)) return;
         if (rng_chance(&g->rng, 40)) game_msg(g, C_DIM, "you hear footsteps somewhere in the dark.");
         return;
     }

@@ -7,7 +7,7 @@ hover descriptions and clickable actions.
 
 ![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
 
-Version: 0.25.4 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.26.0 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -34,7 +34,8 @@ sound, and libvorbis for the music; if no audio device opens, the game runs sile
   as you come close, much less often in the dark or in a shadow cloak.
 - **Traps and special rooms:** from depth 2, hidden alarm plates, draught
   vents, trapdoors and snares (a lit torch helps you spot them; known ones are
-  marked and travel goes around them), and now and then a trapped storeroom,
+  marked and travel goes around them; an alarm sets everything near hunting
+  you, or calls a patrol up from below), and now and then a trapped storeroom,
   a guarded armoury or a shade's nest with a hoard of embers.
 - **Hidden rooms:** some levels hide a room behind a secret door, with fine
   tempered gear, embers and supplies left in it. You may notice the door
@@ -217,7 +218,9 @@ asleep, `SHADESDEEP_DUMP_STRIKE=dx,dy[,N]` steps (attacks) that way N times, and
 `SHADESDEEP_DUMP_ROOM=store|armoury|nest|hidden` stands in such a room (`hidden-door`:
 outside a hidden room's secret door, with the rest of the level shown),
 `SHADESDEEP_DUMP_SEARCH=N` searches N times over, and `SHADESDEEP_DUMP_BANDS=1` reports
-the wandering bands on the level.
+the wandering bands on the level. `SHADESDEEP_DUMP_ALARM=1` rings an alarm bell at your
+feet (`2`: on an emptied level, so a patrol comes up; add `SHADESDEEP_DUMP_REST=N` to
+watch it come).
 
 The title picture is `assets/title.png`, any size (16:9 such as 1920x1080 is
 best). It's scaled to cover the window, cropped evenly if the shapes differ,
