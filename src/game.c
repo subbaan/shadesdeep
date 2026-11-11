@@ -2449,6 +2449,24 @@ static const char *door_blocked(Game *g, int x, int y)
     return NULL;
 }
 
+/* a hunter that sees the door shut in its face knows which side you went: it comes
+ * on through, and if you wait by the doorway it walks into your ambush. Nothing is
+ * woken or alerted by it; only what was already after you and could see the door. */
+#define DOOR_SEEN 8
+static void door_seen_shut(Game *g, int x, int y)
+{
+    Level *lv = game_level(g);
+    Mob *p = &g->player, *ms = g->mobs[g->depth];
+    for (int i = 0; i < MAX_MOBS; i++) {
+        Mob *m = &ms[i];
+        if (!m->alive || m->asleep || !m->hunting || !tracker(m)) continue;
+        if (cheb(m->x, m->y, x, y) > DOOR_SEEN || !los(lv, m->x, m->y, x, y)) continue;
+        m->tx = p->x;
+        m->ty = p->y;
+        if (m->trail < trail_steps(m)) m->trail = trail_steps(m);
+    }
+}
+
 bool game_close_door(Game *g)
 {
     if (g->state != GS_PLAY) return false;
@@ -2460,6 +2478,7 @@ bool game_close_door(Game *g)
         if (!door_beside(g, d, &x, &y)) continue;
         const char *b = door_blocked(g, x, y);
         if (b) { why = b; continue; }
+        door_seen_shut(g, x, y);
         lv->t[y][x] = T_DOOR;
         lv->light_dirty = true;
         sfx(g, SND_DOOR, x, y);

@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.26.3. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.26.4. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -263,7 +263,7 @@ depth 20.
 | Monster | Notes |
 |---|---|
 | **Rat** | Weak and quick to die. Often asleep. Can't open doors. |
-| **Goblin** | A real fight early on. Sees well in the dark and better in the light. It hunts you the long way round corners and through doors, and if it loses sight of you it follows your tracks a few steps before it gives up (a door you've shut ends the trail). Won't swim, so deep water is a refuge from goblins. |
+| **Goblin** | A real fight early on. Sees well in the dark and better in the light. It hunts you the long way round corners and through doors, and if it loses sight of you it follows your tracks a few steps before it gives up (a door you've shut ends the trail, unless it saw you shut it). Won't swim, so deep water is a refuge from goblins. |
 | **Shade** | From depth 2. See [above](#shades-and-the-chill). |
 | **Bat** | From depth 2. Quick (it moves twice a turn) and erratic: it flits in, bites, and flits off again, so it's hard to pin down. Light draws it from a long way off; in the dark it only finds you up close. It flies, so chasms and deep water don't stop it, but it can't open doors. Silent on the wing. |
 | **Goblin slinger** | From depth 3. If it can see you clearly **in the light**, it stays back and slings stones at you from up to 7 tiles away (a little less accurate than a blow). In the dark, or with something in the way, it has to come close and fight with a knife. Snuff your torch, or step out of the lamplight, and it loses its aim. Won't swim. |
@@ -539,6 +539,10 @@ depth banner names it and a line in the log tells you what's changed.
   door and come through it in a single move. Rats and bats can't open them at
   all, so a shut door keeps them out. A rat chasing you gives up once a door
   is shut between you.
+- **Shutting a door on a pursuer** doesn't fool it if it can see the door
+  (within 8 tiles): it knows which side you went and comes on through. Out of
+  its sight, the shut door ends your trail and it gives up. Shutting a door
+  makes no noise to wake or alert anything else.
 - **Ambush at a door.** A monster can't see through a closed door. If it comes
   through one and you're standing right by the doorway on the other side, it
   walks into you unready: your next blow is a [sneak attack](#other-monsters),
