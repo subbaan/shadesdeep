@@ -71,7 +71,6 @@ struct Renderer {
     int hand_x, hand_y;         /* the player's lantern hand on its sprite (facing right): a torch is held there */
     int hcv_w, hcv_h;           /* size of the canvas last recorded */
     CF corner[CH][CW];
-    float chasmc[CH][CW];
     uint8_t chasmd[MAP_H][MAP_W];   /* tiles (Chebyshev) to the nearest floor that isn't chasm */
     ShaftBlk *shaft[MAP_H][MAP_W];  /* per chasm tile, made when first drawn, dropped with the level */
     int lower_gen;                  /* bumped each time the level below is rendered */
@@ -315,13 +314,12 @@ static void compute_light(Renderer *r, const View *v)
     for (int cy = 0; cy < CH; cy++)
         for (int cx = 0; cx < CW; cx++) {
             CF c = { 0 };
-            int n = 0, nch = 0;
+            int n = 0;
             for (int j = -1; j <= 0; j++)
                 for (int i = -1; i <= 0; i++) {
                     int x = cx + i, y = cy + j;
                     if (!in_map(x, y)) continue;
                     Tile t = (Tile)lv->t[y][x];
-                    if (t == T_CHASM) nch++;
                     if (tile_opaque(t)) continue;
                     c.r += r->tl[y][x][0];
                     c.g += r->tl[y][x][1];
@@ -340,7 +338,6 @@ static void compute_light(Renderer *r, const View *v)
                 c.r *= inv; c.g *= inv; c.b *= inv; c.v *= inv; c.s *= inv;
             }
             r->corner[cy][cx] = c;
-            r->chasmc[cy][cx] = nch / 4.0f;
         }
     for (int y = 0; y < MAP_H; y++)             /* a two-pass chamfer: how deep inside a pit each tile is */
         for (int x = 0; x < MAP_W; x++) {
@@ -587,28 +584,44 @@ static inline void shaft_point(float pcx, float pcy, float wx, float wy, float f
     *y = pcy + (wy - pcy) * k - f * SHAFT_TILT;
 }
 
-/* how much of the floor around world pixel (x, y) is chasm, smoothly (0..1);
- * the pit's shaft is this footprint carried straight down */
-static float chasm_field(const Renderer *r, float x, float y)
+/* how far (px) world pixel (x, y) is inside the pit's footprint: positive
+ * over chasm tiles, negative over the floor round them. The shaft is this
+ * footprint carried straight down, so even a lone one-tile hole is open */
+static float pit_dist(const Renderer *r, float x, float y)
 {
-    float fx = x * (1.0f / TILE), fy = y * (1.0f / TILE);
-    if (fx < 0 || fy < 0 || fx >= CW - 1 || fy >= CH - 1) return 0;
-    int xi = (int)fx, yi = (int)fy;
-    float u = fx - xi, w = fy - yi;
-    float a = r->chasmc[yi][xi], b = r->chasmc[yi][xi + 1];
-    float c = r->chasmc[yi + 1][xi], d = r->chasmc[yi + 1][xi + 1];
-    return a + (b - a) * u + (c - a) * w + (a - b - c + d) * u * w;
+    if (x < 0 || y < 0) return -TILE;
+    int tx = (int)(x * (1.0f / TILE)), ty = (int)(y * (1.0f / TILE));
+    if (!in_map(tx, ty)) return -TILE;
+    int d = r->chasmd[ty][tx];
+    float ix = x - tx * TILE, iy = y - ty * TILE;
+    if (d >= 2) return TILE + fminf(fminf(ix, TILE - ix), fminf(iy, TILE - iy));
+    bool inside = d == 1;
+    float best = TILE;
+    for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            int nx = tx + dx, ny = ty + dy;
+            bool pit = in_map(nx, ny) && r->chasmd[ny][nx] > 0;
+            if (pit == inside) continue;            /* looking for the other side of the edge */
+            float ex = dx < 0 ? ix : dx > 0 ? TILE - ix : 0;
+            float ey = dy < 0 ? iy : dy > 0 ? TILE - iy : 0;
+            float e = dx && dy ? sqrtf(ex * ex + ey * ey) : ex + ey;
+            if (!inside) { if (e < best) best = e; continue; }
+            /* a smooth minimum, so the pit's corners come out rounded */
+            float k = 12, h = clampf(0.5f + 0.5f * (best - e) / k, 0, 1);
+            best = best + (e - best) * h - k * h * (1 - h);
+        }
+    return inside ? fmaxf(best, 0.01f) : -best;
 }
 
 /* the shaft's rock is rough: its walls wander in and out as they go down */
 static inline float shaft_open(const Renderer *r, float x, float y, float f)
 {
-    float cf = chasm_field(r, x, y);
-    if (cf > 0.76f) return cf - 0.5f;           /* the wobble can't reach: clearly open (or rock) */
-    if (cf < 0.24f) return cf - 0.5f;
+    float o = pit_dist(r, x, y);
+    if (o > 11 || o < -11) return o;            /* the wobble can't reach: clearly open (or rock) */
     float wob = noise_at(r, x * 0.07f + f * 5.0f, y * 0.07f - f * 7.0f) - 0.5f;
     wob += 0.45f * (noise_at(r, x * 0.22f + 90, y * 0.22f + f * 24.0f) - 0.5f);
-    return cf + wob * 0.34f - 0.5f;
+    return o + wob * 14.0f * smooth01(0, 0.08f, f);    /* the rim itself is the tile edge */
 }
 
 static void corner_light_at(const Renderer *r, float x, float y, CF *o)
@@ -678,8 +691,8 @@ static void shaft_geom(const Renderer *r, bool below, float pcx, float pcy, floa
     o->low = low;
     if (fh < 1) {
         /* rock, in rough beds, streaked down its face */
-        float gx = chasm_field(r, hx + 3, hy) - chasm_field(r, hx - 3, hy);
-        float gy = chasm_field(r, hx, hy + 3) - chasm_field(r, hx, hy - 3);
+        float gx = pit_dist(r, hx + 3, hy) - pit_dist(r, hx - 3, hy);
+        float gy = pit_dist(r, hx, hy + 3) - pit_dist(r, hx, hy - 3);
         float gl = sqrtf(gx * gx + gy * gy);
         float nx = gl > 1e-4f ? gx / gl : 0, ny = gl > 1e-4f ? gy / gl : 1;
         float hu = hx * fabsf(ny) + hy * fabsf(nx);         /* across the face */
@@ -698,7 +711,7 @@ static void shaft_geom(const Renderer *r, bool below, float pcx, float pcy, floa
          * still bright, and shadowed where the shaft walls come down to it */
         int lum = (CR(low) * 77 + CG(low) * 150 + CB(low) * 29) >> 8;
         float keep = 0.5f + 0.42f * smooth01(30, 200, (float)lum);
-        float ao = smooth01(0.0f, 0.22f, shaft_open(r, lx, ly, 1));
+        float ao = smooth01(0.0f, 14.0f, shaft_open(r, lx, ly, 1));
         uint32_t c = mix(0x000000, low, (int)(256 * keep * (0.35f + 0.65f * ao)));
         o->base = mix(c, RGB(10, 22, 30), 36);
         o->k = 0;

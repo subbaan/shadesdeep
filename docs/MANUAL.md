@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.25.3. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.25.4. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
