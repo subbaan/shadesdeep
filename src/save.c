@@ -42,17 +42,29 @@ static uint32_t mix32(uint32_t h, uint32_t v)
  * change what an older save's tiles mean, so the count it was made with stays in the print */
 #define T_SAVED 13
 
-static uint32_t layout_print(void)
+/* the fingerprint of a layout whose Level is level_size bytes long: Level has
+ * grown at its end since saves began, and a save with a shorter one still loads */
+static uint32_t layout_print_for(size_t level_size)
 {
     uint32_t h = 2166136261u;
     const size_t parts[] = {
-        sizeof(Game), sizeof(Level), sizeof(Mob), sizeof(FloorItem), sizeof(Slot), sizeof(Msg), sizeof(Light),
+        sizeof(Game), level_size, sizeof(Mob), sizeof(FloorItem), sizeof(Slot), sizeof(Msg), sizeof(Light),
         offsetof(Game, player), offsetof(Game, inv), offsetof(Game, weapon), offsetof(Game, embers),
         offsetof(Game, items), offsetof(Game, mobs), offsetof(Game, rng), offsetof(Mob, lvl), offsetof(Mob, surfaced),
         offsetof(Level, lights), offsetof(Level, lr), MAX_DEPTH, MAX_MOBS, MAX_ITEMS, MAX_INV, MK_COUNT, IT_COUNT, T_SAVED,
     };
     for (size_t i = 0; i < sizeof parts / sizeof *parts; i++) h = mix32(h, (uint32_t)parts[i]);
     return h;
+}
+
+static uint32_t layout_print(void) { return layout_print_for(sizeof(Level)); }
+
+/* the Level sizes a save may have been written with: today's, and before the alarm
+ * plates' re-arm timers were added (0.26.2) */
+static bool level_size_ok(uint32_t size)
+{
+    size_t old = (offsetof(Level, rearm) + _Alignof(Level) - 1) / _Alignof(Level) * _Alignof(Level);
+    return size == sizeof(Level) || size == old;
 }
 
 bool save_default_path(char *out, size_t n)
@@ -155,8 +167,8 @@ Game *save_read(const char *path, bool *incompatible, char *err, size_t n)
         return NULL;
     }
     h.version[sizeof h.version - 1] = 0;
-    if (h.format != SAVE_FORMAT || h.layout != layout_print() || h.game_size != sizeof(Game)
-        || h.level_size != sizeof(Level)) {
+    if (h.format != SAVE_FORMAT || !level_size_ok(h.level_size) || h.layout != layout_print_for(h.level_size)
+        || h.game_size != sizeof(Game)) {
         gzclose(f);
         *incompatible = true;
         snprintf(err, n, "the saved game is from Shadesdeep %s, which this version (%s) can't read", h.version, SHADESDEEP_VERSION);
@@ -175,8 +187,8 @@ Game *save_read(const char *path, bool *incompatible, char *err, size_t n)
         uint8_t have;
         ok = get(f, &have, 1) && have <= 1;
         if (ok && have) {
-            g->lv[d] = malloc(sizeof(Level));
-            ok = g->lv[d] && get(f, g->lv[d], sizeof(Level));
+            g->lv[d] = calloc(1, sizeof(Level));        /* anything an older save lacks stays 0 */
+            ok = g->lv[d] && get(f, g->lv[d], h.level_size);
         }
     }
     gzclose(f);

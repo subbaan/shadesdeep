@@ -130,6 +130,8 @@ typedef struct {
     int cn[MAX_LIGHTS];
     float ambient;
     bool light_dirty;
+    /* added at the end, so older saves still load (with it all 0) */
+    uint16_t rearm[MAP_H][MAP_W];   /* an alarm plate that has rung: turns until it sets itself again (0: none) */
 } Level;
 
 static inline bool in_map(int x, int y) { return x >= 0 && y >= 0 && x < MAP_W && y < MAP_H; }

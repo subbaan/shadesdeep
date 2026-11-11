@@ -297,9 +297,12 @@ static int cheb(int ax, int ay, int bx, int by);
 #define ALARM_REACH 24          /* tiles an alarm bell carries */
 #define ALARM_TURNS 15          /* turns what answers it knows where you are */
 #define PATROL_TURNS 30         /* ... and a patrol come up from below to hunt you */
+#define ALARM_REARM 300         /* turns a rung plate stays pressed down before it sets itself again */
 
 static uint8_t trail_steps(const Mob *m);
 static void patrol_turn(Game *g);
+static void rearm_alarms(Game *g);
+static void spend_alarm(Level *lv, int x, int y);
 
 /* where a band can stand: open floor in an ordinary room */
 static bool band_spot(const Level *lv, int x, int y)
@@ -759,6 +762,11 @@ void game_resume(Game *g)
     /* fields that sit in what was padding: an older save might hold anything there */
     if (g->poison > 5) g->poison = 0;
     if (g->patrol_in > 7) g->patrol_in = 0;
+    for (int d = 0; d < MAX_DEPTH + 2; d++)          /* whatever an older save held there */
+        if (g->lv[d])
+            for (int y = 0; y < MAP_H; y++)
+                for (int x = 0; x < MAP_W; x++)
+                    if (g->lv[d]->rearm[y][x] > ALARM_REARM || g->lv[d]->t[y][x] != T_FLOOR) g->lv[d]->rearm[y][x] = 0;
     if (g->hollow_slain > 1 || g->deepest < FINAL_DEPTH) g->hollow_slain = 0;   /* older saves: whatever was in the padding */
     if (!g->hollow_slain && g->lv[FINAL_DEPTH] && g->lv[FINAL_DEPTH]->hall >= 0) {  /* a save from before it was kept: the Hollow is there until slain */
         bool alive = false;
@@ -1916,6 +1924,7 @@ static void end_turn(Game *g)
     }
     if (g->state == GS_PLAY) wanderers_arrive(g);
     if (g->state == GS_PLAY) patrol_turn(g);
+    rearm_alarms(g);
     compute_view(g);
     if (g->state == GS_PLAY) { spot_traps(g); search_secrets(g); }
     g_search = 0;
@@ -2183,12 +2192,20 @@ static void patrol_turn(Game *g)
     /* nowhere out of sight to come up: it doesn't come */
 }
 
-/* developer: an alarm bell at your feet (clear: empty the level first, to call the patrol) */
+/* developer: an alarm bell at your feet (clear: empty the level first, to call the
+ * patrol), its plate left sprung on the floor beside you */
 void game_debug_alarm(Game *g, bool clear)
 {
     if (clear)
         for (int i = 0; i < MAX_MOBS; i++) g->mobs[g->depth][i].alive = false;
     alarm_bell(g);
+    Level *lv = game_level(g);
+    for (int d = 0; d < 8; d++) {
+        int x = g->player.x + DX8[d], y = g->player.y + DY8[d];
+        if (tile_at(lv, x, y) != T_FLOOR || lv->trap[y][x]) continue;
+        spend_alarm(lv, x, y);
+        break;
+    }
 }
 
 int game_hunted(const Game *g)
@@ -2198,6 +2215,36 @@ int game_hunted(const Game *g)
     for (int i = 0; i < MAX_MOBS; i++)
         if (ms[i].alive && ms[i].called > t) t = ms[i].called;
     return t;
+}
+
+/* an alarm plate that has rung stays pressed down for a while: until it sets itself
+ * again it is no trap at all */
+static void spend_alarm(Level *lv, int x, int y)
+{
+    lv->trap[y][x] = TR_NONE;
+    lv->f[y][x] &= (uint8_t)~F_TRAP;
+    lv->rearm[y][x] = ALARM_REARM;
+}
+
+/* the sprung plates count down, on every level (time passes there too), and set
+ * themselves again, though never while you're watching one; if you knew where it
+ * was, you still do */
+static void rearm_alarms(Game *g)
+{
+    for (int d = 0; d < MAX_DEPTH + 2; d++) {
+        Level *lv = g->lv[d];
+        if (!lv) continue;
+        for (int y = 0; y < MAP_H; y++)
+            for (int x = 0; x < MAP_W; x++) {
+                if (!lv->rearm[y][x]) continue;
+                if (lv->rearm[y][x] > 1) { lv->rearm[y][x]--; continue; }
+                if (d == g->depth && (lv->f[y][x] & F_VIS)) continue;
+                lv->rearm[y][x] = 0;
+                if (lv->trap[y][x]) continue;
+                lv->trap[y][x] = TR_ALARM;
+                if (lv->f[y][x] & F_SEEN) lv->f[y][x] |= F_TRAP;
+            }
+    }
 }
 
 /* you step on a trap */
@@ -2216,6 +2263,7 @@ static void spring_trap(Game *g, int x, int y)
         sfx_ex(g, SND_ALERT, 0, 0, true, 0.1f, 1.0f);
         g->shake = 0.15f;
         alarm_bell(g);
+        spend_alarm(lv, x, y);
         break;
     case TR_GUST:
         push_fx(g, FX_STEAM, x, y);
@@ -2275,6 +2323,7 @@ static void mob_trap(Game *g, Mob *m, int x, int y)
         if (seen) game_msg(g, C_WARN, "the %s treads on an alarm plate, and a bell clangs in the walls!", nm);
         sfx(g, SND_CLICK, x, y);
         make_noise(g, x, y, 16);
+        spend_alarm(lv, x, y);
         break;
     case TR_GUST:
         push_fx(g, FX_STEAM, x, y);

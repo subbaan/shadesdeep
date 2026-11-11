@@ -878,6 +878,30 @@ static inline void floor_px(Canvas *cv, const View *v, const CF *c, int x, int y
     *px = v->fog ? fogmix(lit, memtone(col), c->v, c->s) : lit;
 }
 
+/* an alarm plate that has rung: pressed down out of true, its bell worn dull,
+ * a crack across it */
+static void draw_spent_plate(Renderer *r, Canvas *cv, const View *v, int tx, int ty, int sx, int sy)
+{
+    CF c;
+    light_at_px(r, tx * TILE + 16.0f, ty * TILE + 16.0f, &c);
+    if (!v->fog) c.v = c.s = 1;
+    int cx = sx + 16, cy = sy + 18;
+    for (int j = -7; j <= 7; j++)
+        for (int i = -8; i <= 8; i++) {
+            bool rim = abs(i) == 8 || abs(j) == 7;
+            /* sunk: a deep shadow along the top and left lips, the plate itself darker */
+            uint32_t col = rim ? 0x100e0c : (j == -6 || i == -7) ? 0x26221e : (abs(i) == 7 || j == 6) ? 0x605848 : 0x423c36;
+            floor_px(cv, v, &c, cx + i, cy + j, col, 0.05f);
+        }
+    static const char *BELL[7] = { "..##..", ".####.", ".####.", ".####.", "######", "......", "..##.." };
+    for (int j = 0; j < 7; j++)
+        for (int i = 0; i < 6; i++)
+            if (BELL[j][i] == '#') floor_px(cv, v, &c, cx - 3 + i, cy - 4 + j, 0x6a5a40, 0.05f);
+    static const int CRACK[][2] = { { -7, -3 }, { -6, -3 }, { -5, -2 }, { -4, -2 }, { -3, -1 }, { -2, 0 }, { -1, 0 },
+                                    { 0, 1 }, { 1, 1 }, { 2, 2 }, { 3, 2 }, { 4, 3 }, { 5, 3 }, { 6, 4 }, { 7, 5 } };
+    for (size_t n = 0; n < sizeof CRACK / sizeof *CRACK; n++) floor_px(cv, v, &c, cx + CRACK[n][0], cy + CRACK[n][1], 0x0c0a08, 0);
+}
+
 /* a trap you know about, marked on its tile */
 static void draw_trap(Renderer *r, Canvas *cv, const View *v, int tx, int ty, int sx, int sy)
 {
@@ -1317,6 +1341,7 @@ static void draw_ground(Renderer *r, Canvas *cv, const View *v)
             if (rk != RK_PLAIN && t != T_DOOR_OPEN) draw_room_floor(r, cv, v, tx, ty, sx, sy, rk);
             if (lv->salt[ty][tx]) draw_salt(r, cv, v, tx, ty, sx, sy);
             if (lv->trap[ty][tx] && (lv->f[ty][tx] & F_TRAP)) draw_trap(r, cv, v, tx, ty, sx, sy);
+            else if (lv->rearm[ty][tx]) draw_spent_plate(r, cv, v, tx, ty, sx, sy);
         }
 }
 

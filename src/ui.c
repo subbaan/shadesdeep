@@ -636,6 +636,11 @@ static void hover_card(UI *ui, Canvas *cv, Game *g, const UiFrame *f)
                  "them, but one hunting you has its eyes on you, not the floor: lead it over this and it sets it off. "
                  "So does one knocked onto it.", trap_desc(lv->trap[y][x]));
         snprintf(hint, sizeof hint, "Travel goes around it");
+    } else if (lv->rearm[y][x]) {
+        snprintf(title, sizeof title, "Sprung alarm plate");
+        snprintf(desc, sizeof desc, "An alarm plate that has rung. It is pressed down and won't ring again for now, "
+                 "but it will work its way back up and set itself in time.");
+        snprintf(hint, sizeof hint, "Safe to walk on, for now");
     } else if (lv->burn[y][x] && vis && tile_flammable(t)) {
         snprintf(title, sizeof title, t == T_LITTER ? "Burning litter" : "Burning crates");
         snprintf(desc, sizeof desc, "%s It's a fixed fire: shades can't bear it, nothing will willingly walk through it, "
