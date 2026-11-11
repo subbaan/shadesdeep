@@ -1,6 +1,6 @@
 # Shadesdeep — Player's Manual
 
-*Covers Shadesdeep 0.25.1. This manual grows with the game: each new feature gets
+*Covers Shadesdeep 0.25.2. This manual grows with the game: each new feature gets
 written up here as it lands.*
 
 You go down into a dungeon with a dim lantern, a short sword, two torches, a
@@ -73,6 +73,8 @@ Heartflame. `F3` turns just the music off (`--no-music` starts with it off);
 when there's a dry way (even a fair bit longer), so you don't splash about and
 draw attention. They only wade when there's no other way. They never swim deep
 water, step into a chasm or fire, or walk onto a trap you know about.
+If explore runs out of places to go before you've found the way down, it
+tells you so. The way on is still there, somewhere explore won't take you.
 
 **Aiming a throw:** move the reticle with the mouse or the direction keys.
 `Tab` cycles through the monsters you can see. Click or press `Enter` to

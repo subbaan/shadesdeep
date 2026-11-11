@@ -2904,8 +2904,13 @@ static void auto_step(Game *g)
     case AUTO_EXPLORE: {
         int n = find_path(g, -1, -1, path, MAX_PATH);
         if (!n) {
-            game_msg(g, C_INFO, game_final(g) ? "you have explored everything you can reach. Press > to go to the hearth."
-                                              : "you have explored everything you can reach. Press > to head for the stairs.");
+            Level *lv = game_level(g);
+            if (!(lv->f[lv->downy][lv->downx] & F_SEEN))       /* a nudge, not the answer: the way on is risky or hidden */
+                game_msg(g, C_INFO, game_final(g) ? "you have explored everything you can safely reach, and still not found the Heartflame's hearth."
+                                                  : "you have explored everything you can safely reach, and still not found the way down.");
+            else
+                game_msg(g, C_INFO, game_final(g) ? "you have explored everything you can reach. Press > to go to the hearth."
+                                                  : "you have explored everything you can reach. Press > to head for the stairs.");
             game_stop(g);
             return;
         }
