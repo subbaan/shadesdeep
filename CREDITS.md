@@ -45,6 +45,12 @@ images; OpenAI's usage policies also apply.
 | `assets/fonts/Cinzel.ttf` | Cinzel, © 2020 The Cinzel Project Authors ([source](https://github.com/NDISCOVER/Cinzel)) | SIL Open Font License 1.1, [`OFL-Cinzel.txt`](assets/fonts/OFL-Cinzel.txt) |
 | `assets/fonts/Alegreya.ttf` | Alegreya, © 2011 The Alegreya Project Authors ([source](https://github.com/huertatipografica/Alegreya)) | SIL Open Font License 1.1, [`OFL-Alegreya.txt`](assets/fonts/OFL-Alegreya.txt) |
 
+## Code
+
+`src/term.c` started from the terminal module of
+[Bunzi](https://github.com/subbaan/bunzi), by the same author and also
+under the MIT License.
+
 ## Procedural art
 
 Floors, walls, shades, the Hollow and the fallback sprites are drawn by code

@@ -5,3 +5,16 @@ build/
 concepts/
 # release bundles
 /dist/
+# logs and local secrets
+*.log
+.env
+.env.*
+!.env.example
+# editor and OS clutter
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
