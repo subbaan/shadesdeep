@@ -7,7 +7,7 @@ hover descriptions and clickable actions.
 
 ![Torchlight in a dungeon room: the hooded player with a torch, a goblin, a goblin slinger, an ogre, a rat and a bat, all idling, with dust glittering in the light](docs/media/torchlit.gif)
 
-Version: 0.26.5 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
+Version: 0.26.6 · Linux · needs [kitty](https://sw.kovidgoyal.net/kitty/)
 
 How to play, in full: **[the player's manual](docs/MANUAL.md)**.
 
@@ -266,7 +266,7 @@ procedural (`src/tiles.c`, `src/render.c`). Fonts: Cinzel and Alegreya (SIL Open
 
 Shadesdeep is released under the [MIT License](LICENSE), and so are its
 sprites: the SpriteCook-generated art in `art/spritecook/` and
-`assets/sprites/` (SpriteCook confirmed its terms allow this), and the
-synthesized sounds and music. The fonts in `assets/fonts/` (Cinzel and
+`assets/sprites/` (SpriteCook confirmed its terms allow this), the title
+picture (ChatGPT image generation) and the synthesized sounds and music. The fonts in `assets/fonts/` (Cinzel and
 Alegreya) are under the SIL Open Font License; their licence texts are kept
 beside them. [CREDITS.md](CREDITS.md) records where every asset came from.

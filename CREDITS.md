@@ -25,6 +25,14 @@ art; how much copyright exists in AI-generated images varies by jurisdiction.
 The still sheets were made with the `gemini-nano-banana-2.1` model, so that
 provider's usage policies also apply.
 
+## Title picture
+
+`assets/title.png` was generated with ChatGPT's image generation (OpenAI),
+then fixed by hand (the adventurer's arms). OpenAI's terms assign the user
+any rights in generated output, so it is under MIT with the rest of the
+project, with the same caveat as above about copyright in AI-generated
+images; OpenAI's usage policies also apply.
+
 ## Sounds and music
 
 `assets/sounds/*` are synthesized from scratch by `tools/make_sounds.py` and
